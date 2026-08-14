@@ -125,16 +125,29 @@ VERSION="$(node -e 'console.log(require("./src-tauri/tauri.conf.json").version)'
 echo ">> building Tauri $VERSION for $TRIPLE"
 (
   cd src-tauri
-  "$TAURI_CLI" build --ci --target "$TRIPLE" --bundles app,dmg
+  "$TAURI_CLI" build --ci --target "$TRIPLE" --bundles app
 )
 
 BUNDLE_ROOT="src-tauri/target/${TRIPLE}/release/bundle"
 APP="$BUNDLE_ROOT/macos/DeepSeek Harness Desktop.app"
-TAURI_DMG="$(find "$BUNDLE_ROOT/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
 [ -d "$APP" ] || { echo "Tauri app not found: $APP" >&2; exit 1; }
-[ -f "$TAURI_DMG" ] || { echo "Tauri DMG not found under $BUNDLE_ROOT/dmg" >&2; exit 1; }
 
 codesign --verify --deep --strict --verbose=4 "$APP"
+
+# Tauri's styled DMG helper drives Finder and can time out on headless Intel
+# GitHub runners. Build the same drag-to-Applications layout with hdiutil only.
+DMG_STAGE="$BUILD_TEMP/dmg-root"
+TAURI_DMG="$BUNDLE_ROOT/dmg/DeepSeek-Harness-Desktop-${VERSION}-${ARTIFACT_ARCH}.dmg"
+mkdir -p "$DMG_STAGE" "$BUNDLE_ROOT/dmg"
+ditto "$APP" "$DMG_STAGE/DeepSeek Harness Desktop.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create \
+  -volname "DeepSeek Harness Desktop" \
+  -srcfolder "$DMG_STAGE" \
+  -fs HFS+ \
+  -format UDZO \
+  -ov "$TAURI_DMG" >/dev/null
+hdiutil imageinfo "$TAURI_DMG" >/dev/null
 
 echo ">> collecting release artifacts"
 mkdir -p release
