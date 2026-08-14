@@ -98,6 +98,10 @@ if [[ "$APPLE_SIGNING_IDENTITY" == "Developer ID Application:"* ]]; then
   : "${APPLE_ID:?APPLE_ID is required for notarization}"
   : "${APPLE_PASSWORD:?APPLE_PASSWORD is required for notarization}"
   : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
+else
+  # Tauri enables notarization when these variables merely exist, even if the
+  # GitHub secrets expanded to empty strings. Keep the ad-hoc path truly local.
+  unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
 fi
 
 echo ">> signing bundled native dependencies with $APPLE_SIGNING_IDENTITY"
