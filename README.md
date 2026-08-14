@@ -44,7 +44,7 @@ Each release also includes ZIP archives and a `SHA256SUMS.txt` file for integrit
 2. Drag **DeepSeek Harness Desktop** to **Applications** before opening it.
 3. Launch the app from Applications.
 
-Tagged macOS releases are Developer ID signed, hardened, and notarized. The release workflow refuses to publish a macOS artifact when signing or notarization credentials are unavailable.
+Tagged macOS releases are hardened and ad-hoc signed by default. When Developer ID and notarization credentials are configured, the same workflow additionally signs, notarizes, and staples the app.
 
 ### Windows
 
@@ -94,11 +94,11 @@ npm run verify:packaged
 
 Build a macOS Tauri release for the current architecture with `npm run build:mac`; build the Windows Electron release with `npm run dist`. The application currently pins `@deepseek-ai/dsh@0.1.0-rc.6`; dependency upgrades require a packaged-runtime smoke test and a real desktop launch before release.
 
-Tagged macOS releases require these GitHub Actions secrets: `APPLE_CERTIFICATE`
-(base64-encoded Developer ID Application `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
-`KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password),
-and `APPLE_TEAM_ID`. The release job fails before packaging if any signing secret
-is missing.
+Developer ID signing is optional. To enable it, configure these GitHub Actions
+secrets: `APPLE_CERTIFICATE` (base64-encoded Developer ID Application `.p12`),
+`APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`
+(an app-specific password), and `APPLE_TEAM_ID`. Without them, the release uses
+ad-hoc signing, matching the earlier unsigned release behavior.
 
 ## Release verification
 
@@ -110,7 +110,7 @@ Every tagged release is built on GitHub-hosted macOS Intel, macOS Apple Silicon,
 4. exercises the packaged native PTY and image modules;
 5. starts the packaged runtime, checks its real HTTP UI, and verifies clean shutdown;
 6. enforces platform-specific installer size budgets;
-7. verifies the macOS Developer ID signature and notarization ticket; and
+7. verifies the macOS code signature, plus notarization when credentials exist; and
 8. publishes SHA-256 checksums with the release assets.
 
 ## Contributing

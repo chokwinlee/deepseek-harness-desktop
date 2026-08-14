@@ -33,16 +33,20 @@ jobs:
       - run: npm test
       - run: npm run check:version -- "${GITHUB_REF_NAME}"
 
-      - name: Import Developer ID certificate
+      - name: Configure optional Developer ID certificate
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          : "${APPLE_CERTIFICATE:?APPLE_CERTIFICATE secret is required}"
-          : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD secret is required}"
-          : "${KEYCHAIN_PASSWORD:?KEYCHAIN_PASSWORD secret is required}"
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo 'No Developer ID certificate configured; using ad-hoc signing.'
+            echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
+            exit 0
+          fi
+          : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD is required when APPLE_CERTIFICATE is set}"
+          : "${KEYCHAIN_PASSWORD:?KEYCHAIN_PASSWORD is required when APPLE_CERTIFICATE is set}"
           certificate_path="$RUNNER_TEMP/developer-id.p12"
           keychain_path="$RUNNER_TEMP/deepseek-harness-signing.keychain-db"
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
@@ -73,15 +77,20 @@ jobs:
       - name: Enforce Tauri release size budget
         run: npm run check:release-size -- --platform mac
 
-      - name: Verify Developer ID signature and notarization
+      - name: Verify macOS signature
         shell: bash
         run: |
           app='release/DeepSeek Harness Desktop.app'
           cmp build/icon.icns "$app/Contents/Resources/icon.icns"
           codesign --verify --deep --strict --verbose=4 "$app"
+          codesign -dvv "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -dvv "$app/Contents/MacOS/node" 2>&1 | grep -E 'flags=.*runtime'
-          xcrun stapler validate "$app"
-          spctl --assess --type execute --verbose=4 "$app"
+          if [[ "${APPLE_SIGNING_IDENTITY:-}" == "Developer ID Application:"* ]]; then
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          else
+            codesign -dvv "$app" 2>&1 | grep -F 'Signature=adhoc'
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
