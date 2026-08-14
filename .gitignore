@@ -4,3 +4,12 @@ release/
 .playwright-cli/
 *.log
 .DS_Store
+# tauri spike (experiment toolchain + build dirs)
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/binaries/
+/.tauri-cli/
+/spike-home*/
+/.cargo/
+/.rustup/
+/.worktrees/
