@@ -1,0 +1,111 @@
+{
+  "name": "deepseek-harness-desktop",
+  "version": "0.1.0",
+  "description": "Unofficial desktop host for DeepSeek Harness on macOS and Windows",
+  "private": true,
+  "license": "MIT",
+  "author": "chokwinlee",
+  "homepage": "https://github.com/chokwinlee/deepseek-harness-desktop#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chokwinlee/deepseek-harness-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chokwinlee/deepseek-harness-desktop/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "electron",
+    "desktop",
+    "macos",
+    "windows"
+  ],
+  "type": "module",
+  "main": "dist/src/main.js",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/upstream-onboarding.test.js",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "verify:packaged": "node scripts/verify-packaged-runtime.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis-plugin-group": "1.0.1",
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-anonymous-user-id": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-bash-local": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings-models": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-code-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-compaction": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-fs": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-output-retention": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-sandbox": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-telemetry": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-title-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-shell": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-spill": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-subagent-in-process-driver": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-subprocess": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-timeout": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-workflow": "0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.3",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "typescript": "6.0.3"
+  },
+  "build": {
+    "appId": "com.chokwinlee.deepseek-harness-desktop",
+    "productName": "DeepSeek Harness Desktop",
+    "artifactName": "DeepSeek-Harness-Desktop-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

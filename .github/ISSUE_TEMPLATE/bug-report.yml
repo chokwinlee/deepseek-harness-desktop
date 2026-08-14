@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible desktop application failure
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the desktop app. Remove API keys, tokens, private paths, and workspace content from every field and attachment.
+  - type: input
+    id: version
+    attributes:
+      label: Desktop version
+      description: Find this in the release filename or application metadata.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 11
+        - Windows 10
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Paste the shortest useful, redacted log excerpt.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I reproduced this with the latest release.
+          required: true
+        - label: I removed all credentials and private data.
+          required: true

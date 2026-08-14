@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a focused improvement to the desktop host
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What desktop-specific problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior and relevant alternatives.
+    validations:
+      required: true
+  - type: textarea
+    id: ownership
+    attributes:
+      label: Why this repository?
+      description: Explain why the change belongs in the Electron host or packaging rather than upstream Harness.
+    validations:
+      required: true

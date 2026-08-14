@@ -1,0 +1,79 @@
+name: Release desktop installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }}-${{ matrix.arch }})
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-15
+            platform: mac
+            arch: arm64
+          - os: windows-2025
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Package application
+        run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+      - name: Verify packaged Harness runtime
+        run: npm run verify:packaged
+      - name: Verify macOS bundle signature
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          dsh_app_path=$(find release -maxdepth 2 -type d -name 'DeepSeek Harness Desktop.app' -print -quit)
+          test -n "$dsh_app_path"
+          codesign --verify --deep --strict --verbose=4 "$dsh_app_path"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cd installers
+          sha256sum * > SHA256SUMS.txt
+          gh release create "${GITHUB_REF_NAME}" * \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --generate-notes \
+            --title "DeepSeek Harness Desktop ${GITHUB_REF_NAME}"
