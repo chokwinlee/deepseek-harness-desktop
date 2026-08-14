@@ -21,7 +21,29 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.19.0
+          node-version: 22.22.0
           cache: npm
       - run: npm ci
       - run: npm test
+
+  tauri-check:
+    name: tauri-check (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check:version
+      - run: bash -n scripts/build-tauri.sh scripts/verify-tauri.sh
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Prepare test-only Tauri sidecar
+        run: |
+          target="$(rustc -vV | awk '/^host:/ { print $2 }')"
+          mkdir -p src-tauri/binaries
+          install -m 755 /usr/bin/true "src-tauri/binaries/node-${target}"
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml -- -D warnings

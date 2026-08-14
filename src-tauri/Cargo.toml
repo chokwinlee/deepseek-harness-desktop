@@ -1,0 +1,25 @@
+[package]
+name = "deepseek-harness-desktop"
+version = "0.1.2"
+edition = "2021"
+description = "Tauri shell that boots @deepseek-ai/dsh web and shows it in the system webview"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+libc = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+opt-level = "z"
