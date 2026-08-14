@@ -103,7 +103,7 @@ Every tagged release is built on GitHub-hosted macOS Intel, macOS Apple Silicon,
 4. verifies the complete packaged DeepSeek dependency set;
 5. starts the packaged runtime and waits for a successful HTTP response;
 6. enforces platform-specific installer size budgets;
-7. verifies macOS bundle signatures; and
+7. verifies macOS bundle icons and signatures; and
 8. publishes SHA-256 checksums with the release assets.
 
 ## Contributing

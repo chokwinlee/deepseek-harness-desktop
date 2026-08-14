@@ -40,12 +40,13 @@ jobs:
         run: npm run verify:packaged
       - name: Enforce release size budget
         run: npm run check:release-size -- --platform ${{ matrix.platform }}
-      - name: Verify macOS bundle signature
+      - name: Verify macOS bundle icon and signature
         if: matrix.platform == 'mac'
         shell: bash
         run: |
           dsh_app_path=$(find release -maxdepth 2 -type d -name 'DeepSeek Harness Desktop.app' -print -quit)
           test -n "$dsh_app_path"
+          cmp build/icon.icns "$dsh_app_path/Contents/Resources/icon.icns"
           codesign --verify --deep --strict --verbose=4 "$dsh_app_path"
       - uses: actions/upload-artifact@v7
         with:
