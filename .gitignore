@@ -13,3 +13,5 @@ release/
 /.cargo/
 /.rustup/
 /.worktrees/
+/.verify-tauri.log
+/.verify-tauri-home/
