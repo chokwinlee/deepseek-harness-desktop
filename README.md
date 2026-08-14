@@ -16,7 +16,7 @@
 
 DeepSeek Harness Desktop packages the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a native desktop window. It starts and stops Harness automatically, so no separate Node.js installation or terminal command is required.
 
-The Harness agent runtime is not forked, modified, or reimplemented here. This repository contains only the Electron host, packaging configuration, runtime verification, and release automation.
+The Harness agent runtime is not forked, modified, or reimplemented here. This repository contains a lightweight Tauri host for macOS, an Electron host for Windows, packaging configuration, runtime verification, and release automation.
 
 The desktop host skips the upstream internal-testing announcement before loading the Web UI. The model API key step remains available because it is functional setup, not a promotional notice.
 
@@ -44,7 +44,7 @@ Each release also includes ZIP archives and a `SHA256SUMS.txt` file for integrit
 2. Drag **DeepSeek Harness Desktop** to **Applications** before opening it.
 3. Launch the app from Applications.
 
-The current macOS builds use an ad-hoc signature but are not notarized with an Apple Developer ID. If Gatekeeper blocks the first launch, right-click the app and choose **Open**, or allow it under **System Settings → Privacy & Security**. Download builds only from this repository's Releases page.
+Tagged macOS releases are Developer ID signed, hardened, and notarized. The release workflow refuses to publish a macOS artifact when signing or notarization credentials are unavailable.
 
 ### Windows
 
@@ -66,11 +66,12 @@ DeepSeek Harness Desktop
 ├── launches the packaged `dsh web` runtime
 ├── binds it to a random port on 127.0.0.1
 ├── acknowledges the pinned upstream welcome notice through the Harness API
-├── loads that exact loopback origin in a sandboxed Electron window
+├── uses Tauri + WKWebView on macOS and Electron on Windows
+├── loads only the exact loopback origin in the desktop window
 └── terminates the child process when the desktop app exits
 ```
 
-The renderer has Node.js integration disabled and context isolation enabled. Navigation is restricted to the local Harness origin, external links open in the system browser, and renderer permission requests are denied by default. Startup logs redact common credential patterns before they are displayed in an error report.
+Navigation is restricted to the local Harness origin and external HTTP(S) or mail links open in the system browser. The macOS Tauri host runs Harness in a dedicated process group so the runtime and its descendants are stopped together.
 
 ## Development
 
@@ -91,7 +92,13 @@ npm run pack
 npm run verify:packaged
 ```
 
-Build distributable installers with `npm run dist`. The application currently pins `@deepseek-ai/dsh@0.1.0-rc.6`; dependency upgrades require a packaged-runtime smoke test and a real desktop launch before release.
+Build a macOS Tauri release for the current architecture with `npm run build:mac`; build the Windows Electron release with `npm run dist`. The application currently pins `@deepseek-ai/dsh@0.1.0-rc.6`; dependency upgrades require a packaged-runtime smoke test and a real desktop launch before release.
+
+Tagged macOS releases require these GitHub Actions secrets: `APPLE_CERTIFICATE`
+(base64-encoded Developer ID Application `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
+`KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password),
+and `APPLE_TEAM_ID`. The release job fails before packaging if any signing secret
+is missing.
 
 ## Release verification
 
@@ -99,11 +106,11 @@ Every tagged release is built on GitHub-hosted macOS Intel, macOS Apple Silicon,
 
 1. installs dependencies from `package-lock.json`;
 2. runs the test suite;
-3. builds the platform installer and archive;
-4. verifies the complete packaged DeepSeek dependency set;
-5. starts the packaged runtime and waits for a successful HTTP response;
+3. builds Tauri artifacts on macOS and Electron artifacts on Windows;
+4. exercises the packaged native PTY and image modules;
+5. starts the packaged runtime, checks its real HTTP UI, and verifies clean shutdown;
 6. enforces platform-specific installer size budgets;
-7. verifies macOS bundle icons and signatures; and
+7. verifies the macOS Developer ID signature and notarization ticket; and
 8. publishes SHA-256 checksums with the release assets.
 
 ## Contributing

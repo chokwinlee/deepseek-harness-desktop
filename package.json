@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Unofficial desktop host for DeepSeek Harness on macOS and Windows",
   "private": true,
   "license": "MIT",
@@ -15,7 +15,7 @@
   },
   "keywords": [
     "deepseek",
-    "electron",
+    "tauri",
     "desktop",
     "macos",
     "windows"
@@ -32,7 +32,10 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "verify:packaged": "node scripts/verify-packaged-runtime.mjs",
-    "check:release-size": "node scripts/check-release-size.mjs"
+    "build:mac": "scripts/build-tauri.sh",
+    "verify:tauri": "scripts/verify-tauri.sh",
+    "check:release-size": "node scripts/check-release-size.mjs",
+    "check:version": "node scripts/check-version-sync.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "1.0.1",

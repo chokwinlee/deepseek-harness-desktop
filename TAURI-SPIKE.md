@@ -1,6 +1,6 @@
-# Tauri spike — DeepSeek Harness Desktop (macOS arm64)
+# macOS Tauri release — DeepSeek Harness Desktop
 
-A minimal Tauri v2 shell that boots the `@deepseek-ai/dsh` harness and shows its
+A Tauri v2 shell that boots the `@deepseek-ai/dsh` harness and shows its
 Web UI in the system WebView (WKWebView), instead of bundling Chromium like Electron.
 
 ## Architecture
@@ -13,28 +13,18 @@ Web UI in the system WebView (WKWebView), instead of bundling Chromium like Elec
 4. loads that URL in a `WebviewUrl::External` window (1440x900)
 5. on exit: SIGTERM then SIGKILL the harness child
 
-## Rebuilding (this machine)
+## Rebuilding
 
 ```bash
-export RUSTUP_HOME=/Users/chokwin/Documents/ChatGPT/deepseek-harness-desktop/.rustup
-export CARGO_HOME=/Users/chokwin/Documents/ChatGPT/deepseek-harness-desktop/.cargo
-export PATH=$CARGO_HOME/bin:/opt/homebrew/bin:$PATH
-cd src-tauri
-../.tauri-cli/node_modules/.bin/tauri build --bundles app
+scripts/build-tauri.sh arm64
+# or, on an Intel runner:
+scripts/build-tauri.sh x86_64
 ```
 
-Post-build fix (required, see below): re-sign the bundled Node WITHOUT hardened runtime:
-
-```bash
-APP="target/release/bundle/macos/DeepSeek Harness Desktop.app"
-codesign --force --sign - "$APP/Contents/MacOS/node"
-codesign --force --sign - --options runtime "$APP"
-```
-
-DMG (hdiutil needs full disk access in this sandbox):
-```bash
-hdiutil create -volname "DeepSeek Harness Desktop" -srcfolder "$APP" -ov -format UDZO release/DeepSeek-Harness-Desktop-0.1.0-mac-arm64.dmg
-```
+Local builds use an ad-hoc identity. Tagged releases require a Developer ID Application
+certificate plus `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`; Tauri then signs,
+notarizes, and staples the bundle. Node receives the JIT entitlements in
+`build/entitlements.mac.plist` while retaining Hardened Runtime.
 
 ## Shrinking the payload
 
@@ -42,20 +32,22 @@ Run `scripts/prune-runtime.mjs` on the prod tree before `tauri build` to drop
 runtime-unneeded files (.d.ts/.ts types, sourcemaps, tests, docs, changelogs, @types):
 
 ```bash
-cd node_modules && node ../scripts/prune-runtime.mjs .
+cd node_modules
+node ../scripts/prune-runtime.mjs . --platform darwin --arch arm64
 ```
 
-Removes ~19000 items / ~73MB of file bytes (disk 342M -> 203M). Do NOT delete
+The generic pass removes runtime-unneeded source, maps, tests, and docs. The macOS
+pass also removes Windows `node-pty` binaries and the unused Sharp Wasm fallback,
+while retaining the selected native architecture. Do NOT delete
 `doc`/`docs` dirs (e.g. `yaml/dist/doc` is required at runtime). Provider SDKs
 (anthropic/mistral/google/aws) are eagerly imported by `@earendil-works/pi-ai/providers/all`
 and cannot be removed.
 
 ## Gotchas found during the spike
 
-- **Node sidecar + hardened runtime = crash**: the official node binary from
-  nodejs.org crashes with `Trace/BPT trap` when signed ad-hoc with the `runtime`
-  flag (V8 needs `allow-unsigned-executable-memory`). Re-sign it without hardened
-  runtime after `tauri build` (see above).
+- **Node needs JIT entitlements**: signing the official Node binary with Hardened
+  Runtime but without V8's JIT entitlements causes a startup crash. Keep Hardened
+  Runtime and apply `allow-jit` plus `allow-unsigned-executable-memory`.
 - **Resources land under `Contents/Resources/_up_`** when declared as a glob in
   `bundle.resources`; resolve both `Resources/node_modules` and
   `Resources/_up_/node_modules`.
@@ -65,16 +57,17 @@ and cannot be removed.
   electron-builder prunes per-package `files` (210M); a Tauri port should prune
   similarly (e.g. npm `--omit=dev` + package `files` semantics) to shrink further.
 
-## Artifacts (this run)
+## Verified arm64 artifacts (v0.1.2)
 
 ```
-release/DeepSeek Harness Desktop.app              326M   (after prune)
-release/DeepSeek-Harness-Desktop-0.1.0-mac-arm64.dmg  105M
-release/DeepSeek-Harness-Desktop-0.1.0-mac-arm64.zip  100M
+release/DeepSeek Harness Desktop.app                  253 MiB
+release/DeepSeek-Harness-Desktop-0.1.2-mac-arm64.dmg  72.5 MB
+release/DeepSeek-Harness-Desktop-0.1.2-mac-arm64.zip  85.3 MB
 ```
 
-vs Electron: .app 498M / DMG 153M / ZIP 166M.
-Breakdown (after prune): shell 10M + node sidecar 106M + node_modules 203M.
+The previous Electron artifacts were approximately 498 MiB / 153 MB / 166 MB.
+The Tauri release therefore cuts the downloadable DMG by about 53% and ZIP by
+about 49%. The remaining payload is primarily the Node sidecar and Harness runtime.
 ## Platform decision (macOS = Tauri, Windows = Electron)
 
 Tauri owns macOS; Electron keeps Windows. Rationale:
@@ -85,9 +78,11 @@ Tauri owns macOS; Electron keeps Windows. Rationale:
 
 One-click macOS build: `scripts/build-tauri.sh [arm64|x86_64]`
 - prod-only `npm ci --omit=dev` -> prune -> Node 22 sidecar download -> `tauri build`
-- re-signs the bundled node WITHOUT hardened runtime (V8 crash fix)
+- verifies the Node download checksum and builds the requested Rust target
+- signs Node with Hardened Runtime and the required JIT entitlements
 - outputs `release/DeepSeek Harness Desktop.app` + dmg/zip
 - restores dev deps on exit (trap); first run needs the rust toolchain (auto-bootstrapped)
 
-Smoke test: `scripts/verify-tauri.sh` launches the packaged app, waits for
-`dsh web: http://127.0.0.1:PORT`, curls the UI, and shuts it down.
+Smoke test: `scripts/verify-tauri.sh` exercises native PTY/Sharp modules, launches
+the packaged app, checks the HTTP UI, requests graceful shutdown, and asserts that
+the Harness child did not survive.

@@ -13,7 +13,7 @@ body:
     attributes:
       label: Desktop version
       description: Find this in the release filename or application metadata.
-      placeholder: 0.1.0
+      placeholder: 0.1.2
     validations:
       required: true
   - type: dropdown

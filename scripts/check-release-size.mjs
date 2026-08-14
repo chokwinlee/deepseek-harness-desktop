@@ -3,8 +3,8 @@ import { extname, join, resolve } from 'node:path'
 
 const SIZE_BUDGETS = {
   mac: {
-    '.dmg': 160_000_000,
-    '.zip': 175_000_000,
+    '.dmg': 130_000_000,
+    '.zip': 140_000_000,
   },
   win: {
     '.exe': 140_000_000,

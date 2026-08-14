@@ -9,57 +9,118 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: build (${{ matrix.platform }}-${{ matrix.arch }})
-    timeout-minutes: 45
+  macos:
+    name: build (mac-${{ matrix.artifact_arch }}, Tauri)
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-15-intel
-            platform: mac
-            arch: x64
+            build_arch: x86_64
+            artifact_arch: x64
           - os: macos-15
-            platform: mac
-            arch: arm64
-          - os: windows-2025
-            platform: win
-            arch: x64
+            build_arch: arm64
+            artifact_arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.19.0
+          node-version: 22.22.0
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: Package application
-        run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+      - run: npm run check:version -- "${GITHUB_REF_NAME}"
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          : "${APPLE_CERTIFICATE:?APPLE_CERTIFICATE secret is required}"
+          : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD secret is required}"
+          : "${KEYCHAIN_PASSWORD:?KEYCHAIN_PASSWORD secret is required}"
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/deepseek-harness-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          identity="$(security find-identity -v -p codesigning "$keychain_path" | \
+            sed -nE 's/.*"(Developer ID Application: [^"]+)".*/\1/p' | head -1)"
+          test -n "$identity"
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Package Tauri application
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/build-tauri.sh "${{ matrix.build_arch }}"
+
+      - name: Verify packaged Tauri runtime
+        run: npm run verify:tauri
+
+      - name: Enforce Tauri release size budget
+        run: npm run check:release-size -- --platform mac
+
+      - name: Verify Developer ID signature and notarization
+        shell: bash
+        run: |
+          app='release/DeepSeek Harness Desktop.app'
+          cmp build/icon.icns "$app/Contents/Resources/icon.icns"
+          codesign --verify --deep --strict --verbose=4 "$app"
+          codesign -dvv "$app/Contents/MacOS/node" 2>&1 | grep -E 'flags=.*runtime'
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-mac-${{ matrix.artifact_arch }}
+          path: |
+            release/DeepSeek-Harness-Desktop-*-mac-${{ matrix.artifact_arch }}.dmg
+            release/DeepSeek-Harness-Desktop-*-mac-${{ matrix.artifact_arch }}.zip
+          if-no-files-found: error
+
+  windows:
+    name: build (win-x64, Electron)
+    timeout-minutes: 45
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version -- "${env:GITHUB_REF_NAME}"
+      - name: Package Electron application
+        run: npm run dist -- --win --x64 --publish never
       - name: Verify packaged Harness runtime
         run: npm run verify:packaged
       - name: Enforce release size budget
-        run: npm run check:release-size -- --platform ${{ matrix.platform }}
-      - name: Verify macOS bundle icon and signature
-        if: matrix.platform == 'mac'
-        shell: bash
-        run: |
-          dsh_app_path=$(find release -maxdepth 2 -type d -name 'DeepSeek Harness Desktop.app' -print -quit)
-          test -n "$dsh_app_path"
-          cmp build/icon.icns "$dsh_app_path/Contents/Resources/icon.icns"
-          codesign --verify --deep --strict --verbose=4 "$dsh_app_path"
+        run: npm run check:release-size -- --platform win
       - uses: actions/upload-artifact@v7
         with:
-          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          name: installers-win-x64
           path: |
-            release/*.dmg
-            release/*.zip
             release/*.exe
+            release/*.zip
           if-no-files-found: error
 
   publish:
     name: publish release
-    needs: build
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

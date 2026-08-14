@@ -4,6 +4,14 @@ import { join } from 'node:path';
 const DRY = process.env.DRY_RUN === '1';
 const root = process.argv[2] ?? '.';
 
+function option(name) {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
+
+const platform = option('--platform');
+const arch = option('--arch');
+
 const DEL_EXT = new Set(['.map', '.d.ts', '.d.mts', '.d.cts', '.ts', '.mts', '.cts', '.tgz']);
 const DEL_DIR = new Set(['test', 'tests', '__tests__', '__mocks__', 'example', 'examples', 'demo', 'demos', 'benchmark', 'benchmarks', 'coverage', '.github', '.circleci']);
 const DEL_FILE = (n) =>
@@ -85,6 +93,32 @@ function rmrf(dir) {
   try { rmdirSync(dir); } catch {}
 }
 
+function removeDirectory(dir) {
+  const size = dirSize(dir);
+  if (size === 0) return;
+  bytes += size;
+  removed++;
+  if (DRY) console.log('  [dir]', dir, fmt(size));
+  else rmrf(dir);
+}
+
+function prunePlatformPayloads() {
+  if (platform !== 'darwin' || !['arm64', 'x64'].includes(arch)) return;
+
+  const nodePty = join(root, 'node-pty');
+  for (const name of ['win32-arm64', 'win32-x64', arch === 'arm64' ? 'darwin-x64' : 'darwin-arm64']) {
+    removeDirectory(join(nodePty, 'prebuilds', name));
+  }
+  removeDirectory(join(nodePty, 'third_party', 'conpty'));
+
+  const sharpRoot = join(root, '@img');
+  const nativeSharp = join(sharpRoot, `sharp-darwin-${arch}`);
+  const nativeLibvips = join(sharpRoot, `sharp-libvips-darwin-${arch}`);
+  if (dirSize(nativeSharp) > 0 && dirSize(nativeLibvips) > 0) {
+    removeDirectory(join(sharpRoot, 'sharp-wasm32'));
+  }
+}
+
 // remove empty dirs bottom-up
 function pruneEmptyDirs(dir) {
   let ents;
@@ -114,5 +148,6 @@ for (const d of readdirSync(root)) {
   }
   walk(join(root, d));
 }
+prunePlatformPayloads();
 pruneEmptyDirs(root);
 console.log((DRY ? '[dry-run] ' : '[applied] ') + 'removed ' + removed + ' items, ' + fmt(bytes) + ' of file bytes');

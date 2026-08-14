@@ -46,4 +46,11 @@ test('pins the acknowledgement to the bundled upstream declaration', async () =>
   const match = /WELCOME_NOTICE_VERSION = "([^"]+)"/.exec(declaration)
 
   assert.equal(match?.[1], UPSTREAM_WELCOME_NOTICE_VERSION)
+
+  const tauriHelper = await readFile(
+    join(process.cwd(), 'src-tauri', 'scripts', 'acknowledge-onboarding.mjs'),
+    'utf8',
+  )
+  const tauriMatch = /UPSTREAM_WELCOME_NOTICE_VERSION = '([^']+)'/.exec(tauriHelper)
+  assert.equal(tauriMatch?.[1], UPSTREAM_WELCOME_NOTICE_VERSION)
 })

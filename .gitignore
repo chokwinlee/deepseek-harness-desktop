@@ -8,7 +8,9 @@ release/
 /src-tauri/target/
 /src-tauri/gen/
 /src-tauri/binaries/
-/.tauri-cli/
+/.tauri-cli/*
+!/.tauri-cli/package.json
+!/.tauri-cli/package-lock.json
 /spike-home*/
 /.cargo/
 /.rustup/
