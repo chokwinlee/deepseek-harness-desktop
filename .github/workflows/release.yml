@@ -38,6 +38,8 @@ jobs:
         run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
       - name: Verify packaged Harness runtime
         run: npm run verify:packaged
+      - name: Enforce release size budget
+        run: npm run check:release-size -- --platform ${{ matrix.platform }}
       - name: Verify macOS bundle signature
         if: matrix.platform == 'mac'
         shell: bash

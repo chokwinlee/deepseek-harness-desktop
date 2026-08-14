@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unofficial desktop host for DeepSeek Harness on macOS and Windows",
   "private": true,
   "license": "MIT",
@@ -31,7 +31,8 @@
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "verify:packaged": "node scripts/verify-packaged-runtime.mjs"
+    "verify:packaged": "node scripts/verify-packaged-runtime.mjs",
+    "check:release-size": "node scripts/check-release-size.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "1.0.1",
@@ -71,13 +72,20 @@
     "asarUnpack": [
       "node_modules/**/*"
     ],
+    "electronLanguages": [
+      "en",
+      "zh_CN",
+      "zh_TW"
+    ],
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "build/icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.d.ts"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
