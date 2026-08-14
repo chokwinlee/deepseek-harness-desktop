@@ -40,5 +40,10 @@ jobs:
       - run: npm run check:version
       - run: bash -n scripts/build-tauri.sh scripts/verify-tauri.sh
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Prepare test-only Tauri sidecar
+        run: |
+          target="$(rustc -vV | awk '/^host:/ { print $2 }')"
+          mkdir -p src-tauri/binaries
+          install -m 755 /usr/bin/true "src-tauri/binaries/node-${target}"
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml -- -D warnings
