@@ -75,3 +75,19 @@ release/DeepSeek-Harness-Desktop-0.1.0-mac-arm64.zip  100M
 
 vs Electron: .app 498M / DMG 153M / ZIP 166M.
 Breakdown (after prune): shell 10M + node sidecar 106M + node_modules 203M.
+## Platform decision (macOS = Tauri, Windows = Electron)
+
+Tauri owns macOS; Electron keeps Windows. Rationale:
+- macOS gets Tauri's size/memory wins and the system WebView;
+- Windows keeps the battle-tested Electron path (no WebView2 runtime dependency,
+  no new platform risk); both shells are thin wrappers over the same `dsh web` core;
+- CI builds macOS via `scripts/build-tauri.sh` and Windows via the existing electron-builder flow.
+
+One-click macOS build: `scripts/build-tauri.sh [arm64|x86_64]`
+- prod-only `npm ci --omit=dev` -> prune -> Node 22 sidecar download -> `tauri build`
+- re-signs the bundled node WITHOUT hardened runtime (V8 crash fix)
+- outputs `release/DeepSeek Harness Desktop.app` + dmg/zip
+- restores dev deps on exit (trap); first run needs the rust toolchain (auto-bootstrapped)
+
+Smoke test: `scripts/verify-tauri.sh` launches the packaged app, waits for
+`dsh web: http://127.0.0.1:PORT`, curls the UI, and shuts it down.
