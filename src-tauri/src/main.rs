@@ -117,9 +117,8 @@ fn spawn_harness() -> Result<Child, String> {
     // to surface as a setup error -> tauri panic -> abort() (panic = "abort"
     // in the release profile), so create the directory (and any missing
     // parents) up front so a missing SPIKE_HOME/HOME cannot abort startup.
-    std::fs::create_dir_all(&home).map_err(|error| {
-        format!("failed to create harness home directory {home}: {error}")
-    })?;
+    std::fs::create_dir_all(&home)
+        .map_err(|error| format!("failed to create harness home directory {home}: {error}"))?;
 
     println!(
         "[dsh] node={} script={} home={}",
