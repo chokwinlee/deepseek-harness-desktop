@@ -100,11 +100,13 @@ Navigation is restricted to the local Harness origin and external HTTP(S) or mai
 
 ## Updating
 
-The desktop shell checks GitHub Releases for a newer version a few seconds after startup and shows a small button in the bottom-left corner of the window (like Codex's version widget):
+The desktop shell checks GitHub Releases for a newer version a few seconds after startup. The update UI stays hidden unless a newer release is available. When an update is found, it adds a compact row immediately above **Settings** in the Harness sidebar:
 
-- **No update** – the button reports the current version.
-- **Update available** – a green dot appears; clicking it shows the new version, release date, and release notes, with **Download update** (opens the release page in your browser) and **Dismiss this version** (remembers the choice for this version).
-- **Check failed** – the panel offers a retry.
+- **No update** – no desktop update control is shown.
+- **Update available** – the row shows the new version with a blue download indicator; opening it shows the release date and release notes, with **Download update** (opens the release page in your browser) and **Ignore this version** (hides the row for that version).
+- **Check failed** – no error control is added to the Harness sidebar; the scheduled check will run again while the app remains open.
+
+The row follows the Harness sidebar's expanded and compact layouts, active language, light or dark theme, keyboard focus, and reduced-motion preference. Update surfaces stay below Harness modal dialogs so they do not interrupt Settings or other product flows.
 
 The check runs again every 6 hours while the app stays open. This is a community project with ad-hoc signed builds, so updates are downloaded manually from the release page rather than installed in place.
 

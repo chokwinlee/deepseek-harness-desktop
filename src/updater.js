@@ -1,23 +1,13 @@
 /**
- * DeepSeek Harness Desktop — update checker.
+ * DeepSeek Harness Desktop update checker.
  *
- * Injected by the Tauri (macOS) and Electron (Windows) shells into the harness
- * webview right after the document starts loading. It renders a small button in
- * the bottom-left corner (like Codex's version widget), queries the GitHub
- * releases API for this repository, and lets the user decide whether to
- * download the new version.
- *
- * Deliberately dependency-free and self-contained:
- *  - styles live in a closed Shadow DOM, so the host UI is never affected;
- *  - the "download update" action navigates to the release page, which the
- *    shell's navigation guard routes to the system browser;
- *  - the "dismiss this version" choice is remembered in localStorage so a
- *    session reload does not nag again.
- *
- * The build replaces __DSH_CURRENT_VERSION__ with the shell's own version.
+ * Injected by the Tauri and Electron shells into the Harness Web UI. The
+ * desktop-only version row is mounted immediately before Harness Settings so it
+ * participates in the sidebar layout instead of covering upstream controls.
  */
 (() => {
   'use strict'
+
   const CURRENT_VERSION = '__DSH_CURRENT_VERSION__'
   const REPO = 'chokwinlee/deepseek-harness-desktop'
   const API_URL = 'https://api.github.com/repos/' + REPO + '/releases/latest'
@@ -27,197 +17,385 @@
   const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
   const MAX_NOTES_CHARS = 420
 
-  if (typeof window === 'undefined') return
-  if (window.__dshUpdaterInstalled) return
-  window.__dshUpdaterInstalled = true
+  const COPY = Object.freeze({
+    zh: Object.freeze({
+      checkUpdates: '检查更新',
+      checking: '正在检查更新…',
+      checkFailed: '检查更新失败',
+      networkError: '无法连接 GitHub Releases，请检查网络后重试。',
+      rateLimited: 'GitHub 暂时限制了更新检查，请稍后重试。',
+      retry: '重试',
+      close: '关闭',
+      currentTitle: '已是最新版本',
+      currentBadge: '最新',
+      currentBody: '没有发现新版本。',
+      currentVersion: '当前版本',
+      latestVersion: '最新版本',
+      updateTitle: '发现新版本',
+      releaseNotesFallback: '暂无发布说明。',
+      download: '下载更新',
+      ignore: '忽略此版本',
+      ignoredTitle: '已忽略',
+      ignoredBody: '该版本不会再提醒。',
+      restore: '恢复提醒',
+      published: '发布于',
+    }),
+    en: Object.freeze({
+      checkUpdates: 'Check for updates',
+      checking: 'Checking for updates…',
+      checkFailed: 'Could not check for updates',
+      networkError: 'Could not reach GitHub Releases. Check your connection and try again.',
+      rateLimited: 'GitHub temporarily limited update checks. Try again later.',
+      retry: 'Retry',
+      close: 'Close',
+      currentTitle: 'You’re up to date',
+      currentBadge: 'Current',
+      currentBody: 'No newer version was found.',
+      currentVersion: 'Current version',
+      latestVersion: 'Latest version',
+      updateTitle: 'Update available',
+      releaseNotesFallback: 'No release notes were provided.',
+      download: 'Download update',
+      ignore: 'Ignore this version',
+      ignoredTitle: 'Ignored',
+      ignoredBody: 'You will not be reminded about this version again.',
+      restore: 'Restore reminder',
+      published: 'Released',
+    }),
+  })
 
-  /* ---- semver helpers ---- */
   function parseVersion(raw) {
-    const s = String(raw || '').trim().replace(/^v/i, '')
-    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(s)
-    if (!m) return null
-    return m.slice(1).map(Number)
+    const source = String(raw || '').trim().replace(/^v/i, '')
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(source)
+    if (!match) return null
+    return match.slice(1).map(Number)
   }
+
   function isNewer(latest, current) {
-    const a = parseVersion(latest)
-    const b = parseVersion(current)
-    if (!a || !b) return false
-    for (let i = 0; i < 3; i++) {
-      if (a[i] > b[i]) return true
-      if (a[i] < b[i]) return false
+    const candidate = parseVersion(latest)
+    const installed = parseVersion(current)
+    if (!candidate || !installed) return false
+    for (let index = 0; index < 3; index += 1) {
+      if (candidate[index] > installed[index]) return true
+      if (candidate[index] < installed[index]) return false
     }
     return false
   }
+
   function versionLabel(raw) {
-    const v = parseVersion(raw)
-    return v ? 'v' + v.join('.') : String(raw || '')
+    const version = parseVersion(raw)
+    return version ? 'v' + version.join('.') : String(raw || '')
   }
 
-  /* ---- tiny storage (may be unavailable, e.g. private mode) ---- */
+  function statusForRelease(tag, current, ignored) {
+    if (!isNewer(tag, current)) return 'current'
+    return ignored && ignored === tag ? 'ignored' : 'update'
+  }
+
+  function shouldShowForStatus(status) {
+    return status === 'update'
+  }
+
+  function summarize(body, fallback = '') {
+    if (!body) return fallback
+    let text = String(body)
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^#+\s*/gm, '')
+      .replace(/\*\*/g, '')
+      .replace(/[\x60]/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .trim()
+    if (text.length > MAX_NOTES_CHARS) text = text.slice(0, MAX_NOTES_CHARS) + '…'
+    return text || fallback
+  }
+
+  function resolveLocaleFromHints(hints, languages) {
+    const text = (hints || []).filter(Boolean).join(' ')
+    if (/\b(settings|new session|workspaces)\b/i.test(text)) return 'en'
+    if (/(设置|新会话|工作区)/.test(text)) return 'zh'
+    for (const tag of languages || []) {
+      const primary = String(tag || '').toLowerCase().split('-')[0]
+      if (primary === 'en' || primary === 'zh') return primary
+    }
+    return 'zh'
+  }
+
+  function copyFor(locale) {
+    return COPY[locale] || COPY.zh
+  }
+
+  function friendlyError(error, locale) {
+    const copy = copyFor(locale)
+    const message = error instanceof Error ? error.message : String(error || '')
+    if (/HTTP 403|HTTP 429/.test(message)) return copy.rateLimited
+    return copy.networkError
+  }
+
+  const testGlobal = typeof globalThis === 'undefined' ? null : globalThis
+  if (testGlobal && testGlobal.__DSH_UPDATER_TEST__ === true) {
+    testGlobal.__DSH_UPDATER_TEST_API__ = Object.freeze({
+      copyFor,
+      isNewer,
+      parseVersion,
+      resolveLocaleFromHints,
+      shouldShowForStatus,
+      statusForRelease,
+      summarize,
+      versionLabel,
+    })
+  }
+
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (window.__dshUpdaterInstalled) return
+  window.__dshUpdaterInstalled = true
+
   function readIgnored() {
     try { return localStorage.getItem(IGNORE_KEY) || null } catch { return null }
   }
+
   function writeIgnored(value) {
     try {
       if (value) localStorage.setItem(IGNORE_KEY, value)
       else localStorage.removeItem(IGNORE_KEY)
-    } catch { /* ignore */ }
+    } catch { /* storage is optional */ }
   }
 
-  /* ---- state ---- */
   const state = {
-    status: 'checking', // checking | update | current | ignored | error
+    status: 'checking',
     latest: null,
     error: null,
     panelOpen: false,
+    locale: resolveLocaleFromHints([], [...navigator.languages || [], navigator.language]),
+    layout: 'wide',
   }
 
-  /* ---- UI ---- */
   let host = null
   let shadow = null
-  let btnEl = null
+  let rootEl = null
+  let triggerEl = null
+  let versionEl = null
   let panelEl = null
   let titleEl = null
   let bodyEl = null
   let notesEl = null
+  let actionsEl = null
   let primaryEl = null
   let secondaryEl = null
+  let closeEl = null
+  let liveEl = null
+  let settingsTrigger = null
+  let triggerObserver = null
+  let triggerResizeObserver = null
+  let railPositionTimer = null
 
   const STYLES = [
-    ':host { all: initial; }',
-    '.dshu-root {',
+    ':host { display: block; flex: none; width: 100%; min-width: 0; }',
+    ':host([hidden]) { display: none; }',
+    ':host([data-layout="rail"]) {',
     '  position: fixed;',
-    '  left: 14px;',
-    '  bottom: 14px;',
-    '  z-index: 2147483000;',
-    '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
+    '  z-index: 900;',
+    '  left: var(--dshu-host-left, 14px);',
+    '  top: var(--dshu-host-top, auto);',
+    '  width: 36px;',
+    '  height: 36px;',
+    '}',
+    '.dshu-root {',
+    '  position: relative;',
+    '  color: var(--dsw-alias-label-primary, oklch(0.24 0.01 255));',
+    '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
     '  font-size: 13px;',
     '  line-height: 1.45;',
-    '  -webkit-user-select: none;',
-    '  user-select: none;',
     '}',
-    '.dshu-btn {',
+    '.dshu-trigger {',
+    '  box-sizing: border-box;',
+    '  position: relative;',
+    '  cursor: pointer;',
+    '  height: 34px;',
+    '  color: var(--dsw-alias-label-primary, oklch(0.24 0.01 255));',
+    '  background: var(--dsw-alias-button-elevated-fill, oklch(0.94 0.006 255));',
+    '  border: 0;',
+    '  border-radius: 12px;',
+    '  display: flex;',
+    '  align-items: center;',
+    '  gap: 10px;',
+    '  padding: 5px 7px 5px 10px;',
+    '  font: inherit;',
+    '  line-height: 22px;',
+    '  transition: background-color 140ms cubic-bezier(0.22, 1, 0.36, 1);',
+    '}',
+    '.dshu-root[data-layout="wide"] .dshu-trigger { width: calc(100% + 8px); margin: 0 -4px 4px; }',
+    '.dshu-root[data-layout="rail"] .dshu-trigger {',
+    '  width: 36px;',
+    '  height: 36px;',
+    '  justify-content: center;',
+    '  gap: 0;',
+    '  padding: 0;',
+    '  margin: 0 0 2px;',
+    '  border-radius: 50%;',
+    '}',
+    '.dshu-trigger:hover { background: var(--dsw-alias-interactive-bg-hover, oklch(0.92 0.006 255)); }',
+    '.dshu-trigger:focus-visible, .dshu-close:focus-visible, .dshu-action:focus-visible {',
+    '  outline: 2px solid var(--dsw-alias-state-business-primary, oklch(0.62 0.17 260));',
+    '  outline-offset: 2px;',
+    '}',
+    '.dshu-icon {',
+    '  width: 22px;',
+    '  height: 22px;',
+    '  flex: none;',
     '  display: grid;',
     '  place-items: center;',
-    '  width: 34px;',
-    '  height: 34px;',
+    '  padding: 5px;',
+    '  box-sizing: border-box;',
     '  border-radius: 50%;',
-    '  border: 1px solid transparent;',
-    '  cursor: pointer;',
-    '  padding: 0;',
-    '  color: #f3f4f6;',
-    '  background: rgba(38, 46, 58, 0.82);',
-    '  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);',
-    '  transition: background 120ms ease, transform 120ms ease, border-color 120ms ease;',
-    '  -webkit-backdrop-filter: blur(6px);',
-    '  backdrop-filter: blur(6px);',
+    '  color: oklch(0.98 0.004 255);',
+    '  background: var(--dsw-alias-state-business-primary, oklch(0.62 0.17 260));',
     '}',
-    '.dshu-btn:hover { background: rgba(48, 58, 74, 0.94); transform: scale(1.05); }',
-    '.dshu-btn:active { transform: scale(0.96); }',
-    '.dshu-btn[data-status="update"] { border-color: rgba(52, 211, 153, 0.55); }',
-    '.dshu-btn[data-status="error"] { border-color: rgba(251, 191, 36, 0.5); }',
-    '.dshu-icon { width: 16px; height: 16px; display: grid; place-items: center; }',
-    '.dshu-icon svg { width: 100%; height: 100%; display: block; }',
-    '.dshu-dot {',
-    '  position: absolute;',
-    '  top: -1px;',
-    '  right: -1px;',
-    '  width: 9px;',
-    '  height: 9px;',
-    '  border-radius: 50%;',
-    '  background: #34d399;',
-    '  border: 2px solid rgba(20, 24, 31, 0.9);',
-    '  display: none;',
-    '}',
-    '.dshu-btn[data-status="update"] .dshu-dot { display: block; animation: dshu-pulse 1.8s ease-in-out infinite; }',
-    '.dshu-btn[data-status="checking"] .dshu-icon { animation: dshu-spin 900ms linear infinite; }',
-    '@keyframes dshu-spin { to { transform: rotate(360deg); } }',
-    '@keyframes dshu-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }',
+    '.dshu-icon svg, .dshu-close svg { width: 100%; height: 100%; display: block; }',
+    '.dshu-version { flex: 1; min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }',
+    '.dshu-root[data-layout="rail"] .dshu-version { display: none; }',
     '.dshu-panel {',
-    '  position: absolute;',
-    '  left: 0;',
-    '  bottom: 44px;',
-    '  width: 312px;',
-    '  max-width: calc(100vw - 40px);',
-    '  border-radius: 12px;',
-    '  padding: 14px 16px;',
-    '  background: rgba(24, 29, 38, 0.96);',
-    '  color: #e5e7eb;',
-    '  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);',
-    '  border: 1px solid rgba(255, 255, 255, 0.08);',
-    '  -webkit-backdrop-filter: blur(14px);',
-    '  backdrop-filter: blur(14px);',
-    '  display: none;',
+    '  box-sizing: border-box;',
+    '  position: fixed;',
+    '  left: var(--dshu-panel-left, 14px);',
+    '  bottom: var(--dshu-panel-bottom, 58px);',
+    '  z-index: 900;',
+    '  width: min(320px, calc(100vw - 28px));',
+    '  max-height: min(360px, calc(100vh - 80px));',
+    '  overflow: hidden;',
+    '  border: 1px solid var(--dsw-alias-border-l2, oklch(0.86 0.008 255));',
+    '  border-radius: 16px;',
+    '  padding: 14px;',
+    '  background: var(--dsw-alias-bg-layer-2, oklch(0.98 0.004 255));',
+    '  color: var(--dsw-alias-label-primary, oklch(0.24 0.01 255));',
+    '  box-shadow: var(--dsw-shadow-lv3, 0 12px 36px oklch(0.18 0.01 255 / 0.2));',
+    '  outline: none;',
     '}',
-    '.dshu-panel[open] { display: block; }',
-    '.dshu-title { font-weight: 650; font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }',
-    '.dshu-title .dshu-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(52, 211, 153, 0.16); color: #34d399; }',
-    '.dshu-versions { font-size: 12px; color: #9ca3af; margin-bottom: 8px; }',
-    '.dshu-versions b { color: #e5e7eb; font-weight: 600; }',
+    '.dshu-panel[hidden] { display: none; }',
+    '.dshu-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }',
+    '.dshu-title { min-width: 0; flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 14px; font-weight: 600; line-height: 20px; }',
+    '.dshu-badge {',
+    '  padding: 1px 7px;',
+    '  border-radius: 999px;',
+    '  background: color-mix(in oklch, var(--dsw-static-green-500, oklch(0.72 0.19 150)) 16%, transparent);',
+    '  color: var(--dsw-static-green-500, oklch(0.66 0.18 150));',
+    '  font-size: 11px;',
+    '  font-weight: 600;',
+    '  line-height: 18px;',
+    '}',
+    '.dshu-close {',
+    '  width: 28px;',
+    '  height: 28px;',
+    '  flex: none;',
+    '  display: grid;',
+    '  place-items: center;',
+    '  padding: 7px;',
+    '  color: var(--dsw-alias-label-secondary, oklch(0.48 0.01 255));',
+    '  background: transparent;',
+    '  border: 0;',
+    '  border-radius: 50%;',
+    '  cursor: pointer;',
+    '}',
+    '.dshu-close:hover { background: var(--dsw-alias-interactive-bg-hover, oklch(0.92 0.006 255)); }',
+    '.dshu-versions { color: var(--dsw-alias-label-secondary, oklch(0.48 0.01 255)); font-size: 12px; line-height: 18px; }',
+    '.dshu-versions b { color: var(--dsw-alias-label-primary, oklch(0.24 0.01 255)); font-weight: 600; }',
     '.dshu-notes {',
-    '  font-size: 12px;',
-    '  color: #b6bdc9;',
-    '  background: rgba(255, 255, 255, 0.045);',
-    '  border-radius: 8px;',
-    '  padding: 8px 10px;',
-    '  margin-bottom: 12px;',
     '  max-height: 132px;',
+    '  margin-top: 10px;',
     '  overflow-y: auto;',
+    '  color: var(--dsw-alias-label-secondary, oklch(0.48 0.01 255));',
+    '  background: var(--dsw-alias-bg-layer-3, oklch(0.95 0.005 255));',
+    '  border-radius: 10px;',
+    '  padding: 9px 10px;',
+    '  font-size: 12px;',
+    '  line-height: 18px;',
     '  white-space: pre-wrap;',
-    '  word-break: break-word;',
+    '  overflow-wrap: anywhere;',
     '}',
-    '.dshu-actions { display: flex; gap: 8px; justify-content: flex-end; }',
-    '.dshu-btn2 { font: inherit; font-size: 12.5px; font-weight: 600; border-radius: 8px; border: 1px solid transparent; padding: 6px 12px; cursor: pointer; transition: filter 120ms ease, background 120ms ease; }',
-    '.dshu-btn2:hover { filter: brightness(1.1); }',
-    '.dshu-btn2:active { transform: scale(0.97); }',
-    '.dshu-primary { background: #2563eb; color: #fff; }',
-    '.dshu-secondary { background: rgba(255, 255, 255, 0.07); color: #cbd5e1; border-color: rgba(255,255,255,0.12); }',
-    '.dshu-error { color: #fbbf24; }',
+    '.dshu-notes[hidden], .dshu-actions[hidden] { display: none; }',
+    '.dshu-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }',
+    '.dshu-action {',
+    '  min-height: 32px;',
+    '  padding: 5px 12px;',
+    '  border: 1px solid transparent;',
+    '  border-radius: 10px;',
+    '  cursor: pointer;',
+    '  font: inherit;',
+    '  font-size: 12.5px;',
+    '  font-weight: 500;',
+    '  transition: background-color 140ms cubic-bezier(0.22, 1, 0.36, 1);',
+    '}',
+    '.dshu-primary { color: var(--dsw-alias-label-primary-inverted, oklch(0.98 0.004 255)); background: var(--dsw-alias-button-primary-fill, oklch(0.62 0.17 260)); }',
+    '.dshu-primary:hover { background: var(--dsw-alias-button-primary-hover, oklch(0.57 0.18 260)); }',
+    '.dshu-secondary { color: var(--dsw-alias-label-primary, oklch(0.24 0.01 255)); background: var(--dsw-alias-button-elevated-fill, oklch(0.94 0.006 255)); border-color: var(--dsw-alias-border-l2, oklch(0.86 0.008 255)); }',
+    '.dshu-secondary:hover { background: var(--dsw-alias-interactive-bg-hover, oklch(0.91 0.007 255)); }',
+    '.dshu-live { position: fixed; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }',
+    '@media (prefers-reduced-motion: reduce) {',
+    '  .dshu-trigger, .dshu-action { transition: none; }',
+    '}',
   ].join('\n')
 
-  function svgIcon() {
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m6 13 6-6 6 6"/></svg>'
+  function downloadIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>'
+  }
+
+  function closeIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'
   }
 
   function buildUI() {
     host = document.createElement('div')
     host.id = 'dsh-desktop-updater'
+    host.hidden = true
+    host.dataset.layout = state.layout
     shadow = host.attachShadow({ mode: 'open' })
 
     const style = document.createElement('style')
     style.textContent = STYLES
     shadow.appendChild(style)
 
-    const root = document.createElement('div')
-    root.className = 'dshu-root'
-    root.innerHTML =
-      '<button class="dshu-btn" type="button" title="检查更新" aria-label="检查更新">' +
-        '<span class="dshu-icon">' + svgIcon() + '</span>' +
-        '<span class="dshu-dot"></span>' +
+    rootEl = document.createElement('div')
+    rootEl.className = 'dshu-root'
+    rootEl.dataset.layout = state.layout
+    rootEl.innerHTML =
+      '<button class="dshu-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="dshu-update-panel">' +
+        '<span class="dshu-version"></span>' +
+        '<span class="dshu-icon">' + downloadIcon() + '</span>' +
       '</button>' +
-      '<div class="dshu-panel" role="dialog" aria-label="更新">' +
-        '<div class="dshu-title"></div>' +
+      '<section class="dshu-panel" id="dshu-update-panel" role="dialog" aria-labelledby="dshu-update-title" tabindex="-1" hidden>' +
+        '<div class="dshu-header">' +
+          '<div class="dshu-title" id="dshu-update-title"></div>' +
+          '<button class="dshu-close" type="button">' + closeIcon() + '</button>' +
+        '</div>' +
         '<div class="dshu-versions"></div>' +
         '<div class="dshu-notes"></div>' +
         '<div class="dshu-actions">' +
-          '<button class="dshu-btn2 dshu-secondary" type="button" data-action="dismiss"></button>' +
-          '<button class="dshu-btn2 dshu-primary" type="button" data-action="primary"></button>' +
+          '<button class="dshu-action dshu-secondary" type="button" data-action="secondary"></button>' +
+          '<button class="dshu-action dshu-primary" type="button" data-action="primary"></button>' +
         '</div>' +
-      '</div>'
-    shadow.appendChild(root)
+      '</section>' +
+      '<div class="dshu-live" role="status" aria-live="polite" aria-atomic="true"></div>'
+    shadow.appendChild(rootEl)
 
-    btnEl = root.querySelector('.dshu-btn')
-    panelEl = root.querySelector('.dshu-panel')
-    titleEl = root.querySelector('.dshu-title')
-    bodyEl = root.querySelector('.dshu-versions')
-    notesEl = root.querySelector('.dshu-notes')
-    const actions = root.querySelector('.dshu-actions')
-    primaryEl = actions.querySelector('[data-action="primary"]')
-    secondaryEl = actions.querySelector('[data-action="dismiss"]')
+    triggerEl = rootEl.querySelector('.dshu-trigger')
+    versionEl = rootEl.querySelector('.dshu-version')
+    panelEl = rootEl.querySelector('.dshu-panel')
+    titleEl = rootEl.querySelector('.dshu-title')
+    bodyEl = rootEl.querySelector('.dshu-versions')
+    notesEl = rootEl.querySelector('.dshu-notes')
+    actionsEl = rootEl.querySelector('.dshu-actions')
+    primaryEl = rootEl.querySelector('[data-action="primary"]')
+    secondaryEl = rootEl.querySelector('[data-action="secondary"]')
+    closeEl = rootEl.querySelector('.dshu-close')
+    liveEl = rootEl.querySelector('.dshu-live')
 
-    btnEl.addEventListener('click', (event) => {
+    triggerEl.addEventListener('click', (event) => {
       event.stopPropagation()
-      togglePanel()
+      if (state.panelOpen) closePanel(true)
+      else openPanel()
+    })
+    closeEl.addEventListener('click', (event) => {
+      event.stopPropagation()
+      closePanel(true)
     })
     primaryEl.addEventListener('click', (event) => {
       event.stopPropagation()
@@ -230,162 +408,272 @@
     document.addEventListener('click', (event) => {
       if (!state.panelOpen) return
       const path = event.composedPath ? event.composedPath() : []
-      if (!path.includes(host)) closePanel()
+      if (!path.includes(host)) closePanel(false)
     })
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && state.panelOpen) closePanel()
+      if (event.key === 'Escape' && state.panelOpen) {
+        event.stopPropagation()
+        closePanel(true)
+      }
     })
+    window.addEventListener('resize', updateShellContext)
 
-    applyTheme()
     return host
   }
 
-  function applyTheme() {
-    if (!shadow) return
-    const dark = document.body && document.body.hasAttribute('data-ds-dark-theme')
-    if (dark === null || dark === undefined) return
-    const root = shadow.querySelector('.dshu-root')
-    if (root) root.dataset.theme = dark ? 'dark' : 'light'
+  function findSettingsTrigger() {
+    const candidates = document.querySelectorAll('button[aria-haspopup="dialog"]')
+    for (const candidate of candidates) {
+      if (candidate === triggerEl) continue
+      if (candidate.hasAttribute('aria-expanded')) return candidate
+    }
+    return null
   }
 
-  function togglePanel() {
-    if (state.panelOpen) closePanel()
-    else openPanel()
+  function inferLocale() {
+    const hints = []
+    if (settingsTrigger) {
+      hints.push(settingsTrigger.textContent, settingsTrigger.getAttribute('aria-label'), settingsTrigger.title)
+    }
+    const labelledButtons = document.querySelectorAll('button[aria-label], button[title]')
+    for (let index = 0; index < Math.min(labelledButtons.length, 24); index += 1) {
+      const button = labelledButtons[index]
+      if (button === triggerEl) continue
+      hints.push(button.getAttribute('aria-label'), button.title)
+    }
+    return resolveLocaleFromHints(hints, [...navigator.languages || [], navigator.language])
   }
+
+  function observeTrigger(nextTrigger) {
+    triggerObserver?.disconnect()
+    triggerResizeObserver?.disconnect()
+    settingsTrigger = nextTrigger
+
+    triggerObserver = new MutationObserver(updateShellContext)
+    triggerObserver.observe(nextTrigger, {
+      attributes: true,
+      attributeFilter: ['aria-label', 'class', 'title'],
+      characterData: true,
+      childList: true,
+      subtree: true,
+    })
+    if (typeof ResizeObserver !== 'undefined') {
+      triggerResizeObserver = new ResizeObserver(updateShellContext)
+      triggerResizeObserver.observe(nextTrigger)
+    }
+  }
+
+  function mountNextToSettings() {
+    const nextTrigger = findSettingsTrigger()
+    if (!nextTrigger || !nextTrigger.parentNode) {
+      host.hidden = true
+      return false
+    }
+    if (settingsTrigger !== nextTrigger) observeTrigger(nextTrigger)
+    if (host.parentNode !== nextTrigger.parentNode || host.nextSibling !== nextTrigger) {
+      nextTrigger.parentNode.insertBefore(host, nextTrigger)
+    }
+    updateShellContext()
+    syncVisibility()
+    return true
+  }
+
+  function updateShellContext() {
+    if (!settingsTrigger?.isConnected) {
+      mountNextToSettings()
+      return
+    }
+    const rect = settingsTrigger.getBoundingClientRect()
+    const nextLayout = rect.width > 80 || Boolean(settingsTrigger.textContent?.trim()) ? 'wide' : 'rail'
+    const nextLocale = inferLocale()
+    const changed = nextLayout !== state.layout || nextLocale !== state.locale
+    state.layout = nextLayout
+    state.locale = nextLocale
+    host.dataset.layout = state.layout
+    rootEl.dataset.layout = state.layout
+    if (state.layout === 'rail') {
+      positionRailHost()
+      window.requestAnimationFrame(positionRailHost)
+      window.clearTimeout(railPositionTimer)
+      railPositionTimer = window.setTimeout(positionRailHost, 260)
+    } else {
+      window.clearTimeout(railPositionTimer)
+      host.style.removeProperty('--dshu-host-left')
+      host.style.removeProperty('--dshu-host-top')
+    }
+    if (changed) {
+      renderBadge(false)
+      if (state.panelOpen) renderPanel()
+    }
+    if (state.panelOpen) positionPanel()
+  }
+
+  function positionRailHost() {
+    if (state.layout !== 'rail' || !settingsTrigger?.isConnected) return
+    const rect = settingsTrigger.getBoundingClientRect()
+    host.style.setProperty('--dshu-host-left', rect.left + 'px')
+    host.style.setProperty('--dshu-host-top', Math.max(8, rect.top - 40) + 'px')
+    if (state.panelOpen) positionPanel()
+  }
+
+  function positionPanel() {
+    if (!triggerEl || !panelEl) return
+    const rect = triggerEl.getBoundingClientRect()
+    const panelWidth = Math.min(320, Math.max(0, window.innerWidth - 28))
+    const left = Math.max(14, Math.min(rect.left, window.innerWidth - panelWidth - 14))
+    const bottom = Math.max(14, window.innerHeight - rect.top + 8)
+    rootEl.style.setProperty('--dshu-panel-left', left + 'px')
+    rootEl.style.setProperty('--dshu-panel-bottom', bottom + 'px')
+  }
+
   function openPanel() {
     state.panelOpen = true
     renderPanel()
-    panelEl.setAttribute('open', '')
+    panelEl.hidden = false
+    triggerEl.setAttribute('aria-expanded', 'true')
+    positionPanel()
+    window.requestAnimationFrame(() => {
+      try { panelEl.focus({ preventScroll: true }) } catch { panelEl.focus() }
+    })
   }
-  function closePanel() {
+
+  function closePanel(restoreFocus) {
     state.panelOpen = false
-    panelEl.removeAttribute('open')
+    panelEl.hidden = true
+    triggerEl.setAttribute('aria-expanded', 'false')
+    if (restoreFocus) triggerEl.focus()
+  }
+
+  function appendBadge(label) {
+    const badge = document.createElement('span')
+    badge.className = 'dshu-badge'
+    badge.textContent = label
+    titleEl.appendChild(badge)
   }
 
   function renderPanel() {
-    const s = state
-    titleEl.innerHTML = ''
+    const copy = copyFor(state.locale)
+    const latest = state.latest || {}
+    const latestTag = versionLabel(latest.tag_name)
+
+    titleEl.textContent = ''
+    bodyEl.textContent = ''
     notesEl.textContent = ''
-    secondaryEl.textContent = '暂不更新'
-    primaryEl.textContent = '下载更新'
+    notesEl.hidden = true
+    actionsEl.hidden = true
+    primaryEl.textContent = ''
+    secondaryEl.textContent = ''
+    closeEl.setAttribute('aria-label', copy.close)
 
-    if (s.status === 'checking') {
-      titleEl.textContent = '正在检查更新…'
-      bodyEl.textContent = '当前版本 ' + versionLabel(CURRENT_VERSION)
-      notesEl.textContent = ''
-      secondaryEl.style.display = 'none'
-      primaryEl.style.display = 'none'
+    if (state.status === 'checking') {
+      titleEl.textContent = copy.checking
+      bodyEl.textContent = copy.currentVersion + ' ' + versionLabel(CURRENT_VERSION)
       return
     }
-    if (s.status === 'error') {
-      titleEl.textContent = '检查更新失败'
-      bodyEl.innerHTML = '<span class="dshu-error">' + escapeHtml(String(s.error || '网络错误')) + '</span>'
-      notesEl.textContent = ''
-      secondaryEl.textContent = '关闭'
-      primaryEl.textContent = '重试'
-      secondaryEl.style.display = ''
-      primaryEl.style.display = ''
+
+    if (state.status === 'error') {
+      titleEl.textContent = copy.checkFailed
+      bodyEl.textContent = friendlyError(state.error, state.locale)
+      actionsEl.hidden = false
+      primaryEl.textContent = copy.retry
+      secondaryEl.textContent = copy.close
       return
     }
-    if (s.status === 'current') {
-      titleEl.textContent = '已是最新版本'
-      const badge = document.createElement('span')
-      badge.className = 'dshu-badge'
-      badge.textContent = '最新'
-      titleEl.appendChild(badge)
-      bodyEl.innerHTML = '当前版本 <b>' + versionLabel(CURRENT_VERSION) + '</b>'
-      notesEl.textContent = '没有发现新版本。'
-      secondaryEl.style.display = 'none'
-      primaryEl.style.display = 'none'
+
+    if (state.status === 'current') {
+      titleEl.textContent = copy.currentTitle
+      appendBadge(copy.currentBadge)
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      notesEl.textContent = copy.currentBody
+      notesEl.hidden = false
       return
     }
-    if (s.status === 'ignored') {
-      const tag = s.latest ? versionLabel(s.latest.tag_name) : ''
-      titleEl.textContent = '已忽略 ' + tag
-      bodyEl.innerHTML = '当前版本 <b>' + versionLabel(CURRENT_VERSION) + '</b>'
-      notesEl.textContent = '该版本不会再提醒。'
-      secondaryEl.textContent = '恢复提醒'
-      primaryEl.textContent = '去下载'
-      secondaryEl.style.display = ''
-      primaryEl.style.display = ''
+
+    if (state.status === 'ignored') {
+      titleEl.textContent = copy.ignoredTitle + ' ' + latestTag
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      notesEl.textContent = copy.ignoredBody
+      notesEl.hidden = false
+      actionsEl.hidden = false
+      secondaryEl.textContent = copy.restore
+      primaryEl.textContent = copy.download
       return
     }
-    // update
-    const latest = s.latest || {}
-    const tag = latest.tag_name || ''
-    titleEl.textContent = '发现新版本'
-    const badge = document.createElement('span')
-    badge.className = 'dshu-badge'
-    badge.textContent = versionLabel(tag)
-    titleEl.appendChild(badge)
+
+    titleEl.textContent = copy.updateTitle
+    appendBadge(latestTag)
     bodyEl.innerHTML =
-      '当前 <b>' + versionLabel(CURRENT_VERSION) + '</b> → 最新 <b>' + versionLabel(tag) + '</b>' +
-      (latest.published_at ? ' · ' + new Date(latest.published_at).toLocaleDateString() : '')
-    notesEl.textContent = summarize(latest.body)
-    secondaryEl.style.display = ''
-    primaryEl.style.display = ''
+      copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · ' +
+      copy.latestVersion + ' <b>' + latestTag + '</b>' +
+      (latest.published_at ? ' · ' + copy.published + ' ' + new Date(latest.published_at).toLocaleDateString(state.locale) : '')
+    notesEl.textContent = summarize(latest.body, copy.releaseNotesFallback)
+    notesEl.hidden = false
+    actionsEl.hidden = false
+    secondaryEl.textContent = copy.ignore
+    primaryEl.textContent = copy.download
   }
 
-  function summarize(body) {
-    if (!body) return '（发布说明略）'
-    let text = String(body)
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/^#+\s*/gm, '')
-      .replace(/\*\*/g, '')
-      .replace(/[\x60]/g, '')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .trim()
-    if (text.length > MAX_NOTES_CHARS) text = text.slice(0, MAX_NOTES_CHARS) + '…'
-    return text
+  function badgeLabel() {
+    const copy = copyFor(state.locale)
+    if (state.status === 'update') return copy.updateTitle + ' ' + versionLabel(state.latest?.tag_name)
+    if (state.status === 'error') return copy.checkFailed
+    if (state.status === 'checking') return copy.checking
+    if (state.status === 'ignored') return copy.ignoredTitle + ' ' + versionLabel(state.latest?.tag_name)
+    return copy.currentTitle + ' ' + versionLabel(CURRENT_VERSION)
   }
 
-  function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (c) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]))
+  function syncVisibility() {
+    const shouldShow = shouldShowForStatus(state.status) && Boolean(settingsTrigger?.isConnected)
+    host.hidden = !shouldShow
+    if (!shouldShow && state.panelOpen) closePanel(false)
   }
 
-  /* ---- actions ---- */
+  function renderBadge(announce) {
+    if (!triggerEl) return
+    const label = badgeLabel()
+    triggerEl.dataset.status = state.status
+    triggerEl.setAttribute('aria-label', label)
+    triggerEl.title = label
+    versionEl.textContent = state.status === 'update' ? label : ''
+    syncVisibility()
+    if (announce && state.status === 'update') liveEl.textContent = label
+  }
+
+  function openRelease() {
+    const url = state.latest?.html_url || RELEASE_PAGE
+    window.location.href = url
+  }
+
   function onPrimary() {
-    const s = state
-    if (s.status === 'error') { closePanel(); check(); return }
-    if (s.status === 'ignored') {
-      writeIgnored(null)
-      closePanel()
+    if (state.status === 'error') {
       check()
       return
     }
-    if (s.status === 'update' && s.latest) {
-      const url = s.latest.html_url || RELEASE_PAGE
-      // The shell navigation guard catches this external navigation and
-      // opens the system browser; the webview itself stays put.
-      window.location.href = url
-      return
-    }
-    closePanel()
+    if (state.status === 'update' || state.status === 'ignored') openRelease()
   }
 
   function onSecondary() {
-    const s = state
-    if (s.status === 'error') { closePanel(); return }
-    if (s.status === 'ignored') {
+    if (state.status === 'error') {
+      closePanel(true)
+      return
+    }
+    if (state.status === 'ignored') {
       writeIgnored(null)
       check()
       return
     }
-    if (s.status === 'update' && s.latest) {
-      writeIgnored(s.latest.tag_name || '')
+    if (state.status === 'update' && state.latest) {
+      writeIgnored(state.latest.tag_name || '')
       state.status = 'ignored'
-      renderBadge()
+      renderBadge(true)
     }
-    closePanel()
   }
 
-  /* ---- checking ---- */
   async function check() {
     state.status = 'checking'
     state.error = null
-    renderBadge()
+    renderBadge(false)
+    if (state.panelOpen) renderPanel()
     try {
       const response = await fetch(API_URL, {
         headers: { Accept: 'application/vnd.github+json' },
@@ -394,44 +682,28 @@
       if (!response.ok) throw new Error('HTTP ' + response.status)
       const release = await response.json()
       state.latest = release
-      const tag = release.tag_name || ''
-      const ignored = readIgnored()
-      if (ignored && ignored === tag) state.status = 'ignored'
-      else if (isNewer(tag, CURRENT_VERSION)) state.status = 'update'
-      else state.status = 'current'
+      state.status = statusForRelease(release.tag_name || '', CURRENT_VERSION, readIgnored())
     } catch (error) {
       state.status = 'error'
-      state.error = error instanceof Error ? error.message : String(error)
+      state.error = error
     }
-    renderBadge()
+    renderBadge(true)
     if (state.panelOpen) renderPanel()
   }
 
-  function renderBadge() {
-    if (!btnEl) return
-    btnEl.dataset.status = state.status
-    const title =
-      state.status === 'update' ? '发现新版本 ' + versionLabel(state.latest && state.latest.tag_name)
-      : state.status === 'error' ? '检查更新失败'
-      : state.status === 'checking' ? '正在检查更新…'
-      : state.status === 'ignored' ? '已忽略更新'
-      : '已是最新版本 ' + versionLabel(CURRENT_VERSION)
-    btnEl.setAttribute('title', title)
-    btnEl.setAttribute('aria-label', title)
-  }
-
-  /* ---- boot ---- */
   function boot() {
-    const el = buildUI()
-    document.body.appendChild(el)
-    // theme changes (the host toggles data-ds-dark-theme on <body>)
-    const observer = new MutationObserver(() => applyTheme())
-    observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
-    renderBadge()
+    const element = buildUI()
+    const bodyObserver = new MutationObserver(() => {
+      if (!settingsTrigger?.isConnected) mountNextToSettings()
+    })
+    bodyObserver.observe(document.body, { childList: true, subtree: true })
+    mountNextToSettings()
+    renderBadge(false)
     window.setTimeout(check, CHECK_DELAY_MS)
     window.setInterval(() => {
       if (state.status !== 'checking') check()
     }, RECHECK_INTERVAL_MS)
+    return element
   }
 
   if (document.readyState === 'loading') {
