@@ -121,6 +121,15 @@ while IFS= read -r -d '' native_file; do
 done < <(find node_modules -type f \( -name '*.node' -o -name '*.dylib' -o -perm -111 \) -print0)
 echo "   signed $NATIVE_SIGNATURES native files"
 
+# Tauri validates every externalBin path from build.rs, including when Cargo is
+# only building the dsh launcher itself. Seed the two launcher paths with the
+# same-architecture Node sidecar to break that bootstrap cycle; the real CLI
+# binary replaces both placeholders immediately after Cargo finishes.
+for CLI_SIDECAR_NAME in dsh pnpm; do
+  cp "$SIDECAR" "src-tauri/binaries/${CLI_SIDECAR_NAME}-${TRIPLE}"
+  chmod +x "src-tauri/binaries/${CLI_SIDECAR_NAME}-${TRIPLE}"
+done
+
 echo ">> building bundled dsh command launcher"
 (
   cd src-tauri
