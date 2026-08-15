@@ -112,6 +112,15 @@ fn spawn_harness() -> Result<Child, String> {
         .map(|value| format!("{value}/.dsh"))
         .unwrap_or_else(|_| env::var("DSH_HOME").unwrap_or_else(|_| format!("{home}/.dsh")));
 
+    // The harness is spawned with `current_dir(home)`, and macOS refuses to
+    // start a child whose working directory does not exist (ENOENT). That used
+    // to surface as a setup error -> tauri panic -> abort() (panic = "abort"
+    // in the release profile), so create the directory (and any missing
+    // parents) up front so a missing SPIKE_HOME/HOME cannot abort startup.
+    std::fs::create_dir_all(&home).map_err(|error| {
+        format!("failed to create harness home directory {home}: {error}")
+    })?;
+
     println!(
         "[dsh] node={} script={} home={}",
         node.display(),
