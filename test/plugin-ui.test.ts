@@ -24,6 +24,10 @@ test('registers Desktop plugin management inside native Settings', async () => {
   assert.doesNotMatch(bridge, /handleInitialNotice\(\)\s*\n\s*request\('status'\)/)
   assert.match(bridge, /if \(payload\.pending\?\.state !== 'verifying'\) clearVerifyingNotice\(\)/)
   assert.match(bridge, /detail\.type === 'plugin-verified'[\s\S]*?clearVerifyingNotice\(\)/)
+  assert.match(bridge, /removed: \{ title: `\$\{label\} 已移除`/)
+  assert.match(bridge, /updated: \{ title: `\$\{label\} 已更新`/)
+  assert.match(bridge, /disabled: \{ title: `\$\{label\} 已停用`/)
+  assert.match(native, /"plugin-verified"[\s\S]*?"outcome": outcome/)
 
   assert.match(manager, /settings\.plugins\.tab/)
   assert.match(manager, /id: 'desktop-manager'/)
@@ -52,11 +56,14 @@ test('asks for restart in place and links external CLI changes', async () => {
 test('ships a dedicated CLI launcher instead of the relocated npm bin file', async () => {
   const launcher = await source('src-tauri/src/bin/dsh.rs')
   const build = await source('scripts/build-tauri.sh')
+  const tauri = JSON.parse(await source('src-tauri/tauri.conf.json'))
   assert.match(launcher, /@deepseek-ai\/dsh\/lib\/bin\.js/)
   assert.match(launcher, /--expose-internals/)
-  assert.match(build, /Contents\/MacOS\/dsh/)
-  assert.match(build, /Contents\/MacOS\/pnpm/)
-  assert.match(build, /codesign[\s\S]+Contents\/MacOS\/dsh/)
+  assert.match(build, /binaries\/dsh-\$\{TRIPLE\}/)
+  assert.match(build, /binaries\/pnpm-\$\{TRIPLE\}/)
+  assert.deepEqual(tauri.bundle.externalBin, ['binaries/node', 'binaries/dsh', 'binaries/pnpm'])
+  assert.doesNotMatch(build, /cp .*Contents\/MacOS\/(?:dsh|pnpm)/)
+  assert.doesNotMatch(build, /codesign[\s\S]+Contents\/MacOS\/(?:dsh|pnpm)/)
 })
 
 test('runs desktop pnpm operations without an interactive terminal', async () => {
@@ -72,4 +79,16 @@ test('runs desktop pnpm operations without an interactive terminal', async () =>
 
   const calls = native.match(/apply_noninteractive_pnpm_environment\(&mut command\)/g)
   assert.equal(calls?.length, 2)
+})
+
+test('resynchronizes restored profile dependencies before recovery relaunch', async () => {
+  const native = await source('src-tauri/src/main.rs')
+  const restore = native.match(
+    /if matches!\(action, RecoveryAction::Restore\)[\s\S]*?\n\s*}/,
+  )?.[0]
+
+  assert.ok(restore)
+  assert.match(restore, /restore_last_known_good/)
+  assert.match(restore, /sync_profile_modules_after_restore/)
+  assert.match(restore, /set_recovery_state\("failed"/)
 })

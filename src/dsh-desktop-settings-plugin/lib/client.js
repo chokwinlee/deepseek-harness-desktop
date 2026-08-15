@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
       cancel: 'Cancel',
       cliTitle: 'Command-line integration',
       cliManaged: 'The Desktop dsh command is enabled and shares this web profile.',
+      cliManagedRestart: 'The Desktop dsh command is enabled. Open a new Terminal window to use it with this web profile.',
       cliConflict: 'Another dsh command is currently active. Desktop will not replace it silently.',
       cliDisabled: 'Enable the Desktop-bundled dsh command to install plugins from Terminal with the same profile.',
       cliUnavailable: 'The Desktop package does not contain the dsh command launcher.',
@@ -68,6 +69,7 @@ window.__ModuleLoader__.load({
       cancel: '取消',
       cliTitle: '命令行集成',
       cliManaged: '桌面版 dsh 命令已启用，并与这里共享同一个 web profile。',
+      cliManagedRestart: '桌面版 dsh 命令已启用；请新开一个终端窗口，再使用与这里共享的 web profile。',
       cliConflict: '当前存在另一套 dsh 命令；桌面版不会静默覆盖。',
       cliDisabled: '启用桌面版内置 dsh 后，可以在终端安装插件并同步到这里。',
       cliUnavailable: '当前桌面安装包缺少 dsh 命令启动器。',
@@ -174,7 +176,7 @@ window.__ModuleLoader__.load({
         cliText = t('cliUnavailable')
         cliLabel = ''
       } else if (status.cli.managed) {
-        cliText = t('cliManaged')
+        cliText = t(status.cli.requiresNewTerminal ? 'cliManagedRestart' : 'cliManaged')
         cliLabel = t('removeCli')
         cliAction = 'remove-cli'
       } else if (status.cli.conflict) {

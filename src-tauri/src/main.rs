@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -698,6 +698,25 @@ fn changed_plugin_names(changes: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
+fn pending_change_outcome(pending: &serde_json::Value) -> &'static str {
+    let kinds: BTreeSet<&str> = pending["changes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change["kind"].as_str())
+        .collect();
+    if kinds.len() != 1 {
+        return "changed";
+    }
+    match kinds.first().copied() {
+        Some("removed") => "removed",
+        Some("updated") => "updated",
+        Some("deactivated") => "disabled",
+        Some("installed" | "activated") => "enabled",
+        _ => "changed",
+    }
+}
+
 fn profile_dependencies_ready(dsh_home: &Path, state: &serde_json::Value) -> bool {
     let modules = dsh_home.join("profiles/web/node_modules");
     state["plugins"]
@@ -991,35 +1010,34 @@ fn shell_profile_has_cli_path() -> bool {
         .unwrap_or(false)
 }
 
-fn ensure_shell_cli_path() -> Result<bool, String> {
-    let directory = managed_cli_path()
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or("invalid managed CLI directory")?;
-    if env::var_os("PATH")
-        .map(|path| env::split_paths(&path).any(|entry| entry == directory))
-        .unwrap_or(false)
-        || shell_profile_has_cli_path()
-    {
+fn without_cli_path_block(contents: &str) -> String {
+    let with_prefix = format!("\n{CLI_PATH_BLOCK}");
+    contents
+        .replace(&with_prefix, "\n")
+        .replace(CLI_PATH_BLOCK, "")
+}
+
+fn ensure_shell_cli_path(force_prepend: bool) -> Result<bool, String> {
+    let command = if cfg!(windows) { "dsh.exe" } else { "dsh" };
+    let bundled = bundled_cli_path();
+    let command_uses_bundled = command_on_path(command)
+        .map(|path| same_file(&path, &bundled))
+        .unwrap_or(false);
+    if !force_prepend && (command_uses_bundled || shell_profile_has_cli_path()) {
         return Ok(false);
     }
     let Some(profile) = shell_profile_path() else {
         return Ok(false);
     };
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&profile)
-        .map_err(|error| format!("无法更新 {}：{error}", profile.display()))?;
-    let needs_newline = fs::metadata(&profile)
-        .map(|meta| meta.len() > 0)
-        .unwrap_or(false);
-    if needs_newline {
-        file.write_all(b"\n")
-            .map_err(|error| format!("无法更新 {}：{error}", profile.display()))?;
-    }
-    file.write_all(CLI_PATH_BLOCK.as_bytes())
-        .map_err(|error| format!("无法更新 {}：{error}", profile.display()))?;
+    let contents = fs::read_to_string(&profile).unwrap_or_default();
+    let contents = without_cli_path_block(&contents);
+    let contents = contents.trim_end_matches('\n');
+    let updated = if contents.is_empty() {
+        CLI_PATH_BLOCK.to_string()
+    } else {
+        format!("{contents}\n\n{CLI_PATH_BLOCK}")
+    };
+    atomic_write(&profile, updated.as_bytes())?;
     Ok(true)
 }
 
@@ -1030,10 +1048,7 @@ fn remove_shell_cli_path() -> Result<(), String> {
     let Ok(contents) = fs::read_to_string(&profile) else {
         return Ok(());
     };
-    let with_prefix = format!("\n{CLI_PATH_BLOCK}");
-    let updated = contents
-        .replace(&with_prefix, "\n")
-        .replace(CLI_PATH_BLOCK, "");
+    let updated = without_cli_path_block(&contents);
     if updated != contents {
         atomic_write(&profile, updated.as_bytes())?;
     }
@@ -1051,25 +1066,28 @@ fn bundled_dsh_version() -> Option<String> {
 fn cli_status_value() -> serde_json::Value {
     let bundled = bundled_cli_path();
     let managed = managed_cli_path();
-    let managed_active = managed.is_file() && same_file(&managed, &bundled);
+    let launcher_installed = managed.is_file() && same_file(&managed, &bundled);
     let existing = command_on_path(if cfg!(windows) { "dsh.exe" } else { "dsh" });
+    let command_uses_bundled = existing
+        .as_ref()
+        .map(|path| same_file(path, &bundled))
+        .unwrap_or(false);
     let conflict = existing
         .as_ref()
         .map(|path| !same_file(path, &bundled))
         .unwrap_or(false);
-    let path_configured = env::var_os("PATH")
-        .and_then(|path| managed.parent().map(|parent| (path, parent.to_path_buf())))
-        .map(|(path, parent)| env::split_paths(&path).any(|entry| entry == parent))
-        .unwrap_or(false)
-        || shell_profile_has_cli_path();
+    let path_configured = command_uses_bundled || shell_profile_has_cli_path();
+    let managed_active = launcher_installed && path_configured;
     serde_json::json!({
         "bundledReady": bundled.is_file(),
         "bundledPath": bundled,
         "managed": managed_active,
+        "launcherInstalled": launcher_installed,
         "managedPath": managed,
         "commandPath": existing,
         "conflict": conflict,
         "pathConfigured": path_configured,
+        "requiresNewTerminal": managed_active && !command_uses_bundled,
         "version": bundled_dsh_version(),
         "profilePath": harness_paths().dsh_home.join("profiles/web"),
     })
@@ -1081,6 +1099,10 @@ fn install_cli_launcher(replace: bool) -> Result<serde_json::Value, String> {
         return Err("当前安装包缺少内置 dsh 命令启动器，请重新安装桌面应用。".into());
     }
     let managed = managed_cli_path();
+    let command = if cfg!(windows) { "dsh.exe" } else { "dsh" };
+    let existing_conflict = command_on_path(command)
+        .map(|path| !same_file(&path, &bundled))
+        .unwrap_or(false);
     if managed.exists() && !same_file(&managed, &bundled) {
         if !replace {
             return Err(format!(
@@ -1091,7 +1113,7 @@ fn install_cli_launcher(replace: bool) -> Result<serde_json::Value, String> {
         fs::remove_file(&managed)
             .map_err(|error| format!("无法替换 {}：{error}", managed.display()))?;
     }
-    if let Some(existing) = command_on_path(if cfg!(windows) { "dsh.exe" } else { "dsh" }) {
+    if let Some(existing) = command_on_path(command) {
         if !same_file(&existing, &bundled) && !replace {
             return Err(format!(
                 "已检测到其他 dsh 命令：{}。请选择“改用桌面版”后再继续。",
@@ -1110,7 +1132,7 @@ fn install_cli_launcher(replace: bool) -> Result<serde_json::Value, String> {
         fs::copy(&bundled, &managed)
             .map_err(|error| format!("无法安装 {}：{error}", managed.display()))?;
     }
-    let profile_updated = ensure_shell_cli_path()?;
+    let profile_updated = ensure_shell_cli_path(replace && existing_conflict)?;
     let mut status = cli_status_value();
     status["profileUpdated"] = serde_json::Value::Bool(profile_updated);
     Ok(status)
@@ -1855,13 +1877,17 @@ fn start_child_monitor(
                                     read_pending_install(&paths.dsh_home).ok().flatten()
                                 {
                                     let label = pending_install_label(&pending);
+                                    let outcome = pending_change_outcome(&pending);
                                     match clear_pending_install(&paths.dsh_home) {
                                         Ok(()) => {
                                             println!("[dsh] plugin change verified");
                                             emit_bridge_event(
                                                 &handle,
                                                 "plugin-verified",
-                                                serde_json::json!({ "label": label }),
+                                                serde_json::json!({
+                                                    "label": label,
+                                                    "outcome": outcome,
+                                                }),
                                             );
                                         }
                                         Err(error) => eprintln!("[dsh] warning: {error}"),
@@ -2048,7 +2074,9 @@ fn perform_recovery_action(handle: tauri::AppHandle, action: RecoveryAction) -> 
     stop_managed_child();
 
     if matches!(action, RecoveryAction::Restore) {
-        if let Err(error) = restore_last_known_good(&paths.dsh_home) {
+        let restore_result = restore_last_known_good(&paths.dsh_home)
+            .and_then(|()| sync_profile_modules_after_restore(&paths.dsh_home));
+        if let Err(error) = restore_result {
             set_recovery_state("failed", &error, false);
             let _ = show_recovery_window(&handle);
             return Err(error);
@@ -2379,9 +2407,10 @@ mod tests {
 
     use super::{
         detected_plugin, ensure_desktop_settings_module_link, installed_plugins, parse_readiness,
-        plugin_profile_state, plugin_state_changes, plugin_state_fingerprint, redact_startup_line,
-        resolve_modules_directory, restore_last_known_good, safe_profile_manifest, same_file,
-        validate_plugin_spec, write_profile_snapshot,
+        pending_change_outcome, plugin_profile_state, plugin_state_changes,
+        plugin_state_fingerprint, redact_startup_line, resolve_modules_directory,
+        restore_last_known_good, safe_profile_manifest, same_file, validate_plugin_spec,
+        without_cli_path_block, write_profile_snapshot, CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -2505,6 +2534,34 @@ mod tests {
             plugin_state_fingerprint(&before),
             plugin_state_fingerprint(&after)
         );
+    }
+
+    #[test]
+    fn reports_the_verified_plugin_operation_outcome() {
+        for (kind, expected) in [
+            ("installed", "enabled"),
+            ("activated", "enabled"),
+            ("removed", "removed"),
+            ("updated", "updated"),
+            ("deactivated", "disabled"),
+        ] {
+            let pending = serde_json::json!({ "changes": [{ "kind": kind }] });
+            assert_eq!(pending_change_outcome(&pending), expected);
+        }
+        let mixed = serde_json::json!({
+            "changes": [{ "kind": "installed" }, { "kind": "updated" }]
+        });
+        assert_eq!(pending_change_outcome(&mixed), "changed");
+    }
+
+    #[test]
+    fn rewrites_the_managed_cli_path_block_without_duplicates() {
+        let profile =
+            format!("export PATH=/custom/bin:$PATH\n\n{CLI_PATH_BLOCK}alias dsh=legacy\n");
+        let cleaned = without_cli_path_block(&profile);
+        assert_eq!(cleaned.matches("DeepSeek Harness Desktop CLI").count(), 0);
+        assert!(cleaned.contains("export PATH=/custom/bin:$PATH"));
+        assert!(cleaned.contains("alias dsh=legacy"));
     }
 
     #[test]

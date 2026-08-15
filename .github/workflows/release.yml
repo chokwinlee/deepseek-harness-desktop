@@ -85,6 +85,8 @@ jobs:
           codesign --verify --deep --strict --verbose=4 "$app"
           codesign -dvv "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -dvv "$app/Contents/MacOS/node" 2>&1 | grep -E 'flags=.*runtime'
+          codesign -dvv "$app/Contents/MacOS/dsh" 2>&1 | grep -E 'flags=.*runtime'
+          codesign -dvv "$app/Contents/MacOS/pnpm" 2>&1 | grep -E 'flags=.*runtime'
           if [[ "${APPLE_SIGNING_IDENTITY:-}" == "Developer ID Application:"* ]]; then
             xcrun stapler validate "$app"
             spctl --assess --type execute --verbose=4 "$app"

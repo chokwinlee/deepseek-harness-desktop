@@ -200,7 +200,15 @@
       lastPendingKey = ''
       clearVerifyingNotice()
       publish({ status: { ...(snapshot.status || {}), pending: null }, busyOperation: '', error: '' })
-      showNotice({ title: `${payload.label || '插件配置'} 已启用`, body: '启动验证通过，已保存为最近可用配置。', timeout: 8_000 })
+      const label = payload.label || '插件配置'
+      const messages = {
+        removed: { title: `${label} 已移除`, body: '卸载验证通过，当前配置已保存为最近可用配置。' },
+        updated: { title: `${label} 已更新`, body: '更新验证通过，当前配置已保存为最近可用配置。' },
+        disabled: { title: `${label} 已停用`, body: '停用验证通过，当前配置已保存为最近可用配置。' },
+        enabled: { title: `${label} 已启用`, body: '启动验证通过，已保存为最近可用配置。' },
+        changed: { title: `${label} 变更已生效`, body: '启动验证通过，当前配置已保存为最近可用配置。' },
+      }
+      showNotice({ ...(messages[payload.outcome] || messages.changed), timeout: 8_000 })
       request('status')
       return
     }
