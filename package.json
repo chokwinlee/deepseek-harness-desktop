@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/upstream-onboarding.test.js dist/test/updater.test.js",
+    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/plugin-ui.test.js dist/test/upstream-onboarding.test.js dist/test/updater.test.js",
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
@@ -61,7 +61,9 @@
     "@deepseek-ai/dsh-subagent-in-process-driver": "0.1.0-rc.6",
     "@deepseek-ai/dsh-subprocess": "0.1.0-rc.6",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-workflow": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-workflow": "0.1.0-rc.6",
+    "dsh-desktop-settings-plugin": "file:src/dsh-desktop-settings-plugin",
+    "pnpm": "11.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.3",

@@ -98,6 +98,22 @@ DeepSeek Harness Desktop
 
 Navigation is restricted to the local Harness origin and external HTTP(S) or mail links open in the system browser. The macOS Tauri host runs Harness in a dedicated process group so the runtime and its descendants are stopped together.
 
+Third-party plugins installed into the shared `web` profile load inside the packaged Harness runtime. The macOS host supervises that runtime before and after readiness, so a startup failure or later process exit opens a local recovery screen instead of closing the desktop app. The screen can retry Harness, restore the last profile that remained healthy for at least five seconds, or start a temporary safe profile that excludes dependency-managed third-party bundles. These actions use the packaged runtime and do not require Node.js, the `dsh` CLI, or pnpm on the user's PATH.
+
+The last-known-good snapshot contains only plugin transaction files (`package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` when present). It does not overwrite sessions, credentials, workspaces, settings, or `cordis.patch.yml`. Safe mode also leaves the ordinary `web` profile unchanged and shows a compact **Try normal mode** action inside Harness.
+
+### Installing plugins in the desktop app
+
+In the macOS build, open Harness **Settings → Plugins → Install & manage**. The desktop app contributes installation, the user-plugin list, command-line integration, and restart state as a native Plugins Settings tab; it no longer adds a separate sidebar entry, plugin page, or install sheet. Paste an npm package, `github:owner/repo`, or a public GitHub HTTPS repository URL, review the third-party-code warning, and choose **Install**. The app uses its bundled DSH runtime and pinned pnpm, so no terminal or global pnpm installation is required.
+
+Installing or removing changes the on-disk `web` profile but does not hot-load code into the current Harness process. The same Settings tab then shows the pending restart state. Restarting replaces the supervised Harness child process without quitting the desktop app. The new profile must remain healthy for five seconds before it becomes the new last-known-good snapshot. A startup failure or early runtime exit automatically restores the pre-change profile and starts Harness again. An interrupted operation is also rolled back on the next app launch.
+
+The desktop host also watches the shared `~/.dsh/profiles/web`. When `dsh plugin --profile web add/remove/update ...` changes that profile in a terminal, the current Harness UI detects the stable dependency change and asks whether to restart. Changes made while the desktop app is closed are loaded and verified automatically on the next launch, with the same five-second validation and rollback behavior.
+
+The desktop app does not require a globally installed DSH. **Enable in Terminal** in **Install & manage** installs a desktop-managed `~/.local/bin/dsh` launcher that calls the real DSH entry bundled in the app and shares its `DSH_HOME`. An existing `dsh` command is never silently replaced; switching to the desktop-managed version requires an explicit choice. A newly added PATH entry takes effect in a new terminal session.
+
+Third-party plugins run code on the local machine. The linked open directory is for discovery, not compatibility validation, security certification, or official endorsement. Inspect the repository and publisher before installing.
+
 ## Updating
 
 The desktop shell checks GitHub Releases for a newer version a few seconds after startup. The update UI stays hidden unless a newer release is available. When an update is found, it adds a compact row immediately above **Settings** in the Harness sidebar:

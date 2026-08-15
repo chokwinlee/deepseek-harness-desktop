@@ -121,6 +121,13 @@ while IFS= read -r -d '' native_file; do
 done < <(find node_modules -type f \( -name '*.node' -o -name '*.dylib' -o -perm -111 \) -print0)
 echo "   signed $NATIVE_SIGNATURES native files"
 
+echo ">> building bundled dsh command launcher"
+(
+  cd src-tauri
+  cargo build --release --target "$TRIPLE" --bin dsh
+)
+CLI_BINARY="src-tauri/target/${TRIPLE}/release/dsh"
+
 VERSION="$(node -e 'console.log(require("./src-tauri/tauri.conf.json").version)')"
 echo ">> building Tauri $VERSION for $TRIPLE"
 (
@@ -131,6 +138,23 @@ echo ">> building Tauri $VERSION for $TRIPLE"
 BUNDLE_ROOT="src-tauri/target/${TRIPLE}/release/bundle"
 APP="$BUNDLE_ROOT/macos/DeepSeek Harness Desktop.app"
 [ -d "$APP" ] || { echo "Tauri app not found: $APP" >&2; exit 1; }
+
+echo ">> adding and signing the bundled dsh command launcher"
+cp "$CLI_BINARY" "$APP/Contents/MacOS/dsh"
+cp "$CLI_BINARY" "$APP/Contents/MacOS/pnpm"
+chmod +x "$APP/Contents/MacOS/dsh" "$APP/Contents/MacOS/pnpm"
+if [[ "$APPLE_SIGNING_IDENTITY" == "Developer ID Application:"* ]]; then
+  codesign --force --timestamp --options runtime \
+    --sign "$APPLE_SIGNING_IDENTITY" "$APP/Contents/MacOS/dsh"
+  codesign --force --timestamp --options runtime \
+    --sign "$APPLE_SIGNING_IDENTITY" "$APP/Contents/MacOS/pnpm"
+  codesign --force --timestamp --options runtime \
+    --sign "$APPLE_SIGNING_IDENTITY" "$APP"
+else
+  codesign --force --options runtime --sign - "$APP/Contents/MacOS/dsh"
+  codesign --force --options runtime --sign - "$APP/Contents/MacOS/pnpm"
+  codesign --force --options runtime --sign - "$APP"
+fi
 
 codesign --verify --deep --strict --verbose=4 "$APP"
 
