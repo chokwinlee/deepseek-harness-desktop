@@ -89,6 +89,7 @@
       "dist/**/*",
       "build/icon.png",
       "package.json",
+      "src/updater.js",
       "!node_modules/**/*.map",
       "!node_modules/**/*.d.ts"
     ],

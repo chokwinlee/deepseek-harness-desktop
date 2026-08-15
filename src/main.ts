@@ -1,10 +1,15 @@
 import { createRequire } from 'node:module'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, Menu, shell, type MenuItemConstructorOptions } from 'electron'
 import { HarnessSupervisor } from './harness-supervisor.js'
 import { suppressUpstreamWelcomeNotice } from './upstream-onboarding.js'
 
 const APP_NAME = 'DeepSeek Harness Desktop'
+// Shared update-checker client script (also injected by the Tauri shell on
+// macOS). The placeholder is replaced with the app's own version before
+// injection; see src/updater.js for what the script does.
+const UPDATER_SCRIPT_RELATIVE = join('src', 'updater.js')
 const LOADING_PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -127,6 +132,27 @@ function installMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+async function readAppVersion(): Promise<string> {
+  const manifestPath = join(app.getAppPath(), 'package.json')
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { version?: string }
+  return manifest.version ?? '0.0.0'
+}
+
+/** Inject the update-checker widget into the harness page after it loads. */
+async function injectUpdater(): Promise<void> {
+  if (mainWindow === undefined) return
+  try {
+    const [rawScript, version] = await Promise.all([
+      readFile(join(app.getAppPath(), UPDATER_SCRIPT_RELATIVE), 'utf8'),
+      readAppVersion(),
+    ])
+    const script = rawScript.split('__DSH_CURRENT_VERSION__').join(version)
+    await mainWindow.webContents.executeJavaScript(script, true)
+  } catch (error) {
+    console.error('[dsh] failed to inject updater:', error)
+  }
+}
+
 async function showHarness(): Promise<void> {
   mainWindow ??= createWindow()
   if (harnessUrl === undefined) {
@@ -134,6 +160,7 @@ async function showHarness(): Promise<void> {
     return
   }
   await mainWindow.loadURL(harnessUrl)
+  await injectUpdater()
   mainWindow.show()
   mainWindow.focus()
 }

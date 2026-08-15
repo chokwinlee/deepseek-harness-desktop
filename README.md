@@ -98,6 +98,16 @@ DeepSeek Harness Desktop
 
 Navigation is restricted to the local Harness origin and external HTTP(S) or mail links open in the system browser. The macOS Tauri host runs Harness in a dedicated process group so the runtime and its descendants are stopped together.
 
+## Updating
+
+The desktop shell checks GitHub Releases for a newer version a few seconds after startup and shows a small button in the bottom-left corner of the window (like Codex's version widget):
+
+- **No update** – the button reports the current version.
+- **Update available** – a green dot appears; clicking it shows the new version, release date, and release notes, with **Download update** (opens the release page in your browser) and **Dismiss this version** (remembers the choice for this version).
+- **Check failed** – the panel offers a retry.
+
+The check runs again every 6 hours while the app stays open. This is a community project with ad-hoc signed builds, so updates are downloaded manually from the release page rather than installed in place.
+
 ## Development
 
 Node.js 22.19 or newer is required.

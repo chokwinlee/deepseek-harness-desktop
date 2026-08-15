@@ -19,6 +19,14 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const READINESS_GRACE: Duration = Duration::from_millis(300);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// Update-checker client script, embedded at compile time and injected into
+/// the harness webview. The `__DSH_CURRENT_VERSION__` placeholder is replaced with the shell's
+/// own version below; see src/updater.js for what the script does.
+const UPDATER_SCRIPT: &str = include_str!("../../src/updater.js");
+
+/// Current shell version, kept in sync with package.json / tauri.conf.json.
+const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
 fn target_triple() -> &'static str {
@@ -325,10 +333,12 @@ fn main() {
             println!("[dsh] harness registered under supervisor");
 
             let navigation_handle = handle.clone();
+            let updater_script = UPDATER_SCRIPT.replace("__DSH_CURRENT_VERSION__", SHELL_VERSION);
             let window = WebviewWindowBuilder::new(&handle, "main", WebviewUrl::External(url))
                 .title("DeepSeek Harness Desktop")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(960.0, 640.0)
+                .initialization_script(updater_script)
                 .on_navigation(move |destination| {
                     if destination.origin().ascii_serialization() == harness_origin {
                         return true;
