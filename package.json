@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Compact unofficial desktop host for DeepSeek Harness, powered by Tauri on macOS",
   "private": true,
   "license": "MIT",

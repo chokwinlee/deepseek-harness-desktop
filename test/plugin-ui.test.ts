@@ -64,6 +64,11 @@ test('ships a dedicated CLI launcher instead of the relocated npm bin file', asy
   assert.deepEqual(tauri.bundle.externalBin, ['binaries/node', 'binaries/dsh', 'binaries/pnpm'])
   assert.doesNotMatch(build, /cp .*Contents\/MacOS\/(?:dsh|pnpm)/)
   assert.doesNotMatch(build, /codesign[\s\S]+Contents\/MacOS\/(?:dsh|pnpm)/)
+  const bootstrap = build.indexOf('for CLI_SIDECAR_NAME in dsh pnpm')
+  const compile = build.indexOf('cargo build --release --target "$TRIPLE" --bin dsh')
+  const replace = build.indexOf('install -m 755 "$CLI_BINARY" "src-tauri/binaries/dsh-${TRIPLE}"')
+  assert.ok(bootstrap >= 0 && bootstrap < compile)
+  assert.ok(compile < replace)
 })
 
 test('runs desktop pnpm operations without an interactive terminal', async () => {
