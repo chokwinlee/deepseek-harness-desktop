@@ -21,10 +21,10 @@ scripts/build-tauri.sh arm64
 scripts/build-tauri.sh x86_64
 ```
 
-Local builds use an ad-hoc identity. Tagged releases require a Developer ID Application
-certificate plus `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`; Tauri then signs,
-notarizes, and staples the bundle. Node receives the JIT entitlements in
-`build/entitlements.mac.plist` while retaining Hardened Runtime.
+Local and tagged builds use an ad-hoc identity by default. When a Developer ID
+Application certificate plus `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`
+are configured, Tauri signs, notarizes, and staples the bundle. Node receives the
+JIT entitlements in `build/entitlements.mac.plist` while retaining Hardened Runtime.
 
 ## Shrinking the payload
 
@@ -57,17 +57,18 @@ and cannot be removed.
   electron-builder prunes per-package `files` (210M); a Tauri port should prune
   similarly (e.g. npm `--omit=dev` + package `files` semantics) to shrink further.
 
-## Verified arm64 artifacts (v0.1.2)
+## Published artifact comparison (v0.1.1 to v0.1.2)
 
-```
-release/DeepSeek Harness Desktop.app                  253 MiB
-release/DeepSeek-Harness-Desktop-0.1.2-mac-arm64.dmg  72.5 MB
-release/DeepSeek-Harness-Desktop-0.1.2-mac-arm64.zip  85.3 MB
-```
+| Architecture | Artifact | v0.1.1 Electron | v0.1.2 Tauri | Reduction |
+| --- | --- | ---: | ---: | ---: |
+| arm64 | DMG | 147.8 MB | 86.3 MB | 41.6% |
+| arm64 | ZIP | 155.0 MB | 78.7 MB | 49.2% |
+| x64 | DMG | 152.6 MB | 88.8 MB | 41.8% |
+| x64 | ZIP | 159.9 MB | 81.0 MB | 49.3% |
 
-The previous Electron artifacts were approximately 498 MiB / 153 MB / 166 MB.
-The Tauri release therefore cuts the downloadable DMG by about 53% and ZIP by
-about 49%. The remaining payload is primarily the Node sidecar and Harness runtime.
+These decimal MB figures come from the assets published on the GitHub v0.1.1 and
+v0.1.2 releases. Both v0.1.2 macOS downloads stay below 90 MB. The remaining
+payload is primarily the Node sidecar and Harness runtime.
 ## Platform decision (macOS = Tauri, Windows = Electron)
 
 Tauri owns macOS; Electron keeps Windows. Rationale:
