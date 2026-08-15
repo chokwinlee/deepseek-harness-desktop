@@ -1,6 +1,6 @@
 [package]
 name = "deepseek-harness-desktop"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Tauri shell that boots @deepseek-ai/dsh web and shows it in the system webview"
 license = "MIT"
