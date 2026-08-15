@@ -20,6 +20,8 @@
   </p>
 </div>
 
+![DeepSeek Harness Desktop: under 90 MB on macOS with the complete Harness runtime included](docs/images/readme-hero-en.png)
+
 DeepSeek Harness Desktop packages the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a native desktop window. It starts and stops Harness automatically, so no separate Node.js installation or terminal command is required.
 
 The macOS build uses Tauri and the system WKWebView instead of shipping another browser engine. The published v0.1.2 DMGs are 86.3 MB for Apple Silicon and 88.8 MB for Intel, about 42% smaller than this project's previous Electron DMGs while retaining the bundled Node sidecar and Harness runtime.

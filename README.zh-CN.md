@@ -20,6 +20,8 @@
   </p>
 </div>
 
+![DeepSeek Harness Desktop：macOS 下载包不到 90 MB，内置完整 Harness 运行环境](docs/images/readme-hero-zh-CN.png)
+
 DeepSeek Harness Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行环境放进原生桌面窗口，并负责自动启动和关闭 Harness。用户无需额外安装 Node.js，也不用在终端执行命令。
 
 macOS 版采用 Tauri 和系统自带的 WKWebView，无需随应用附带另一套浏览器内核。v0.1.2 公开发布的 Apple Silicon DMG 为 86.3 MB，Intel DMG 为 88.8 MB。两者都比本项目上一版 Electron DMG 小约 42%，同时保留完整的 Node sidecar 和 Harness 运行环境。
