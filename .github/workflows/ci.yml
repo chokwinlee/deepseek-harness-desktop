@@ -45,5 +45,7 @@ jobs:
           target="$(rustc -vV | awk '/^host:/ { print $2 }')"
           mkdir -p src-tauri/binaries
           install -m 755 /usr/bin/true "src-tauri/binaries/node-${target}"
+          install -m 755 /usr/bin/true "src-tauri/binaries/dsh-${target}"
+          install -m 755 /usr/bin/true "src-tauri/binaries/pnpm-${target}"
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml -- -D warnings

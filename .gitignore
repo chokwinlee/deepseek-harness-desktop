@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 .playwright-cli/
+/output/
 *.log
 .DS_Store
 # tauri spike (experiment toolchain + build dirs)

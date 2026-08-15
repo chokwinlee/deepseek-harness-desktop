@@ -1,10 +1,65 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>spike placeholder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepSeek Harness Desktop — 启动恢复</title>
+  <link rel="stylesheet" href="startup-error.css">
+  <script src="startup-error.js" defer></script>
 </head>
 <body>
-  <p>placeholder - the real UI is served by the harness over http://127.0.0.1</p>
+  <main class="shell">
+    <section class="card" aria-labelledby="error-title">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" role="img">
+            <path d="M8 25.5c0-9.1 7-16.5 16-16.5 6.4 0 12.1 3.8 14.7 9.5-3.2-1.1-6.8-.9-9.8.8-3.5 1.9-5.9 5.4-6.4 9.4-3.7-2.8-8.6-4-14.5-3.2Z"/>
+            <path d="M8.4 29.7c5.1-1.1 9.3-.3 12.5 2.2 2.7 2.1 4.3 5.1 4.8 8.9-8.1.8-15.5-3.8-17.3-11.1Z"/>
+            <path d="M27 30.1c.2-3.1 1.9-5.8 4.5-7.3 2.7-1.5 6-1.6 8.8-.3-.1 6.6-4.6 12.1-10.8 13.6L27 30.1Z"/>
+          </svg>
+        </div>
+        <div>
+          <p class="product">DeepSeek Harness Desktop</p>
+          <p class="eyebrow">STARTUP RECOVERY</p>
+        </div>
+        <span class="status-dot" aria-label="Harness 未运行"></span>
+      </div>
+
+      <div class="message">
+        <p class="kicker">桌面壳仍在运行</p>
+        <h1 id="error-title">Harness 启动失败</h1>
+        <p class="lede">你的会话、凭据和设置没有被删除。你可以直接重试，恢复上次可用的插件配置，或临时跳过第三方 bundle 启动。</p>
+      </div>
+
+      <section class="recovery" aria-labelledby="recovery-title">
+        <div class="section-heading">
+          <div>
+            <p class="step">自主恢复</p>
+            <h2 id="recovery-title">选择一种恢复方式</h2>
+          </div>
+        </div>
+        <div class="actions" aria-describedby="recovery-note">
+          <button id="restore-action" class="button primary" type="button">恢复上次可用状态</button>
+          <button id="safe-mode-action" class="button secondary" type="button">以安全模式启动</button>
+          <button id="retry-action" class="button ghost" type="button">重试启动</button>
+        </div>
+        <p id="recovery-note" class="note">恢复操作只处理插件 profile，不会删除会话、凭据或工作区。</p>
+        <p id="action-status" class="action-status" role="status" aria-live="polite" hidden></p>
+      </section>
+
+      <details class="details">
+        <summary>
+          <span>启动错误详情</span>
+          <button id="copy-error" class="button ghost" type="button">复制错误</button>
+        </summary>
+        <pre id="startup-error" class="error-text" aria-live="polite">正在读取启动错误…</pre>
+      </details>
+
+      <footer>
+        <p>不需要安装 Node.js、DSH CLI 或 pnpm。</p>
+        <p class="english">The desktop host is safe. Recovery actions are local and reversible.</p>
+      </footer>
+    </section>
+  </main>
 </body>
 </html>

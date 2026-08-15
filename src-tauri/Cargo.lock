@@ -663,14 +663,16 @@ dependencies = [
 
 [[package]]
 name = "deepseek-harness-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "libc",
+ "serde_json",
  "signal-hook",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "uuid",
 ]
 
 [[package]]

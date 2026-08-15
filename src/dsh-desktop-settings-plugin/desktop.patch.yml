@@ -1,0 +1,3 @@
+- insert:
+    - id: ui-settings-desktop-plugin-manager
+      name: dsh-desktop-settings-plugin

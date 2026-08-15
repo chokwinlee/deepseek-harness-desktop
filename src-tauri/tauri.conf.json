@@ -1,13 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DeepSeek Harness Desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "com.chokwinlee.deepseek-harness-desktop",
   "build": {
     "frontendDist": "./ui"
   },
   "app": {
     "windows": [],
+    "withGlobalTauri": true,
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
@@ -15,7 +16,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
-    "externalBin": ["binaries/node"],
+    "externalBin": ["binaries/node", "binaries/dsh", "binaries/pnpm"],
     "resources": ["../node_modules/**/*", "scripts/acknowledge-onboarding.mjs"],
     "icon": ["../build/icon.icns", "../build/icon.png", "../build/icon.ico"],
     "category": "public.app-category.developer-tools",

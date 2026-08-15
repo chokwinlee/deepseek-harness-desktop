@@ -121,6 +121,16 @@ while IFS= read -r -d '' native_file; do
 done < <(find node_modules -type f \( -name '*.node' -o -name '*.dylib' -o -perm -111 \) -print0)
 echo "   signed $NATIVE_SIGNATURES native files"
 
+echo ">> building bundled dsh command launcher"
+(
+  cd src-tauri
+  cargo build --release --target "$TRIPLE" --bin dsh
+)
+CLI_BINARY="src-tauri/target/${TRIPLE}/release/dsh"
+mkdir -p src-tauri/binaries
+install -m 755 "$CLI_BINARY" "src-tauri/binaries/dsh-${TRIPLE}"
+install -m 755 "$CLI_BINARY" "src-tauri/binaries/pnpm-${TRIPLE}"
+
 VERSION="$(node -e 'console.log(require("./src-tauri/tauri.conf.json").version)')"
 echo ">> building Tauri $VERSION for $TRIPLE"
 (

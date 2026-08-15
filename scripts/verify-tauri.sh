@@ -7,9 +7,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 APP="${1:-release/DeepSeek Harness Desktop.app}"
 NODE="$APP/Contents/MacOS/node"
-APP_BINARY="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f -perm -111 ! -name node -print -quit)"
+DSH_CLI="$APP/Contents/MacOS/dsh"
+PNPM_CLI="$APP/Contents/MacOS/pnpm"
+APP_BINARY="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f -perm -111 ! -name node ! -name dsh ! -name pnpm -print -quit)"
 [ -x "$APP_BINARY" ] || { echo "app binary not found under $APP/Contents/MacOS" >&2; exit 1; }
 [ -x "$NODE" ] || { echo "Node sidecar not found: $NODE" >&2; exit 1; }
+[ -x "$DSH_CLI" ] || { echo "DSH command launcher not found: $DSH_CLI" >&2; exit 1; }
+[ -x "$PNPM_CLI" ] || { echo "pnpm command launcher not found: $PNPM_CLI" >&2; exit 1; }
 
 for candidate in \
   "$APP/Contents/Resources/node_modules" \
@@ -20,6 +24,12 @@ for candidate in \
   fi
 done
 [ -n "${MODULES:-}" ] || { echo "bundled node_modules not found" >&2; exit 1; }
+PNPM_SCRIPT="$MODULES/pnpm/bin/pnpm.mjs"
+[ -f "$PNPM_SCRIPT" ] || { echo "bundled pnpm not found: $PNPM_SCRIPT" >&2; exit 1; }
+DESKTOP_SETTINGS_PATCH="$MODULES/dsh-desktop-settings-plugin/desktop.patch.yml"
+DESKTOP_SETTINGS_CLIENT="$MODULES/dsh-desktop-settings-plugin/lib/client.js"
+[ -f "$DESKTOP_SETTINGS_PATCH" ] || { echo "Desktop Settings patch not found: $DESKTOP_SETTINGS_PATCH" >&2; exit 1; }
+[ -f "$DESKTOP_SETTINGS_CLIENT" ] || { echo "Desktop Settings client not found: $DESKTOP_SETTINGS_CLIENT" >&2; exit 1; }
 
 echo ">> verifying bundled PTY and image native modules"
 NODE_PATH="$MODULES" "$NODE" <<'NODE'
@@ -52,6 +62,38 @@ terminal.onExit(async ({ exitCode }) => {
   console.log('native runtime smoke passed')
 })
 NODE
+
+PNPM_VERSION="$("$NODE" "$PNPM_SCRIPT" --version)"
+[ -n "$PNPM_VERSION" ] || { echo "bundled pnpm did not report a version" >&2; exit 1; }
+echo "bundled pnpm smoke passed ($PNPM_VERSION)"
+
+PNPM_CLI_VERSION="$("$PNPM_CLI" --version)"
+[ "$PNPM_CLI_VERSION" = "$PNPM_VERSION" ] || { echo "bundled pnpm launcher version mismatch" >&2; exit 1; }
+echo "bundled pnpm command smoke passed ($PNPM_CLI_VERSION)"
+
+DSH_VERSION="$("$DSH_CLI" --version)"
+[ -n "$DSH_VERSION" ] || { echo "bundled dsh launcher did not report a version" >&2; exit 1; }
+echo "bundled dsh command smoke passed ($DSH_VERSION)"
+
+CLI_TEST_HOME="$REPO_ROOT/.verify-tauri-cli-home"
+find "$CLI_TEST_HOME" -depth -delete 2>/dev/null || true
+mkdir -p "$CLI_TEST_HOME"
+DSH_HOME="$CLI_TEST_HOME/.dsh" "$DSH_CLI" plugin --profile web add \
+  "link:$REPO_ROOT/test/fixtures/sample-plugin" >/dev/null
+node -e '
+  const manifest = require(process.argv[1])
+  if (manifest.dependencies?.["dsh-desktop-fixture-plugin"] === undefined) process.exit(1)
+  if (!manifest.dsh?.profile?.bundles?.includes("dsh-desktop-fixture-plugin")) process.exit(1)
+' "$CLI_TEST_HOME/.dsh/profiles/web/package.json"
+DSH_HOME="$CLI_TEST_HOME/.dsh" CI=true "$DSH_CLI" plugin --profile web remove \
+  "dsh-desktop-fixture-plugin" >/dev/null
+node -e '
+  const manifest = require(process.argv[1])
+  if (manifest.dependencies?.["dsh-desktop-fixture-plugin"] !== undefined) process.exit(1)
+  if (manifest.dsh?.profile?.bundles?.includes("dsh-desktop-fixture-plugin")) process.exit(1)
+' "$CLI_TEST_HOME/.dsh/profiles/web/package.json"
+find "$CLI_TEST_HOME" -depth -delete
+echo "bundled dsh plugin add/remove smoke passed"
 
 SPIKE_HOME="$REPO_ROOT/.verify-tauri-home"
 find "$SPIKE_HOME" -depth -delete 2>/dev/null || true
@@ -93,6 +135,11 @@ echo "harness ready at $URL"
 CODE="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "$URL/")"
 echo "GET $URL/ -> $CODE"
 [ "$CODE" = "200" ] || { echo "UI check failed" >&2; exit 1; }
+BOOT_HTML="$(curl --fail --silent --max-time 10 "$URL/")"
+[[ "$BOOT_HTML" == *"dsh-desktop-settings-plugin"* ]] || { echo "Desktop Settings plugin missing from Web boot manifest" >&2; exit 1; }
+DESKTOP_CLIENT="$(curl --fail --silent --max-time 10 "$URL/plugins/dsh-desktop-settings-plugin/client.js")"
+[[ "$DESKTOP_CLIENT" == *"settings.plugins.tab"* ]] || { echo "Desktop Settings client bundle is invalid" >&2; exit 1; }
+echo "native Settings plugin smoke passed"
 
 echo ">> requesting graceful Tauri shutdown"
 kill "$APP_PID"
@@ -117,4 +164,4 @@ if kill -0 "$CHILD_PID" 2>/dev/null; then
 fi
 CHILD_PID=""
 
-echo "✅ verify-tauri passed (HTTP + native modules + child cleanup)"
+echo "✅ verify-tauri passed (HTTP + native modules + pnpm + child cleanup)"
