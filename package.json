@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/upstream-onboarding.test.js",
+    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/upstream-onboarding.test.js dist/test/updater.test.js",
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
