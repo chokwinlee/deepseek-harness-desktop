@@ -1,11 +1,17 @@
 <div align="center">
   <img src="build/icon.png" width="112" height="112" alt="DeepSeek Harness Desktop icon">
   <h1>DeepSeek Harness Desktop</h1>
-  <p>An unofficial desktop host for DeepSeek Harness on macOS and Windows.</p>
+  <p><strong>macOS downloads under 90 MB, with the complete Harness runtime included.</strong></p>
+  <p>A compact, unofficial desktop host for DeepSeek Harness on macOS and Windows.</p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest">Download</a>
     · <a href="#installation">Installation</a>
+    · <a href="#compact-by-design-on-macos">Why it is compact</a>
     · <a href="CONTRIBUTING.md">Contributing</a>
+  </p>
+  <p>
+    <strong>English</strong>
+    · <a href="README.zh-CN.md">简体中文</a>
   </p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml"><img src="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -16,12 +22,29 @@
 
 DeepSeek Harness Desktop packages the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a native desktop window. It starts and stops Harness automatically, so no separate Node.js installation or terminal command is required.
 
+The macOS build uses Tauri and the system WKWebView instead of shipping another browser engine. The published v0.1.2 DMGs are 86.3 MB for Apple Silicon and 88.8 MB for Intel, about 42% smaller than this project's previous Electron DMGs while retaining the bundled Node sidecar and Harness runtime.
+
 The Harness agent runtime is not forked, modified, or reimplemented here. This repository contains a lightweight Tauri host for macOS, an Electron host for Windows, packaging configuration, runtime verification, and release automation.
 
 The desktop host skips the upstream internal-testing announcement before loading the Web UI. The model API key step remains available because it is functional setup, not a promotional notice.
 
 > [!IMPORTANT]
 > This is an independent community project. It is not affiliated with or endorsed by DeepSeek AI. DeepSeek Harness is currently a developer preview and may introduce breaking changes.
+
+## Compact by design on macOS
+
+Download size is one of this project's clearest advantages. Tauri lets the macOS app reuse WKWebView, which is already part of macOS, instead of bundling Chromium. The release build also removes source maps, type declarations, tests, documentation, and native binaries for unused platforms from the packaged runtime.
+
+The result is visible in the published release assets. Sizes below use decimal MB and compare the same architecture and file type across two consecutive releases.
+
+| macOS installer | v0.1.1 Electron | v0.1.2 Tauri | Reduction |
+| --- | ---: | ---: | ---: |
+| Apple Silicon DMG | 147.8 MB | **86.3 MB** | **41.6%** |
+| Intel DMG | 152.6 MB | **88.8 MB** | **41.8%** |
+
+The ZIP downloads are 49.2% smaller on Apple Silicon and 49.3% smaller on Intel. These figures come directly from the published [v0.1.1](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.1.1) and [v0.1.2](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.1.2) assets.
+
+The smaller download remains self-contained. Users still get the pinned Node sidecar, the official Harness runtime, native PTY and image modules, and automatic process management. CI enforces a 130 MB DMG budget and a 140 MB ZIP budget so future releases cannot silently give back the size reduction.
 
 ## Download
 

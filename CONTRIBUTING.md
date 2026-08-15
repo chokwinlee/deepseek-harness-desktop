@@ -31,7 +31,7 @@ npm run verify:packaged
 ## Pull requests
 
 - Keep changes focused and include tests for process-management behavior.
-- Write documentation, code comments, commit messages, and pull request descriptions in English.
+- Write documentation, code comments, commit messages, and pull request descriptions in English, except for explicitly localized files such as `README.zh-CN.md`.
 - Do not commit generated `dist/`, `release/`, logs, credentials, or local Harness data.
 - Run `npm test` and `git diff --check` before submitting.
 - For packaging changes, verify a packaged runtime and launch the desktop application locally.
