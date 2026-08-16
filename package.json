@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Compact unofficial desktop host for DeepSeek Harness, powered by Tauri on macOS",
   "private": true,
   "license": "MIT",
@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/harness-supervisor.test.js dist/test/plugin-ui.test.js dist/test/upstream-onboarding.test.js dist/test/updater.test.js",
+    "test": "npm run build && node --test dist/test/desktop-preferences.test.js dist/test/harness-supervisor.test.js dist/test/plugin-ui.test.js dist/test/smooth-stream.test.js dist/test/upstream-onboarding.test.js dist/test/updater.test.js dist/test/usage-meter.test.js",
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
@@ -91,6 +91,7 @@
       "dist/**/*",
       "build/icon.png",
       "package.json",
+      "src/smooth-stream.js",
       "src/updater.js",
       "!node_modules/**/*.map",
       "!node_modules/**/*.d.ts"
