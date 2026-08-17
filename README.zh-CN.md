@@ -19,6 +19,8 @@
   </p>
 </div>
 
+![DeepSeek Harness Desktop](docs/images/readme-hero-zh-CN.png)
+
 DeepSeek Harness Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口，并自动管理本机 Harness 进程。用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
 > [!IMPORTANT]

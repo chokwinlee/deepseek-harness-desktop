@@ -19,6 +19,8 @@
   </p>
 </div>
 
+![DeepSeek Harness Desktop](docs/images/readme-hero-en.png)
+
 DeepSeek Harness Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. It manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
 
 > [!IMPORTANT]
