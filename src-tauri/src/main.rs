@@ -14,7 +14,7 @@ use std::sync::{mpsc, Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, Theme, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
@@ -33,6 +33,7 @@ const BEFORE_PLUGIN_INSTALL: &str = "before-plugin-install";
 const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
+const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
 
 /// Update-checker client script, embedded at compile time and injected into
 /// the harness webview. The `__DSH_CURRENT_VERSION__` placeholder is replaced with the shell's
@@ -42,6 +43,16 @@ const UPDATER_SCRIPT: &str = include_str!("../../src/updater.js");
 /// Safe-mode banner injected into the Harness page. It is dormant during a
 /// normal launch and exposes one route back to the user's ordinary profile.
 const RECOVERY_BRIDGE_SCRIPT: &str = include_str!("../../src/recovery-bridge.js");
+
+/// Mirrors Harness' resolved palette into the native title bar. This keeps
+/// application-level light/dark choices independent from the macOS preference.
+const THEME_SYNC_SCRIPT: &str = include_str!("../../src/theme-sync.js");
+
+/// Native-log-backed usage summary and live title-bar throughput meter.
+const USAGE_METER_SCRIPT: &str = include_str!("../../src/usage-meter.js");
+
+/// Built-in, profile-independent streaming polish and its General Settings row.
+const SMOOTH_STREAM_SCRIPT: &str = include_str!("../../src/smooth-stream.js");
 
 /// Current shell version, kept in sync with package.json / tauri.conf.json.
 const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -267,6 +278,55 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
     }
     fs::rename(&temporary, path)
         .map_err(|error| format!("failed to commit {}: {error}", path.display()))
+}
+
+fn desktop_preferences_path(dsh_home: &Path) -> PathBuf {
+    dsh_home.join(DESKTOP_PREFERENCES_FILE)
+}
+
+fn read_desktop_preferences(path: &Path) -> Result<serde_json::Value, String> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(serde_json::json!({}));
+        }
+        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
+    };
+    let preferences: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|error| format!("invalid Desktop preferences at {}: {error}", path.display()))?;
+    if !preferences.is_object() {
+        return Err(format!(
+            "Desktop preferences at {} must be an object",
+            path.display()
+        ));
+    }
+    Ok(preferences)
+}
+
+fn smooth_stream_enabled_from(preferences: &serde_json::Value) -> bool {
+    preferences
+        .get("smoothStreamEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn smooth_stream_enabled_at(path: &Path) -> bool {
+    read_desktop_preferences(path)
+        .map(|preferences| smooth_stream_enabled_from(&preferences))
+        .unwrap_or_else(|error| {
+            eprintln!("[dsh] smooth stream preference warning: {error}");
+            true
+        })
+}
+
+fn write_smooth_stream_preference(path: &Path, enabled: bool) -> Result<(), String> {
+    let mut preferences = read_desktop_preferences(path)?;
+    preferences["smoothStreamEnabled"] = serde_json::Value::Bool(enabled);
+    let encoded = serde_json::to_vec_pretty(&preferences)
+        .map_err(|error| format!("failed to encode Desktop preferences: {error}"))?;
+    let mut contents = encoded;
+    contents.push(b'\n');
+    atomic_write(path, &contents)
 }
 
 fn copy_atomic(source: &Path, destination: &Path) -> Result<(), String> {
@@ -531,11 +591,23 @@ fn pending_install_label(value: &serde_json::Value) -> String {
 }
 
 fn validate_plugin_spec(raw: &str) -> Result<String, String> {
-    let spec = raw.trim();
-    if spec.is_empty() {
+    let input = raw.trim();
+    if input.is_empty() {
         return Err("请输入 npm 包名或 GitHub 仓库地址。".into());
     }
-    if spec != raw || spec.len() > 512 || spec.chars().any(char::is_whitespace) {
+
+    let parts: Vec<&str> = input.split_ascii_whitespace().collect();
+    let spec = match parts.as_slice() {
+        [spec] => *spec,
+        ["dsh" | "dsh.exe", "plugin", "--profile", "web", "add", spec]
+        | ["dsh" | "dsh.exe", "plugin", "--profile=web", "add", spec] => *spec,
+        _ => {
+            return Err(
+                "请输入插件地址，或粘贴完整命令：dsh plugin --profile web add <插件地址>。".into(),
+            )
+        }
+    };
+    if spec.len() > 512 || spec.chars().any(char::is_whitespace) {
         return Err("插件地址不能包含空格，且长度不能超过 512 个字符。".into());
     }
     if spec.starts_with('-')
@@ -1467,6 +1539,137 @@ fn emit_bridge_event(handle: &tauri::AppHandle, event: &str, payload: serde_json
     }
 }
 
+fn usage_record_from_event(value: &serde_json::Value, cutoff_ms: u64) -> Option<serde_json::Value> {
+    if value.get("type")?.as_str()? != "assistant/message" {
+        return None;
+    }
+    let time = value.get("time")?.as_u64()?;
+    if time < cutoff_ms {
+        return None;
+    }
+    let data = value.get("data")?;
+    let usage = data.get("usage")?;
+    let message = data.get("message")?;
+    let source = message.get("source");
+    let token = |name: &str| {
+        usage
+            .get(name)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    Some(serde_json::json!({
+        "id": message.get("id")?.as_str()?,
+        "time": time,
+        "provider": source.and_then(|value| value.get("provider")).and_then(serde_json::Value::as_str).unwrap_or(""),
+        "model": source.and_then(|value| value.get("model")).and_then(serde_json::Value::as_str).unwrap_or(""),
+        "usage": {
+            "inputTokens": token("inputTokens"),
+            "outputTokens": token("outputTokens"),
+            "cacheReadTokens": token("cacheReadTokens"),
+            "cacheWriteTokens": token("cacheWriteTokens"),
+        }
+    }))
+}
+
+fn collect_usage_log_paths(directory: &Path, cutoff_ms: u64, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_usage_log_paths(&path, cutoff_ms, paths);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !matches!(name, "session.jsonl" | "session.jsonl.zstd") {
+            continue;
+        }
+        let modified_ms = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
+        if modified_ms.is_none_or(|modified| modified >= cutoff_ms) {
+            paths.push(path);
+        }
+    }
+}
+
+fn scan_usage_log(
+    path: &Path,
+    cutoff_ms: u64,
+    records: &mut Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let file = fs::File::open(path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    let mut reader: Box<dyn BufRead> =
+        if path.extension().and_then(|value| value.to_str()) == Some("zstd") {
+            let decoder = zstd::stream::read::Decoder::new(file)
+                .map_err(|error| format!("failed to decode {}: {error}", path.display()))?;
+            Box::new(BufReader::new(decoder))
+        } else {
+            Box::new(BufReader::new(file))
+        };
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        if !line.contains("assistant/message") {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_str(&line)
+            .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+        if let Some(record) = usage_record_from_event(&value, cutoff_ms) {
+            records.push(record);
+        }
+    }
+    Ok(())
+}
+
+fn usage_snapshot_value(cutoff_ms: u64) -> serde_json::Value {
+    let sessions = harness_paths().dsh_home.join("sessions");
+    let mut paths = Vec::new();
+    collect_usage_log_paths(&sessions, cutoff_ms, &mut paths);
+    let mut records = Vec::new();
+    let mut warnings = 0_u64;
+    for path in &paths {
+        if let Err(error) = scan_usage_log(path, cutoff_ms, &mut records) {
+            warnings += 1;
+            eprintln!("[dsh] usage scan warning: {error}");
+        }
+    }
+    records.sort_by_key(|record| {
+        record
+            .get("time")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    });
+    serde_json::json!({
+        "records": records,
+        "warnings": warnings,
+        "scannedFiles": paths.len(),
+        "scannedAt": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),
+    })
+}
+
 fn desktop_status_value() -> Result<serde_json::Value, String> {
     let mut status = plugin_manager_status_value()?;
     status["cli"] = cli_status_value();
@@ -1499,6 +1702,96 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
     }
     let action = destination.path().trim_start_matches('/');
     match action {
+        "usage-snapshot" => {
+            let Some(cutoff_ms) = parameters
+                .get("cutoff")
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                emit_bridge_event(
+                    &handle,
+                    "usage-snapshot-error",
+                    serde_json::json!({ "message": "invalid usage cutoff" }),
+                );
+                return;
+            };
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let oldest_allowed = now_ms.saturating_sub(31 * 24 * 60 * 60 * 1_000);
+            if cutoff_ms < oldest_allowed || cutoff_ms > now_ms.saturating_add(60_000) {
+                emit_bridge_event(
+                    &handle,
+                    "usage-snapshot-error",
+                    serde_json::json!({ "message": "usage cutoff is outside the allowed range" }),
+                );
+                return;
+            }
+            thread::spawn(move || {
+                let snapshot = usage_snapshot_value(cutoff_ms);
+                emit_bridge_event(&handle, "usage-snapshot", snapshot);
+            });
+        }
+        "sync-theme" => {
+            let theme = match parameters.get("scheme").map(String::as_str) {
+                Some("light") => Theme::Light,
+                Some("dark") => Theme::Dark,
+                _ => {
+                    eprintln!("[dsh] ignored invalid desktop theme");
+                    return;
+                }
+            };
+            let color = ["red", "green", "blue"].map(|channel| {
+                parameters
+                    .get(channel)
+                    .and_then(|value| value.parse::<u8>().ok())
+            });
+            if let Some(window) = handle.get_webview_window("main") {
+                if let Err(error) = window.set_theme(Some(theme)) {
+                    eprintln!("[dsh] failed to sync native theme: {error}");
+                }
+                if let [Some(red), Some(green), Some(blue)] = color {
+                    if let Err(error) = window
+                        .set_background_color(Some(tauri::webview::Color(red, green, blue, 255)))
+                    {
+                        eprintln!("[dsh] failed to sync native background: {error}");
+                    }
+                }
+            }
+        }
+        "set-smooth-stream" => {
+            let enabled = match parameters.get("enabled").map(String::as_str) {
+                Some("1") => true,
+                Some("0") => false,
+                _ => {
+                    emit_bridge_event(
+                        &handle,
+                        "smooth-stream-setting-error",
+                        serde_json::json!({
+                            "enabled": smooth_stream_enabled_at(&desktop_preferences_path(&harness_paths().dsh_home)),
+                            "message": "invalid smooth stream preference"
+                        }),
+                    );
+                    return;
+                }
+            };
+            let path = desktop_preferences_path(&harness_paths().dsh_home);
+            match write_smooth_stream_preference(&path, enabled) {
+                Ok(()) => emit_bridge_event(
+                    &handle,
+                    "smooth-stream-setting",
+                    serde_json::json!({ "enabled": enabled }),
+                ),
+                Err(error) => emit_bridge_event(
+                    &handle,
+                    "smooth-stream-setting-error",
+                    serde_json::json!({
+                        "enabled": smooth_stream_enabled_at(&path),
+                        "message": error
+                    }),
+                ),
+            }
+        }
         "status" => match desktop_status_value() {
             Ok(status) => emit_bridge_event(&handle, "desktop-status", status),
             Err(error) => emit_action_error(&handle, error),
@@ -1582,6 +1875,22 @@ fn build_main_window(
     let recovery_bridge_script = RECOVERY_BRIDGE_SCRIPT
         .replace("__DSH_RECOVERY_URL__", recovery_page_url()?.as_str())
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
+    let theme_sync_script =
+        THEME_SYNC_SCRIPT.replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
+    let usage_meter_script =
+        USAGE_METER_SCRIPT.replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
+    let smooth_stream_enabled =
+        smooth_stream_enabled_at(&desktop_preferences_path(&harness_paths().dsh_home));
+    let smooth_stream_script = SMOOTH_STREAM_SCRIPT
+        .replace(
+            "__DSH_SMOOTH_STREAM_ENABLED__",
+            if smooth_stream_enabled {
+                "true"
+            } else {
+                "false"
+            },
+        )
+        .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
     let (title, width, height, min_width, min_height) = if recovery {
         (
             "DeepSeek Harness Desktop — Recovery",
@@ -1593,12 +1902,15 @@ fn build_main_window(
     } else {
         ("DeepSeek Harness Desktop", 1440.0, 900.0, 960.0, 640.0)
     };
-    WebviewWindowBuilder::new(handle, "main", url)
+    let builder = WebviewWindowBuilder::new(handle, "main", url)
         .title(title)
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .initialization_script(updater_script)
         .initialization_script(recovery_bridge_script)
+        .initialization_script(theme_sync_script)
+        .initialization_script(usage_meter_script)
+        .initialization_script(smooth_stream_script)
         .on_navigation(move |destination| {
             if destination.scheme() == "dsh-desktop" {
                 handle_desktop_action(navigation_handle.clone(), destination);
@@ -1628,9 +1940,24 @@ fn build_main_window(
                     .open_url(destination.as_str(), None::<&str>);
             }
             false
-        })
+        });
+    #[cfg(target_os = "macos")]
+    let builder = if recovery {
+        builder.title_bar_style(tauri::TitleBarStyle::Transparent)
+    } else {
+        builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+    };
+    let window = builder
         .build()
         .map_err(|error| format!("failed to create desktop window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show desktop window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus desktop window: {error}"))?;
     println!("[dsh] window created");
     Ok(())
 }
@@ -2406,11 +2733,13 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        detected_plugin, ensure_desktop_settings_module_link, installed_plugins, parse_readiness,
-        pending_change_outcome, plugin_profile_state, plugin_state_changes,
-        plugin_state_fingerprint, redact_startup_line, resolve_modules_directory,
-        restore_last_known_good, safe_profile_manifest, same_file, validate_plugin_spec,
-        without_cli_path_block, write_profile_snapshot, CLI_PATH_BLOCK,
+        desktop_preferences_path, detected_plugin, ensure_desktop_settings_module_link,
+        installed_plugins, parse_readiness, pending_change_outcome, plugin_profile_state,
+        plugin_state_changes, plugin_state_fingerprint, read_desktop_preferences,
+        redact_startup_line, resolve_modules_directory, restore_last_known_good,
+        safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
+        validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
+        write_smooth_stream_preference, CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -2429,6 +2758,69 @@ mod tests {
         ] {
             assert!(parse_readiness(line).is_none(), "accepted {line}");
         }
+    }
+
+    #[test]
+    fn extracts_only_recent_committed_provider_usage_for_the_title_bar() {
+        let event = serde_json::json!({
+            "type": "assistant/message",
+            "seq": 42,
+            "time": 1_800_000,
+            "data": {
+                "message": {
+                    "id": "message-1",
+                    "role": "assistant",
+                    "content": [],
+                    "source": {
+                        "kind": "model",
+                        "provider": "deepseek-official",
+                        "model": "deepseek-v4-flash"
+                    }
+                },
+                "usage": {
+                    "inputTokens": 100,
+                    "outputTokens": 20,
+                    "cacheReadTokens": 400
+                }
+            }
+        });
+        let record = usage_record_from_event(&event, 1_700_000).unwrap();
+        assert_eq!(record["id"], "message-1");
+        assert_eq!(record["provider"], "deepseek-official");
+        assert_eq!(record["usage"]["cacheReadTokens"], 400);
+        assert_eq!(record["usage"]["cacheWriteTokens"], 0);
+        assert!(usage_record_from_event(&event, 1_900_000).is_none());
+        assert!(usage_record_from_event(
+            &serde_json::json!({ "type": "assistant/chunk", "time": 1_800_000 }),
+            1_700_000
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn persists_the_default_on_smooth_stream_preference_outside_the_dsh_profile() {
+        assert!(smooth_stream_enabled_from(&serde_json::json!({})));
+        assert!(smooth_stream_enabled_from(
+            &serde_json::json!({ "smoothStreamEnabled": true })
+        ));
+        assert!(!smooth_stream_enabled_from(
+            &serde_json::json!({ "smoothStreamEnabled": false })
+        ));
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-smooth-stream-test-{}-{unique}",
+            std::process::id()
+        ));
+        let path = desktop_preferences_path(&dsh_home);
+        write_smooth_stream_preference(&path, false).unwrap();
+        let stored = read_desktop_preferences(&path).unwrap();
+        assert!(!smooth_stream_enabled_from(&stored));
+        assert!(!dsh_home.join("profiles/web").exists());
+        fs::remove_dir_all(dsh_home).unwrap();
     }
 
     #[test]
@@ -2474,6 +2866,27 @@ mod tests {
             "package name",
         ] {
             assert!(validate_plugin_spec(spec).is_err(), "accepted {spec}");
+        }
+    }
+
+    #[test]
+    fn extracts_plugin_spec_from_documented_install_command() {
+        assert_eq!(
+            validate_plugin_spec("dsh plugin --profile web add github:owner/example-plugin")
+                .unwrap(),
+            "github:owner/example-plugin"
+        );
+        assert_eq!(
+            validate_plugin_spec("dsh.exe plugin --profile=web add github:owner/repo").unwrap(),
+            "github:owner/repo"
+        );
+
+        for command in [
+            "dsh plugin --profile tui add github:owner/repo",
+            "dsh plugin --profile web remove dsh-plugin",
+            "dsh plugin --profile web add github:owner/repo --global",
+        ] {
+            assert!(validate_plugin_spec(command).is_err(), "accepted {command}");
         }
     }
 

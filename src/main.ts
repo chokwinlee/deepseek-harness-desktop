@@ -1,7 +1,13 @@
 import { createRequire } from 'node:module'
+import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, Menu, shell, type MenuItemConstructorOptions } from 'electron'
+import {
+  readDesktopPreferences,
+  smoothStreamEnabledFrom,
+  writeSmoothStreamPreference,
+} from './desktop-preferences.js'
 import { HarnessSupervisor } from './harness-supervisor.js'
 import { suppressUpstreamWelcomeNotice } from './upstream-onboarding.js'
 
@@ -10,6 +16,9 @@ const APP_NAME = 'DeepSeek Harness Desktop'
 // macOS). The placeholder is replaced with the app's own version before
 // injection; see src/updater.js for what the script does.
 const UPDATER_SCRIPT_RELATIVE = join('src', 'updater.js')
+const SMOOTH_STREAM_SCRIPT_RELATIVE = join('src', 'smooth-stream.js')
+const DESKTOP_PREFERENCES_FILE = 'desktop-preferences.json'
+const DESKTOP_ACTION_TOKEN = randomBytes(16).toString('hex')
 const LOADING_PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -80,6 +89,54 @@ function isLoadingPage(rawUrl: string): boolean {
   return harnessUrl === undefined && rawUrl.startsWith('data:text/html;charset=utf-8,')
 }
 
+function desktopPreferencesPath(): string {
+  const configured = process.env.DSH_HOME?.trim()
+  const dshHome = configured ? configured : join(app.getPath('home'), '.dsh')
+  return join(dshHome, DESKTOP_PREFERENCES_FILE)
+}
+
+function parseSmoothStreamAction(rawUrl: string): boolean | undefined {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== 'dsh-desktop:' || url.hostname !== 'action') return undefined
+    if (url.pathname !== '/set-smooth-stream') return undefined
+    if (url.searchParams.get('token') !== DESKTOP_ACTION_TOKEN) return undefined
+    const enabled = url.searchParams.get('enabled')
+    if (enabled === '1') return true
+    if (enabled === '0') return false
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function emitSmoothStreamSetting(
+  window: BrowserWindow,
+  type: 'smooth-stream-setting' | 'smooth-stream-setting-error',
+  payload: { enabled: boolean, message?: string },
+): Promise<void> {
+  if (window.isDestroyed()) return
+  const detail = JSON.stringify({ type, payload })
+  await window.webContents.executeJavaScript(
+    `window.dispatchEvent(new CustomEvent('dsh-desktop-event', { detail: ${detail} }))`,
+    true,
+  )
+}
+
+async function handleSmoothStreamAction(window: BrowserWindow, enabled: boolean): Promise<void> {
+  const path = desktopPreferencesPath()
+  try {
+    await writeSmoothStreamPreference(path, enabled)
+    await emitSmoothStreamSetting(window, 'smooth-stream-setting', { enabled })
+  } catch (error) {
+    const current = smoothStreamEnabledFrom(await readDesktopPreferences(path).catch(() => ({})))
+    await emitSmoothStreamSetting(window, 'smooth-stream-setting-error', {
+      enabled: current,
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 async function openExternal(rawUrl: string): Promise<void> {
   if (isExternalUrl(rawUrl)) await shell.openExternal(rawUrl)
 }
@@ -106,6 +163,12 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
+    const smoothStreamEnabled = parseSmoothStreamAction(url)
+    if (smoothStreamEnabled !== undefined) {
+      event.preventDefault()
+      void handleSmoothStreamAction(window, smoothStreamEnabled)
+      return
+    }
     if (isHarnessPage(url) || isLoadingPage(url)) return
     event.preventDefault()
     void openExternal(url)
@@ -153,6 +216,25 @@ async function injectUpdater(): Promise<void> {
   }
 }
 
+/** Inject the built-in streaming polish with its native, default-on preference. */
+async function injectSmoothStream(): Promise<void> {
+  if (mainWindow === undefined) return
+  try {
+    const [rawScript, preferences] = await Promise.all([
+      readFile(join(app.getAppPath(), SMOOTH_STREAM_SCRIPT_RELATIVE), 'utf8'),
+      readDesktopPreferences(desktopPreferencesPath()),
+    ])
+    const script = rawScript
+      .split('__DSH_SMOOTH_STREAM_ENABLED__')
+      .join(String(smoothStreamEnabledFrom(preferences)))
+      .split('__DSH_ACTION_TOKEN__')
+      .join(DESKTOP_ACTION_TOKEN)
+    await mainWindow.webContents.executeJavaScript(script, true)
+  } catch (error) {
+    console.error('[dsh] failed to inject smooth streaming:', error)
+  }
+}
+
 async function showHarness(): Promise<void> {
   mainWindow ??= createWindow()
   if (harnessUrl === undefined) {
@@ -161,6 +243,7 @@ async function showHarness(): Promise<void> {
   }
   await mainWindow.loadURL(harnessUrl)
   await injectUpdater()
+  await injectSmoothStream()
   mainWindow.show()
   mainWindow.focus()
 }
