@@ -156,6 +156,18 @@ struct RemoteRuntimeState {
     pairing_url: String,
     qr_svg: String,
     error: String,
+    clear_error_when_tailscale_ready: bool,
+}
+
+impl RemoteRuntimeState {
+    fn clear_recovered_transport_error(&mut self, tailscale_ready: bool) {
+        if tailscale_ready && self.clear_error_when_tailscale_ready && !self.enabled && !self.busy {
+            self.phase = "off".into();
+            self.endpoint.clear();
+            self.error.clear();
+            self.clear_error_when_tailscale_ready = false;
+        }
+    }
 }
 
 impl Default for RecoveryState {
@@ -1777,12 +1789,15 @@ fn emit_bridge_event(handle: &tauri::AppHandle, event: &str, payload: serde_json
 }
 
 fn remote_status_value() -> serde_json::Value {
-    let state = REMOTE_STATE
-        .lock()
-        .map(|state| state.clone())
-        .unwrap_or_default();
     let installed = remote::resolve_tailscale().is_some();
     let inspected = remote::inspect_tailscale();
+    let state = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            state.clear_recovered_transport_error(inspected.is_ok());
+            state.clone()
+        })
+        .unwrap_or_default();
     let (backend_state, magic_dns, https_ready, detected_dns, inspection_error) =
         match inspected.as_ref() {
             Ok(info) => (
@@ -1863,10 +1878,12 @@ fn start_remote_serve_monitor(handle: tauri::AppHandle, generation: u64) {
                 if REMOTE_SERVE_GENERATION.load(Ordering::SeqCst) != generation {
                     return;
                 }
+                let clear_error_when_tailscale_ready = remote::inspect_tailscale().is_err();
                 deactivate_remote_transport(
                     Some(format!(
                         "Tailscale Serve 已退出（{exit}），Remote 已自动关闭。"
                     )),
+                    clear_error_when_tailscale_ready,
                     &handle,
                 );
                 return;
@@ -1875,6 +1892,7 @@ fn start_remote_serve_monitor(handle: tauri::AppHandle, generation: u64) {
             Err(error) => {
                 deactivate_remote_transport(
                     Some(format!("无法监控 Tailscale Serve：{error}")),
+                    false,
                     &handle,
                 );
                 return;
@@ -1889,7 +1907,11 @@ fn set_remote_trusted_host(value: Option<String>) {
     }
 }
 
-fn deactivate_remote_transport(error: Option<String>, handle: &tauri::AppHandle) {
+fn deactivate_remote_transport(
+    error: Option<String>,
+    clear_error_when_tailscale_ready: bool,
+    handle: &tauri::AppHandle,
+) {
     stop_remote_serve_process();
     REMOTE_DESIRED.store(false, Ordering::SeqCst);
     set_remote_trusted_host(None);
@@ -1901,10 +1923,12 @@ fn deactivate_remote_transport(error: Option<String>, handle: &tauri::AppHandle)
         if let Some(error) = error {
             state.phase = "error".into();
             state.error = error;
+            state.clear_error_when_tailscale_ready = clear_error_when_tailscale_ready;
         } else {
             state.phase = "off".into();
             state.error.clear();
             state.endpoint.clear();
+            state.clear_error_when_tailscale_ready = false;
         }
     }
     emit_remote_status(handle);
@@ -1954,6 +1978,7 @@ fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Res
         state.pairing_url = pairing_url;
         state.qr_svg = qr_svg;
         state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
     }
     start_remote_serve_monitor(handle.clone(), generation);
     emit_remote_status(handle);
@@ -2011,6 +2036,7 @@ fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
         state.enabled = false;
         state.dns_name = info.dns_name.clone();
         state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
     }
     let trusted_host = format!("{}:{}", info.dns_name, remote::REMOTE_PORT);
     set_remote_trusted_host(Some(trusted_host));
@@ -2045,6 +2071,7 @@ fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
         state.phase = "stopping".into();
         state.busy = true;
         state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
     }
     stop_remote_serve_process();
     let serve_stop_error = remote::inspect_tailscale()
@@ -2062,6 +2089,7 @@ fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
         state.pairing_url.clear();
         state.qr_svg.clear();
         state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
     }
     emit_remote_status(&handle);
     match serve_stop_error {
@@ -2080,6 +2108,7 @@ fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
                 state.busy = true;
                 state.phase = if enable { "starting" } else { "stopping" }.into();
                 state.error.clear();
+                state.clear_error_when_tailscale_ready = false;
                 false
             }
         })
@@ -2104,6 +2133,7 @@ fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
                 state.phase = "error".into();
                 state.busy = false;
                 state.error = error.clone();
+                state.clear_error_when_tailscale_ready = false;
             }
             emit_bridge_event(
                 &handle,
@@ -2803,6 +2833,7 @@ fn start_child_monitor(
                     if REMOTE_DESIRED.load(Ordering::SeqCst) {
                         deactivate_remote_transport(
                             Some("Harness 已退出，Remote 已自动关闭。".into()),
+                            false,
                             &handle,
                         );
                     }
@@ -2897,7 +2928,7 @@ fn register_harness(
     start_child_monitor(handle.clone(), generation, mode, tail);
     if mode == LaunchMode::Normal && REMOTE_DESIRED.load(Ordering::SeqCst) {
         if let Err(error) = sync_remote_serve(handle, url) {
-            deactivate_remote_transport(Some(error), handle);
+            deactivate_remote_transport(Some(error), false, handle);
         }
     }
     println!("[dsh] harness registered under supervisor (generation {generation})");
@@ -3402,8 +3433,32 @@ mod tests {
         resolve_modules_directory, restore_last_known_good, safe_profile_manifest, same_file,
         smooth_stream_enabled_from, usage_record_from_event, validate_plugin_spec,
         without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
-        CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
+        RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT,
+        LEGACY_CLI_PATH_BLOCK,
     };
+
+    #[test]
+    fn clears_only_recovered_transient_remote_errors() {
+        let mut state = RemoteRuntimeState {
+            phase: "error".into(),
+            error: "Tailscale Serve exited".into(),
+            clear_error_when_tailscale_ready: true,
+            ..RemoteRuntimeState::default()
+        };
+        state.clear_recovered_transport_error(false);
+        assert_eq!(state.phase, "error");
+        assert!(!state.error.is_empty());
+
+        state.clear_recovered_transport_error(true);
+        assert_eq!(state.phase, "off");
+        assert!(state.error.is_empty());
+        assert!(!state.clear_error_when_tailscale_ready);
+
+        state.phase = "error".into();
+        state.error = "Port conflict".into();
+        state.clear_recovered_transport_error(true);
+        assert_eq!(state.error, "Port conflict");
+    }
 
     #[test]
     fn accepts_only_explicit_loopback_readiness_urls() {
