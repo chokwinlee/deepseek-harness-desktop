@@ -10,14 +10,14 @@
 - 扫描 `dshremote://connect?url=...` 二维码或手动输入 `.ts.net` 地址；
 - 连接前的 HTTPS、域名和可达性检查；
 - 本地保存多台电脑；
-- 使用同源受限的 `WKWebView` 复用官方 Harness UI；
+- 使用同源受限的 `WKWebView` 复用 Harness 会话运行时，并提供手机优先的会话抽屉、单列消息流、底部输入区和详情底部面板；
 - 断线提示、重新连接和前后台恢复；
 - 非 Harness 链接转交系统浏览器。
 - macOS Desktop 设置中的一键开启/关闭 Remote；
 - 精确的 `--trusted-host`、受监督的前台 `tailscale serve` 与退出清理；
 - 本地二维码和 `dshremote://` 深链配对，不经过项目方服务器。
 
-macOS + iOS 模拟器已完成真实 Tailnet HTTPS 端到端验证：Desktop 启动 Serve，iOS 保存主机并在 `WKWebView` 中加载 Harness。物理 iPhone、蜂窝网络、完整 Prompt/审批交互和 Windows Host 仍需按方案中的验收门槛逐项验证，因此当前仍标记为实验性 MVP。
+macOS + iOS 已完成真实 Tailnet HTTPS 连接验证；模拟器也已完成手机布局、Prompt、工具调用和流式响应验证。蜂窝网络、完整审批交互和 Windows Host 仍需按方案中的验收门槛逐项验证，因此当前仍标记为实验性 MVP。
 
 ## 运行要求
 

@@ -6,11 +6,25 @@ struct RemoteBrowserState: Equatable {
     var isLoading = true
     var progress = 0.0
     var errorMessage: String?
+    var sessionTitle: String?
+    var isMobileAdaptationReady = false
+}
+
+enum RemoteBrowserAction: String {
+    case toggleSidebar
+    case newSession
+    case reload
+}
+
+struct RemoteBrowserCommand: Equatable {
+    let id = UUID()
+    let action: RemoteBrowserAction
 }
 
 struct RemoteBrowserView: UIViewRepresentable {
     let baseURL: URL
     let reloadID: UUID
+    let command: RemoteBrowserCommand?
     @Binding var state: RemoteBrowserState
 
     func makeCoordinator() -> Coordinator {
@@ -22,6 +36,16 @@ struct RemoteBrowserView: UIViewRepresentable {
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.add(context.coordinator, name: Coordinator.stateMessageName)
+
+        if let scriptURL = Bundle.main.url(forResource: "RemoteMobileAdaptation", withExtension: "js"),
+           let script = try? String(contentsOf: scriptURL, encoding: .utf8) {
+            configuration.userContentController.addUserScript(
+                WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+            )
+        } else {
+            assertionFailure("RemoteMobileAdaptation.js is missing from the app bundle")
+        }
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -38,18 +62,28 @@ struct RemoteBrowserView: UIViewRepresentable {
             context.coordinator.reloadID = reloadID
             webView.reload()
         }
+        if let command, context.coordinator.lastCommandID != command.id {
+            context.coordinator.lastCommandID = command.id
+            webView.evaluateJavaScript(
+                "window.__dshRemoteMobile?.command('\(command.action.rawValue)')"
+            )
+        }
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
         webView.stopLoading()
         webView.navigationDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.stateMessageName)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        static let stateMessageName = "dshRemoteState"
+
         private let baseURL: URL
         var state: Binding<RemoteBrowserState>
         var reloadID: UUID
+        var lastCommandID: UUID?
         private var progressObservation: NSKeyValueObservation?
 
         init(baseURL: URL, state: Binding<RemoteBrowserState>, reloadID: UUID) {
@@ -80,6 +114,25 @@ struct RemoteBrowserView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             state.wrappedValue.isLoading = false
             state.wrappedValue.progress = 1
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == Self.stateMessageName,
+                  let payload = message.body as? [String: Any] else {
+                return
+            }
+
+            Task { @MainActor in
+                if let title = payload["title"] as? String, !title.isEmpty {
+                    self.state.wrappedValue.sessionTitle = title
+                } else {
+                    self.state.wrappedValue.sessionTitle = nil
+                }
+                self.state.wrappedValue.isMobileAdaptationReady = payload["ready"] as? Bool ?? false
+            }
         }
 
         func webView(
