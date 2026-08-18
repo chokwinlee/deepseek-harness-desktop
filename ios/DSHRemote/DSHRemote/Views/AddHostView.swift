@@ -16,7 +16,6 @@ struct AddHostView: View {
             Form {
                 Section {
                     TextField("例如 MacBook Pro", text: $name)
-                        .textContentType(.deviceName)
 
                     HStack {
                         TextField("https://电脑名.tailnet.ts.net:8443", text: $address)
