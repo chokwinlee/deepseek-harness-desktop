@@ -9,6 +9,7 @@ interface RemoteTestApi {
   copyFor: (language: 'zh' | 'en') => Record<string, string>
   languageFromTag: (tag: string) => 'zh' | 'en'
   normalizeStatus: (value?: Record<string, unknown>) => Record<string, unknown>
+  shouldPollStatus: (value: Record<string, unknown> | undefined, settingVisible: boolean) => boolean
 }
 
 async function loadTestApi(): Promise<RemoteTestApi> {
@@ -67,4 +68,16 @@ test('Remote copy follows the active DSH language', async () => {
 test('Remote pairing layer preserves an explicit hidden state', async () => {
   const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
   assert.match(source, /:host\(\[hidden\]\)\{display:none\}/)
+})
+
+test('Remote polls Tailscale while its settings row is visible', async () => {
+  const api = await loadTestApi()
+  assert.equal(api.shouldPollStatus(undefined, false), false)
+  assert.equal(api.shouldPollStatus({ backendState: 'Stopped', error: 'not connected' }, true), true)
+  assert.equal(api.shouldPollStatus({
+    backendState: 'Running',
+    magicDNS: true,
+    httpsReady: true,
+  }, true), true)
+  assert.equal(api.shouldPollStatus({ busy: true }, true), false)
 })

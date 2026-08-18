@@ -15,6 +15,7 @@
   const SETTING_ID = 'dsh-desktop-remote-setting'
   const STYLE_ID = 'dsh-desktop-remote-style'
   const LAYER_ID = 'dsh-desktop-remote-layer'
+  const STATUS_POLL_INTERVAL_MS = 2000
   const ALLOWED_ACTIONS = new Set(['remote-status', 'remote-open-https', 'remote-enable', 'remote-disable'])
 
   function languageFromTag(tag) {
@@ -44,6 +45,11 @@
       error: String(status.error || ''),
       port: Number(status.port) || 8443,
     })
+  }
+
+  function shouldPollStatus(value, settingVisible) {
+    const next = normalizeStatus(value)
+    return Boolean(settingVisible) && !next.busy
   }
 
   function copyFor(language) {
@@ -96,7 +102,13 @@
 
   const testGlobal = typeof globalThis === 'undefined' ? null : globalThis
   if (testGlobal?.[TEST_FLAG] === true) {
-    testGlobal[TEST_API] = Object.freeze({ actionUrl, copyFor, languageFromTag, normalizeStatus })
+    testGlobal[TEST_API] = Object.freeze({
+      actionUrl,
+      copyFor,
+      languageFromTag,
+      normalizeStatus,
+      shouldPollStatus,
+    })
     return
   }
 
@@ -323,7 +335,11 @@
   }
 
   function refreshStatus() {
-    if (document.visibilityState === 'visible') request('remote-status')
+    if (document.visibilityState === 'visible' && !status.busy) request('remote-status')
+  }
+
+  function pollStatus() {
+    if (shouldPollStatus(status, settingRow?.isConnected)) refreshStatus()
   }
 
   function start() {
@@ -332,6 +348,7 @@
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['lang'] })
     window.addEventListener('focus', refreshStatus)
     document.addEventListener('visibilitychange', refreshStatus)
+    window.setInterval(pollStatus, STATUS_POLL_INTERVAL_MS)
     mountSetting()
     window.setTimeout(refreshStatus, 0)
   }
