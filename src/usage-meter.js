@@ -564,9 +564,9 @@
     style.dataset.dshUsageMeter = 'true'
     style.textContent = `
       body.dsh-native-titlebar-overlay { box-sizing: border-box !important; padding-top: 32px !important; }
-      .dsh-usage-meter { --meter-bg: #f6f7f9; --meter-layer: #fff; --meter-subtle: #f2f4f7; --meter-text: #22252b; --meter-muted: #66707c; --meter-border: rgba(20,26,35,.14); --meter-accent: #3b6ff5; position: fixed; z-index: 2147483646; top: 0; left: 0; right: 0; height: 32px; display: flex; justify-content: center; color: var(--dsw-alias-fg-default,var(--meter-text)); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size: 11px; line-height: 1; text-rendering: optimizeLegibility; -webkit-app-region: no-drag; pointer-events: none; }
+      .dsh-usage-meter { --meter-bg: #f6f7f9; --meter-layer: #fff; --meter-subtle: #f2f4f7; --meter-text: #22252b; --meter-muted: #66707c; --meter-border: rgba(20,26,35,.14); --meter-accent: #3b6ff5; position: fixed; z-index: 2147483646; top: 0; left: 0; right: 0; height: 32px; display: flex; justify-content: center; color: var(--dsw-alias-fg-default,var(--meter-text)); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size: 11px; line-height: 1; text-rendering: optimizeLegibility; -webkit-app-region: drag; app-region: drag; pointer-events: auto; user-select: none; -webkit-user-select: none; }
       body[data-ds-dark-theme] .dsh-usage-meter { --meter-bg: #24272d; --meter-layer: #202329; --meter-subtle: #292d34; --meter-text: #f1f3f6; --meter-muted: #aeb4bf; --meter-border: rgba(255,255,255,.14); --meter-accent: #7d9cff; }
-      .dsh-usage-summary { box-sizing: border-box; max-width: calc(100vw - 96px); height: 22px; margin-top: 5px; padding: 0 10px; display: flex; align-items: center; gap: 8px; overflow: hidden; border: 1px solid var(--meter-border); border-radius: 8px; color: inherit; background: var(--meter-bg); box-shadow: 0 1px 0 rgba(255,255,255,.12) inset; cursor: default; white-space: nowrap; font: inherit; font-weight: 500; letter-spacing: .01em; pointer-events: auto; }
+      .dsh-usage-summary { box-sizing: border-box; max-width: calc(100vw - 96px); height: 22px; margin-top: 5px; padding: 0 10px; display: flex; align-items: center; gap: 8px; overflow: hidden; border: 1px solid var(--meter-border); border-radius: 8px; color: inherit; background: var(--meter-bg); box-shadow: 0 1px 0 rgba(255,255,255,.12) inset; cursor: default; white-space: nowrap; font: inherit; font-weight: 500; letter-spacing: .01em; -webkit-app-region: no-drag; app-region: no-drag; pointer-events: auto; }
       .dsh-usage-summary:hover, .dsh-usage-summary[aria-expanded="true"] { border-color: color-mix(in srgb,var(--meter-accent) 42%,var(--meter-border)); background: var(--meter-layer); }
       .dsh-usage-summary:focus-visible { outline: 2px solid color-mix(in srgb,var(--meter-accent) 58%,transparent); outline-offset: 1px; }
       .dsh-usage-summary small { color: var(--meter-muted); font-size: 9px; }
@@ -580,7 +580,7 @@
       .dsh-usage-live i.is-running { background: #32b36b; box-shadow: 0 0 0 2px color-mix(in srgb,#32b36b 16%,transparent); }
       .dsh-usage-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--meter-accent); animation: dsh-usage-pulse 1.25s ease-in-out infinite; }
       @keyframes dsh-usage-pulse { 50% { opacity: .3; transform: scale(.75); } }
-      .dsh-usage-popover { position: absolute; top: 34px; left: calc(50% - 174px); width: 348px; box-sizing: border-box; padding: 6px; border: 1px solid var(--meter-border); border-radius: 12px; background: var(--meter-layer); box-shadow: 0 12px 36px rgba(10,16,28,.15),0 2px 7px rgba(10,16,28,.07); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 130ms ease,visibility 130ms; color: inherit; font-size: 11px; line-height: 1.3; }
+      .dsh-usage-popover { position: absolute; top: 34px; left: calc(50% - 174px); width: 348px; box-sizing: border-box; padding: 6px; border: 1px solid var(--meter-border); border-radius: 12px; background: var(--meter-layer); box-shadow: 0 12px 36px rgba(10,16,28,.15),0 2px 7px rgba(10,16,28,.07); opacity: 0; visibility: hidden; -webkit-app-region: no-drag; app-region: no-drag; pointer-events: none; transition: opacity 130ms ease,visibility 130ms; color: inherit; font-size: 11px; line-height: 1.3; }
       .dsh-usage-popover[data-open="true"] { opacity: 1; visibility: visible; pointer-events: auto; }
       .dsh-usage-popover-head { display: grid; grid-template-columns: 1.2fr .8fr; overflow: hidden; border-radius: 8px; background: var(--meter-subtle); box-shadow: 0 0 0 1px var(--meter-border) inset; }
       .dsh-usage-popover-head > div { display: flex; align-items: baseline; justify-content: space-between; padding: 8px 10px; }
@@ -617,6 +617,7 @@
     document.body.classList.add('dsh-native-titlebar-overlay')
     host = document.createElement('div')
     host.className = 'dsh-usage-meter'
+    host.setAttribute('data-tauri-drag-region', '')
     host.innerHTML = `
       <button class="dsh-usage-summary" type="button" aria-haspopup="dialog" aria-expanded="false">
         <span class="dsh-usage-pulse"></span><span>${t.loading}</span>

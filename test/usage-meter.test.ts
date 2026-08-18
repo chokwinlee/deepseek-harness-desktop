@@ -128,3 +128,20 @@ test('keeps unmatched models unpriced and sums authoritative running-session thr
   assert.doesNotMatch(source, /未匹配模型不会按 0 元计算/)
   assert.doesNotMatch(source, /backdrop-filter/)
 })
+
+test('keeps the title-bar background draggable without swallowing usage controls', async () => {
+  const { source } = await loadUsageMeter()
+  const capability = JSON.parse(await readFile(
+    join(process.cwd(), 'src-tauri', 'capabilities', 'main-window-drag.json'),
+    'utf8',
+  ))
+
+  assert.match(source, /host\.setAttribute\('data-tauri-drag-region', ''\)/)
+  assert.match(source, /\.dsh-usage-meter \{[^}]*-webkit-app-region: drag;[^}]*pointer-events: auto;/)
+  assert.match(source, /\.dsh-usage-summary \{[^}]*-webkit-app-region: no-drag;[^}]*pointer-events: auto;/)
+  assert.match(source, /\.dsh-usage-popover \{[^}]*-webkit-app-region: no-drag;[^}]*pointer-events: none;/)
+  assert.doesNotMatch(source, /\.dsh-usage-meter \{[^}]*-webkit-app-region: no-drag;/)
+  assert.deepEqual(capability.windows, ['main'])
+  assert.deepEqual(capability.remote.urls, ['http://127.0.0.1:*'])
+  assert.deepEqual(capability.permissions, ['core:window:allow-start-dragging'])
+})
