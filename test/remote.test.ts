@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import test from 'node:test'
+import { runInNewContext } from 'node:vm'
+
+interface RemoteTestApi {
+  actionUrl: (action: string, token?: string) => string
+  copyFor: (language: 'zh' | 'en') => Record<string, string>
+  languageFromTag: (tag: string) => 'zh' | 'en'
+  normalizeStatus: (value?: Record<string, unknown>) => Record<string, unknown>
+}
+
+async function loadTestApi(): Promise<RemoteTestApi> {
+  const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
+  const context: Record<string, unknown> = {
+    URLSearchParams,
+    __DSH_REMOTE_TEST__: true,
+  }
+  runInNewContext(source, context)
+  return context.__DSH_REMOTE_TEST_API__ as RemoteTestApi
+}
+
+test('Remote actions use the tokenized Desktop bridge', async () => {
+  const api = await loadTestApi()
+  assert.equal(
+    api.actionUrl('remote-enable', 'desktop-token'),
+    'dsh-desktop://action/remote-enable?token=desktop-token',
+  )
+  assert.equal(
+    api.actionUrl('remote-disable', 'desktop-token'),
+    'dsh-desktop://action/remote-disable?token=desktop-token',
+  )
+  assert.equal(
+    api.actionUrl('remote-open-https', 'desktop-token'),
+    'dsh-desktop://action/remote-open-https?token=desktop-token',
+  )
+  assert.throws(() => api.actionUrl('serve-reset', 'desktop-token'))
+})
+
+test('Remote state defaults closed and normalizes native payloads', async () => {
+  const api = await loadTestApi()
+  const initial = api.normalizeStatus()
+  assert.equal(initial.enabled, false)
+  assert.equal(initial.busy, false)
+  assert.equal(initial.port, 8443)
+
+  const active = api.normalizeStatus({
+    enabled: true,
+    httpsReady: true,
+    url: 'https://dsh-mac.example.ts.net:8443/',
+    pairingURL: 'dshremote://connect?url=example',
+  })
+  assert.equal(active.enabled, true)
+  assert.equal(active.httpsReady, true)
+  assert.equal(active.url, 'https://dsh-mac.example.ts.net:8443/')
+})
+
+test('Remote copy follows the active DSH language', async () => {
+  const api = await loadTestApi()
+  assert.equal(api.languageFromTag('zh-CN'), 'zh')
+  assert.equal(api.languageFromTag('en-US'), 'en')
+  assert.equal(api.copyFor('zh').title, '手机 Remote')
+  assert.equal(api.copyFor('en').title, 'Mobile Remote')
+})
+
+test('Remote pairing layer preserves an explicit hidden state', async () => {
+  const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
+  assert.match(source, /:host\(\[hidden\]\)\{display:none\}/)
+})

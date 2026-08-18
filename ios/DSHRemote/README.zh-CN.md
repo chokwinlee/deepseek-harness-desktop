@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-已经完成的客户端能力：
+已经完成的 MVP 能力：
 
 - 原生 SwiftUI 主机列表与配对流程；
 - 扫描 `dshremote://connect?url=...` 二维码或手动输入 `.ts.net` 地址；
@@ -13,17 +13,20 @@
 - 使用同源受限的 `WKWebView` 复用官方 Harness UI；
 - 断线提示、重新连接和前后台恢复；
 - 非 Harness 链接转交系统浏览器。
+- macOS Desktop 设置中的一键开启/关闭 Remote；
+- 精确的 `--trusted-host`、受监督的前台 `tailscale serve` 与退出清理；
+- 本地二维码和 `dshremote://` 深链配对，不经过项目方服务器。
 
-Desktop 端尚需实现“一键开启 Remote”：查询本机 Tailscale DNS 名、用 `--trusted-host` 重启 Harness、启动受监督的 `tailscale serve`，并显示配对二维码。在该功能接通前，这个 iOS 工程是可编译的客户端骨架，不应表述为已经完成端到端 Remote。
+macOS + iOS 模拟器已完成真实 Tailnet HTTPS 端到端验证：Desktop 启动 Serve，iOS 保存主机并在 `WKWebView` 中加载 Harness。物理 iPhone、蜂窝网络、完整 Prompt/审批交互和 Windows Host 仍需按方案中的验收门槛逐项验证，因此当前仍标记为实验性 MVP。
 
 ## 运行要求
 
 - Xcode 16 或更高版本；
 - iOS 17 或更高版本；
 - iPhone 与电脑均安装 Tailscale，并登录同一个 Tailnet；
-- 电脑端已按 [`docs/IOS_REMOTE_PLAN.zh-CN.md`](../../docs/IOS_REMOTE_PLAN.zh-CN.md) 暴露专用的 Tailnet HTTPS 地址。
+- 在 Desktop 的“设置 → 通用 → 手机 Remote”中开启 Remote；首次使用需按提示授权 Tailnet HTTPS。
 
-在 Xcode 中打开 `DSHRemote.xcodeproj`，选择开发团队和 iPhone 后运行。工程没有第三方 iOS 依赖。
+在 Xcode 中打开 `DSHRemote.xcodeproj`，选择开发团队和 iPhone 后运行。Desktop 会显示二维码；也可以在 iOS App 中手动输入 Desktop 显示的 `.ts.net:8443` 地址。工程没有第三方 iOS 依赖。
 
 ## 安全边界
 

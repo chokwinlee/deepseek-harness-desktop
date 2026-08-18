@@ -14,6 +14,10 @@ flowchart LR
 
 项目方不接触代码、API Key、模型请求、Shell 输出或会话记录，也不承担长连接服务器成本。电脑仍是唯一执行主机；iPhone 只是控制面。
 
+## 当前实现状态
+
+macOS Tauri Remote Host 与 iOS SwiftUI 客户端已经实现，并完成同一 Tailnet 下的真实 HTTPS 模拟器闭环：开启 Remote、生成二维码/深链、保存主机、连接检查以及在 `WKWebView` 中加载 Harness。物理 iPhone、蜂窝网络、完整会话交互和 Windows Electron Host 尚未完成验收；下方“全部通过后才标为可用”的门槛保持不变。
+
 ## 为什么 MVP 先使用 Harness Web UI
 
 当前固定的 `@deepseek-ai/dsh@0.1.0-rc.6` 已经把浏览器控制面和协议实现完整。iOS 第一版用 SwiftUI 管理配对与连接，再用 `WKWebView` 加载官方 UI，可以立即覆盖会话、Prompt、流式输出、Queue/Steer/Cancel、审批和用户问题，而不复制 Agent runtime 或重新实现消息渲染。
