@@ -74,6 +74,21 @@ struct RemoteSessionSummary: Identifiable, Hashable, Sendable {
     let updatedAt: Date
     let running: Bool
     let projectName: String?
+    let projectPath: String?
+}
+
+struct RemoteWorkspaceSummary: Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let path: String
+    let sessionIDs: [String]
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct RemoteWorkspaceSnapshot: Hashable, Sendable {
+    let items: [RemoteWorkspaceSummary]
+    let archivedSessionIDs: Set<String>
 }
 
 struct RemoteConversationSnapshot: Hashable, Sendable {

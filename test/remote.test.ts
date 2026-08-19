@@ -101,3 +101,12 @@ test('Remote polls Tailscale while its settings row is visible', async () => {
   }, true), true)
   assert.equal(api.shouldPollStatus({ busy: true }, true), false)
 })
+
+test('LAN Remote exposes workspace grouping as read-only enrichment', async () => {
+  const source = await readFile(join(process.cwd(), 'scripts', 'lan-remote-proxy.mjs'), 'utf8')
+  assert.match(source, /'\/api\/workspace\.list'/)
+  assert.doesNotMatch(
+    source,
+    /'\/api\/workspace\.(?:create|rename|delete|insertBefore|insertSessionBefore|archiveSession)'/,
+  )
+})

@@ -7,6 +7,7 @@ import { timingSafeEqual } from 'node:crypto'
 const READINESS_MARK = 'dsh lan remote:'
 const ALLOWED_HTTP_PATHS = new Set([
   '/api/host.describe',
+  '/api/workspace.list',
   '/api/session.list',
   '/api/session.history',
   '/api/session.prompt',

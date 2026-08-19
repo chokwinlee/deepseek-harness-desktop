@@ -4,19 +4,26 @@ import Foundation
 @MainActor
 final class RemoteHostViewModel: ObservableObject {
     @Published private(set) var sessions: [RemoteSessionSummary] = []
-    @Published private(set) var description: RemoteHostDescription?
+    @Published private(set) var workspaceSnapshot: RemoteWorkspaceSnapshot?
+    @Published private(set) var archivedSessionIDs: Set<String> = []
+    @Published private(set) var usesDirectoryProjectFallback = false
+    @Published private(set) var isLoadingProjects = false
     @Published private(set) var isLoading = true
     @Published private(set) var errorMessage: String?
     @Published private(set) var lastUpdated: Date?
 
     let client: any HarnessRemoteClient
     private var runningBySession: [String: Bool]?
+    private var refreshGeneration = 0
+    private var workspaceRefreshGeneration = 0
+    private var workspaceRefreshTask: Task<Void, Never>?
 
     init(client: any HarnessRemoteClient) {
         self.client = client
     }
 
     func monitor() async {
+        defer { cancelWorkspaceRefresh() }
         await refresh()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3))
@@ -26,20 +33,75 @@ final class RemoteHostViewModel: ObservableObject {
     }
 
     func refresh(silently: Bool = false) async {
-        if !silently && sessions.isEmpty { isLoading = true }
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        if !silently && sessions.isEmpty && workspaceSnapshot == nil { isLoading = true }
+        if !silently { cancelWorkspaceRefresh() }
+
         do {
-            async let description = client.describe()
-            async let sessions = client.sessions()
-            let (newDescription, newSessions) = try await (description, sessions)
+            let newSessions = try await client.sessions()
+            guard generation == refreshGeneration else { return }
             notifyCompletedSessions(in: newSessions)
-            self.description = newDescription
-            self.sessions = newSessions
+            sessions = newSessions
             lastUpdated = Date()
             errorMessage = nil
+            requestWorkspaceRefresh()
         } catch {
+            guard generation == refreshGeneration else { return }
             errorMessage = error.localizedDescription
+            cancelWorkspaceRefresh()
         }
         isLoading = false
+    }
+
+    private func requestWorkspaceRefresh() {
+        guard workspaceRefreshTask == nil else { return }
+
+        isLoadingProjects = true
+        workspaceRefreshGeneration += 1
+        let generation = workspaceRefreshGeneration
+        let client = client
+        workspaceRefreshTask = Task { [weak self] in
+            let result: Result<RemoteWorkspaceSnapshot, Error>
+            do {
+                result = .success(try await client.workspaces())
+            } catch {
+                result = .failure(error)
+            }
+            self?.finishWorkspaceRefresh(
+                result,
+                generation: generation,
+                wasCancelled: Task.isCancelled
+            )
+        }
+    }
+
+    private func finishWorkspaceRefresh(
+        _ result: Result<RemoteWorkspaceSnapshot, Error>,
+        generation: Int,
+        wasCancelled: Bool
+    ) {
+        guard generation == workspaceRefreshGeneration else { return }
+        workspaceRefreshTask = nil
+        isLoadingProjects = false
+        guard !wasCancelled else { return }
+
+        switch result {
+        case .success(let snapshot):
+            workspaceSnapshot = snapshot
+            archivedSessionIDs = snapshot.archivedSessionIDs
+            usesDirectoryProjectFallback = false
+        case .failure:
+            workspaceSnapshot = nil
+            usesDirectoryProjectFallback = true
+        }
+    }
+
+    private func cancelWorkspaceRefresh() {
+        workspaceRefreshGeneration += 1
+        workspaceRefreshTask?.cancel()
+        workspaceRefreshTask = nil
+        isLoadingProjects = false
     }
 
     private func notifyCompletedSessions(in sessions: [RemoteSessionSummary]) {

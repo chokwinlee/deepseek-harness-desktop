@@ -5,6 +5,7 @@ protocol HarnessRemoteClient: Sendable {
     var isDemo: Bool { get }
 
     func describe() async throws -> RemoteHostDescription
+    func workspaces() async throws -> RemoteWorkspaceSnapshot
     func sessions() async throws -> [RemoteSessionSummary]
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
     func send(_ text: String, to sessionID: String, steer: Bool) async throws
@@ -58,6 +59,28 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         return RemoteHostDescription(version: response.version, attachedSessions: response.attachedSessions)
     }
 
+    func workspaces() async throws -> RemoteWorkspaceSnapshot {
+        let response: WorkspaceListWire = try await call("workspace.list", payload: EmptyPayload())
+        let items = try response.items.map { item in
+            guard let createdAt = Self.parseISO8601Date(item.createdAt),
+                  let updatedAt = Self.parseISO8601Date(item.updatedAt) else {
+                throw HarnessRemoteClientError.invalidResponse
+            }
+            return RemoteWorkspaceSummary(
+                id: item.workspaceId,
+                title: item.title,
+                path: item.path,
+                sessionIDs: item.sessionIds,
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+        }
+        return RemoteWorkspaceSnapshot(
+            items: items,
+            archivedSessionIDs: Set(response.archivedSessionIds)
+        )
+    }
+
     func sessions() async throws -> [RemoteSessionSummary] {
         let response: SessionListWire = try await call("session.list", payload: EmptyPayload())
         return response.items
@@ -65,13 +88,17 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
             .map { item in
                 let title = item.projections?.values["title"]?.stringValue?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let projectName = item.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+                let projectPath = item.cwd.flatMap { path in
+                    path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : path
+                }
+                let projectName = Self.projectName(from: projectPath)
                 return RemoteSessionSummary(
                     id: item.sessionId,
                     title: title.flatMap { $0.isEmpty ? nil : $0 } ?? projectName ?? "未命名任务",
                     updatedAt: Date(timeIntervalSince1970: item.updatedAt / 1_000),
                     running: item.running,
-                    projectName: projectName
+                    projectName: projectName,
+                    projectPath: projectPath
                 )
             }
     }
@@ -292,6 +319,21 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         guard let accessToken else { return }
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     }
+
+    private static func projectName(from path: String?) -> String? {
+        guard let path,
+              !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let components = path
+            .split { $0 == "/" || $0 == "\\" }
+        return components.last.map(String.init)
+    }
+
+    private static func parseISO8601Date(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        return ISO8601DateFormatter().date(from: value)
+    }
 }
 
 actor DemoHarnessRemoteClient: HarnessRemoteClient {
@@ -438,6 +480,23 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         RemoteHostDescription(version: "Offline Demo", attachedSessions: 1)
     }
 
+    func workspaces() async throws -> RemoteWorkspaceSnapshot {
+        let updatedAt = items.last?.time ?? Date()
+        return RemoteWorkspaceSnapshot(
+            items: [
+                RemoteWorkspaceSummary(
+                    id: "review-demo-workspace",
+                    title: "Sample Project",
+                    path: "/Users/demo/Sample Project",
+                    sessionIDs: [sessionID],
+                    createdAt: updatedAt.addingTimeInterval(-3_600),
+                    updatedAt: updatedAt
+                ),
+            ],
+            archivedSessionIDs: []
+        )
+    }
+
     func sessions() async throws -> [RemoteSessionSummary] {
         [
             RemoteSessionSummary(
@@ -445,7 +504,8 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                 title: "登录流程上线检查",
                 updatedAt: items.last?.time ?? Date(),
                 running: running,
-                projectName: "Sample Project"
+                projectName: "Sample Project",
+                projectPath: "/Users/demo/Sample Project"
             ),
         ]
     }
@@ -606,6 +666,18 @@ private struct HostDescriptionWire: Decodable {
 }
 
 private struct SessionListWire: Decodable { let items: [SessionSummaryWire] }
+private struct WorkspaceListWire: Decodable {
+    let items: [WorkspaceSummaryWire]
+    let archivedSessionIds: [String]
+}
+private struct WorkspaceSummaryWire: Decodable {
+    let workspaceId: String
+    let path: String
+    let title: String
+    let sessionIds: [String]
+    let createdAt: String
+    let updatedAt: String
+}
 private struct SessionSummaryWire: Decodable {
     let sessionId: String
     let updatedAt: Double
