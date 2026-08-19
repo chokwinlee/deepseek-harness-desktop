@@ -19,6 +19,8 @@
 		A1000000000000000000000A /* RemoteBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* RemoteBrowserView.swift */; };
 		A1000000000000000000000B /* RemoteSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* RemoteSessionView.swift */; };
 		A1000000000000000000000C /* RemoteMobileAdaptation.js in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* RemoteMobileAdaptation.js */; };
+		A1000000000000000000000D /* RemoteNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* RemoteNotificationManager.swift */; };
+		A1000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +38,8 @@
 		B1000000000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000000000000000000000D /* DSHRemote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DSHRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000E /* RemoteMobileAdaptation.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = RemoteMobileAdaptation.js; sourceTree = "<group>"; };
+		B1000000000000000000000F /* RemoteNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteNotificationManager.swift; sourceTree = "<group>"; };
+		B10000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +66,7 @@
 			children = (
 				B10000000000000000000001 /* DSHRemoteApp.swift */,
 				B1000000000000000000000E /* RemoteMobileAdaptation.js */,
+				B10000000000000000000010 /* Assets.xcassets */,
 				D10000000000000000000003 /* Models */,
 				D10000000000000000000004 /* Services */,
 				D10000000000000000000005 /* Views */,
@@ -84,6 +89,7 @@
 				B10000000000000000000003 /* RemoteEndpointValidator.swift */,
 				B10000000000000000000004 /* RemoteHostStore.swift */,
 				B10000000000000000000005 /* RemoteConnectionVerifier.swift */,
+				B1000000000000000000000F /* RemoteNotificationManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -168,6 +174,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000000C /* RemoteMobileAdaptation.js in Resources */,
+				A1000000000000000000000E /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -189,6 +196,7 @@
 				A10000000000000000000009 /* QRCodeScannerView.swift in Sources */,
 				A1000000000000000000000A /* RemoteBrowserView.swift in Sources */,
 				A1000000000000000000000B /* RemoteSessionView.swift in Sources */,
+				A1000000000000000000000D /* RemoteNotificationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +237,7 @@
 		F10000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -251,6 +260,7 @@
 		F10000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;

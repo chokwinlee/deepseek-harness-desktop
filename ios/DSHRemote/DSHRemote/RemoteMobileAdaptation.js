@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = "4";
+  const VERSION = "6";
   const root = document.documentElement;
 
   if (window.__dshRemoteMobile?.version === VERSION) {
@@ -13,6 +13,7 @@
     closeDetails: /(关闭详情|close details)/i,
     closeSettings: /^(关闭|close)$/i,
     modelID: /(模型 ID|model id)/i,
+    stopGeneration: /^(停止生成|stop generating)$/i,
   };
 
   const isVisible = (element) => {
@@ -706,6 +707,14 @@
   let activeSettingsPanel = null;
   let syncScheduled = false;
   let lastBridgeState = "";
+  const notificationState = {
+    initialized: false,
+    activeTurn: false,
+    runID: null,
+    completionTimer: null,
+    interactionKeys: new Set(),
+    monitoring: false,
+  };
 
   const markComposer = () => {
     const card = document.querySelector("[data-composer-card]");
@@ -738,6 +747,132 @@
     } catch (_) {
       // The browser baseline has no native message bridge.
     }
+  };
+
+  const notificationBridge = () => window.webkit?.messageHandlers?.dshRemoteNotification;
+  const activityBridge = () => window.webkit?.messageHandlers?.dshRemoteActivity;
+
+  const setMonitoring = (active) => {
+    if (notificationState.monitoring === active) return;
+    notificationState.monitoring = active;
+    try {
+      activityBridge()?.postMessage({ active });
+    } catch (_) {
+      // The browser baseline has no native activity bridge.
+    }
+  };
+
+  const forgetMonitoring = () => {
+    notificationState.monitoring = false;
+  };
+
+  const trimmedText = (element, fallback) => {
+    const text = element?.textContent?.replace(/\s+/g, " ").trim();
+    return text ? text.slice(0, 180) : fallback;
+  };
+
+  const currentInteraction = () => {
+    const question = document.querySelector("[data-question-key]");
+    if (isVisible(question)) {
+      const key = question.getAttribute("data-question-key") || "question";
+      return {
+        id: `question:${key}`,
+        body: trimmedText(
+          question.querySelector("h2"),
+          "DeepSeek Harness 有一个问题正在等待你回答。",
+        ),
+      };
+    }
+
+    const approval = document.querySelector("[data-approval-key]");
+    if (isVisible(approval)) {
+      const key = approval.getAttribute("data-approval-key") || "approval";
+      return {
+        id: `approval:${key}`,
+        body: trimmedText(
+          approval.querySelector("[data-approval-scroll]"),
+          "DeepSeek Harness 正在等待你确认一项操作。",
+        ),
+      };
+    }
+    return null;
+  };
+
+  const isTurnRunning = () => Boolean(buttonWithLabel(labels.stopGeneration));
+
+  const postNotification = (kind, id, body) => {
+    try {
+      notificationBridge()?.postMessage({ kind, id, body });
+    } catch (_) {
+      // The browser baseline has no native notification bridge.
+    }
+  };
+
+  const completionBody = () => {
+    const title = titleFromPage();
+    return title
+      ? `“${title.slice(0, 80)}” 已完成，可以查看结果。`
+      : "电脑上的 DeepSeek Harness 已完成本次任务。";
+  };
+
+  const cancelCompletion = () => {
+    if (notificationState.completionTimer === null) return;
+    clearTimeout(notificationState.completionTimer);
+    notificationState.completionTimer = null;
+  };
+
+  const scheduleCompletion = () => {
+    if (notificationState.completionTimer !== null) return;
+    notificationState.completionTimer = setTimeout(() => {
+      notificationState.completionTimer = null;
+      if (isTurnRunning() || currentInteraction() || !notificationState.activeTurn) return;
+      const runID = notificationState.runID || `${location.pathname}:${Date.now()}`;
+      postNotification("completed", `completed:${runID}`, completionBody());
+      forgetMonitoring();
+      notificationState.activeTurn = false;
+      notificationState.runID = null;
+    }, 1200);
+  };
+
+  const syncNotifications = () => {
+    if (!notificationBridge() && !activityBridge()) return;
+
+    const interaction = currentInteraction();
+    const running = isTurnRunning();
+    if (!notificationState.initialized) {
+      notificationState.initialized = true;
+      notificationState.activeTurn = running || Boolean(interaction);
+      notificationState.runID = notificationState.activeTurn
+        ? `${location.pathname}:${Date.now()}`
+        : null;
+      if (interaction) notificationState.interactionKeys.add(interaction.id);
+      setMonitoring(running && !interaction);
+      return;
+    }
+
+    if (interaction) {
+      cancelCompletion();
+      notificationState.activeTurn = true;
+      notificationState.runID ||= `${location.pathname}:${Date.now()}`;
+      if (!notificationState.interactionKeys.has(interaction.id)) {
+        notificationState.interactionKeys.add(interaction.id);
+        postNotification("attention", `attention:${interaction.id}`, interaction.body);
+        forgetMonitoring();
+      } else {
+        setMonitoring(false);
+      }
+      return;
+    }
+
+    if (running) {
+      cancelCompletion();
+      notificationState.activeTurn = true;
+      notificationState.runID ||= `${location.pathname}:${Date.now()}`;
+      setMonitoring(true);
+      return;
+    }
+
+    if (notificationState.activeTurn) scheduleCompletion();
   };
 
   const markSettings = () => {
@@ -825,6 +960,7 @@
     chatFlow?.parentElement?.setAttribute("data-dsh-remote-chat-scroll", "");
     markComposer();
     markSettings();
+    syncNotifications();
 
     root.setAttribute(
       "data-dsh-remote-drawer",
@@ -894,6 +1030,9 @@
       "aria-label",
       "class",
       "data-details-collapsed",
+      "data-approval-key",
+      "data-question-key",
+      "data-phase",
       "data-sidebar-collapsed",
       "disabled",
     ],

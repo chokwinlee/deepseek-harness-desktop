@@ -55,9 +55,15 @@ struct RemoteSessionView: View {
             )
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await RemoteNotificationManager.shared.requestAuthorizationIfNeeded()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, browserState.errorMessage != nil {
-                reloadID = UUID()
+            if phase == .active {
+                RemoteNotificationManager.shared.clearDeliveredNotifications()
+                if browserState.errorMessage != nil {
+                    reloadID = UUID()
+                }
             }
         }
     }

@@ -39,6 +39,8 @@ struct RemoteBrowserView: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.add(context.coordinator, name: Coordinator.stateMessageName)
+        configuration.userContentController.add(context.coordinator, name: Coordinator.notificationMessageName)
+        configuration.userContentController.add(context.coordinator, name: Coordinator.activityMessageName)
 
         if let scriptURL = Bundle.main.url(forResource: "RemoteMobileAdaptation", withExtension: "js"),
            let script = try? String(contentsOf: scriptURL, encoding: .utf8) {
@@ -77,10 +79,14 @@ struct RemoteBrowserView: UIViewRepresentable {
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.stateMessageName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.notificationMessageName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.activityMessageName)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         static let stateMessageName = "dshRemoteState"
+        static let notificationMessageName = "dshRemoteNotification"
+        static let activityMessageName = "dshRemoteActivity"
 
         private let baseURL: URL
         var state: Binding<RemoteBrowserState>
@@ -122,10 +128,23 @@ struct RemoteBrowserView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            guard message.name == Self.stateMessageName,
-                  let payload = message.body as? [String: Any] else {
+            guard let payload = message.body as? [String: Any] else {
                 return
             }
+
+            if message.name == Self.notificationMessageName {
+                if let event = RemoteNotificationEvent(payload: payload) {
+                    RemoteNotificationManager.shared.deliver(event)
+                }
+                return
+            }
+
+            if message.name == Self.activityMessageName {
+                RemoteNotificationManager.shared.setMonitoringActive(payload["active"] as? Bool ?? false)
+                return
+            }
+
+            guard message.name == Self.stateMessageName else { return }
 
             Task { @MainActor in
                 if let title = payload["title"] as? String, !title.isEmpty {
