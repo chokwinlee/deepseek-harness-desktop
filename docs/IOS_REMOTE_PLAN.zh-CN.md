@@ -2,27 +2,28 @@
 
 ## 决策
 
-首版采用“用户自带 Tailscale”的私有网络方案，不建设项目方云端中继：
+产品采用“本地直连 + 用户自带 Tailscale”的私有网络方案，不建设项目方云端中继：
 
 ```mermaid
 flowchart LR
-    A["iPhone: DSH Remote"] -->|"Tailnet HTTPS / WSS"| B["Tailscale Serve :8443"]
+    A["iPhone: Harness Remote"] -->|"Tailnet HTTPS / WSS"| B["Tailscale Serve :8443"]
     B -->|"127.0.0.1:随机端口"| C["DeepSeek Harness Web/API"]
+    A -->|"受信任 Wi-Fi + bearer"| E["LAN Remote Proxy :8765"]
+    E -->|"白名单 API / 127.0.0.1"| C
     D["DeepSeek Harness Desktop"] -->|"启动、监控、停止"| C
     D -->|"启动、监控、停止"| B
+    D -->|"启动、监控、停止"| E
 ```
 
 项目方不接触代码、API Key、模型请求、Shell 输出或会话记录，也不承担长连接服务器成本。电脑仍是唯一执行主机；iPhone 只是控制面。
 
 ## 当前实现状态
 
-macOS Tauri Remote Host 与 iOS SwiftUI 客户端已经实现，并完成同一 Tailnet 下的真实 HTTPS 模拟器闭环：开启 Remote、生成二维码/深链、保存主机、连接检查以及在 `WKWebView` 中加载 Harness。物理 iPhone、蜂窝网络、完整会话交互和 Windows Electron Host 尚未完成验收；下方“全部通过后才标为可用”的门槛保持不变。
+macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale HTTPS 路径完成真实 Harness、WebSocket、DeepSeek 模型调用与模拟器展示闭环。局域网路径实现独立开关、随机 256-bit 配对凭据、固定 API 白名单代理、二维码导入及 iOS HTTP/WebSocket 认证，并完成代理协议联调。物理 iPhone 的局域网权限弹窗、蜂窝网络和 Windows Host 仍需发布前验收。
 
-## 为什么 MVP 先使用 Harness Web UI
+## 为什么 iOS 使用原生 Remote UI
 
-当前固定的 `@deepseek-ai/dsh@0.1.0-rc.6` 已经把浏览器控制面和协议实现完整。iOS 第一版用 SwiftUI 管理配对与连接，再用 `WKWebView` 加载官方 UI，可以立即覆盖会话、Prompt、流式输出、Queue/Steer/Cancel、审批和用户问题，而不复制 Agent runtime 或重新实现消息渲染。
-
-这是验证 Remote 需求的最短闭环，不是最终 UI 承诺。确认真实使用后，再按相同 API 做原生“会话列表 + 对话 + 审批”界面。
+手机端不复制 Desktop 网页，也不承载 Agent runtime。SwiftUI 只实现任务列表、对话、工具摘要、Prompt、Steer、Cancel、审批和用户问题等窄控制面；执行、代码访问和模型凭据仍全部留在电脑。这样能针对单手操作和小屏适配，同时避免把插件安装、终端、任意目录访问等桌面能力带入 App Store binary。
 
 ## Desktop 端需要增加的 Remote Host
 
@@ -48,7 +49,7 @@ macOS Tauri Remote Host 与 iOS SwiftUI 客户端已经实现，并完成同一 
 8. Desktop 显示连接地址与二维码：
 
    ```text
-   dshremote://connect?url=https%3A%2F%2F<DNSName>%3A8443%2F
+   harnessremote://connect?url=https%3A%2F%2F<DNSName>%3A8443%2F
    ```
 
 ### 关闭与异常恢复
@@ -67,9 +68,9 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 ### 必须保持
 
 - Harness 始终绑定 `127.0.0.1`，不能改为 `0.0.0.0`。
-- 只能使用 Tailscale Serve，不能使用 Funnel。
+- 跨网络只能使用 Tailscale Serve 或用户自己管理的 HTTPS，不能使用 Funnel。
 - `--trusted-host` 只加入当前 Tailnet 的精确 DNS authority 和端口，不能加入通配符。
-- 二维码只包含 URL，不包含 API Key、Tailscale key 或长期 bearer token。
+- Tailscale 二维码只包含 URL；局域网二维码包含 Desktop 每次开启时重新生成的 256-bit bearer 凭据，但不包含 API Key 或 Tailscale key。
 - Remote 默认关闭，并提供明确的离线/撤销入口。
 
 ### 两层边界
@@ -78,27 +79,34 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 
 个人 Tailnet 默认可能允许自己的设备互相访问；若 Tailnet 包含其他成员，应在文档中给出 ACL 示例，把 8443 只开放给用户自己的 iPhone 或用户组。
 
+### 局域网直连边界
+
+- Harness 本身仍只绑定 `127.0.0.1`；Desktop 另启 `:8765` 代理，不能把 Harness 直接绑定到 `0.0.0.0`。
+- 代理只接受 `host.describe`、会话读写、取消、交互响应和事件 WebSocket；其他路径一律 404。
+- HTTP 与 WebSocket 都要求二维码中的 bearer，转发到 Harness 前会剥离认证头并重写 loopback Host。
+- 裸局域网 HTTP 地址不能在 iOS 手输；缺少凭据时客户端拒绝保存。
+- 该路径有认证但没有链路加密，只允许用户明确启用并用于受信任家庭/办公 Wi-Fi；不受信任网络使用 Tailscale HTTPS。
+
 ## iOS 客户端范围
 
 当前工程位于 [`ios/DSHRemote`](../ios/DSHRemote)：
 
 - SwiftUI：配对、电脑列表、错误与恢复；
 - VisionKit：扫码；
-- URLSession：连接前检查；
-- WKWebView：加载 Harness Web UI 与其 HTTP RPC/WebSocket；
-- Release 只接受 HTTPS `.ts.net`；
-- 只允许 Harness 同源导航，外部链接交给系统浏览器。
+- URLSession：原生 Harness HTTP RPC 与 WebSocket；
+- Release 接受任意有效 HTTPS；局域网 HTTP 仅接受私有地址和有效配对凭据；
+- App 不包含 `WKWebView`、原始终端或模型凭据编辑。
 
-暂不包含：推送通知、后台常驻连接、多用户共享、文件上传优化、原始终端、自动审批危险操作、App Store 订阅。
+暂不包含：远程推送服务、后台常驻连接、多用户共享、文件上传优化、原始终端、自动审批危险操作、App Store 订阅。
 
-## 第二阶段：原生会话控制面
+## 已实现的原生会话控制面
 
-WebView MVP 证明连接和使用频率之后，再原生实现以下最小协议：
+当前客户端使用以下最小协议：
 
 1. `session.list` 与 `session.history`；
 2. `session.prompt`，支持 `queue` 和 `steer`；
-3. `session.updateQueue` 与 `session.cancel`；
-4. `/api/events.mux` 与 `/api/events.host` WebSocket 重连；
+3. `session.prompt` 的 `queue` / `steer` 与 `session.cancel`；
+4. `/api/events.mux` WebSocket 重连；
 5. approval/question 的 `/api/respond`；
 6. 只读工具视图与 diff。
 
@@ -108,12 +116,12 @@ WebView MVP 证明连接和使用频率之后，再原生实现以下最小协�
 
 以下场景全部通过后，才把 Remote 标为可用：
 
-- 同一 Wi-Fi 下扫码并进入现有会话；
+- 同一 Wi-Fi 下扫码、认证并进入现有会话；
 - iPhone 切换到蜂窝网络后仍可连接；
 - Prompt → 流式事件 → Steer → Cancel 完整闭环；
 - 手机上完成一次审批和一次用户问题回答；
 - App 前后台切换、网络中断后重连，不重复发送 Prompt；
-- 手机断开 Tailscale 后无法访问；
+- 手机断开 Tailscale 后无法访问 Tailscale 入口；局域网入口关闭或凭据错误时返回 401/不可访问；
 - Desktop 关闭 Remote 后，8443 立即不可访问；
 - 错误的 Host/Origin 被 Harness 拒绝；
 - Desktop 重启后二维码 authority 不变，Serve 目标更新到新的随机端口；
@@ -121,7 +129,8 @@ WebView MVP 证明连接和使用频率之后，再原生实现以下最小协�
 
 ## 建议交付顺序
 
-1. 先合入 iOS 客户端骨架和本方案；
-2. 实现 macOS Tauri Remote Host，完成一台 Mac + 一台 iPhone 真机闭环；
-3. 复用状态机实现 Windows Electron；
-4. 收集 10 位真实用户的一周使用数据；只有反复使用手机 Steer/审批/查看结果，才投入原生消息 UI 和通知。
+1. 完成 macOS + 模拟器的两种传输回归；
+2. 完成一台 Mac + 一台 iPhone 的局域网、Tailscale 与蜂窝网络真机闭环；
+3. 复用相同安全边界实现 Windows Host；
+4. 提交 TestFlight，并用内置审核演示降低 App Review 对外部硬件和账户的依赖；
+5. 收集 10 位真实用户的一周使用数据，再决定是否增加后台推送服务或更多桌面控制能力。

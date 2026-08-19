@@ -17,7 +17,11 @@
     "active": true,
     "targets": ["app", "dmg"],
     "externalBin": ["binaries/node", "binaries/dsh", "binaries/pnpm"],
-    "resources": ["../node_modules/**/*", "scripts/acknowledge-onboarding.mjs"],
+    "resources": [
+      "../node_modules/**/*",
+      "scripts/acknowledge-onboarding.mjs",
+      "../scripts/lan-remote-proxy.mjs"
+    ],
     "icon": ["../build/icon.icns", "../build/icon.png", "../build/icon.ico"],
     "category": "public.app-category.developer-tools",
     "macOS": {

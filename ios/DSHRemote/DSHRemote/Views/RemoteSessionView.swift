@@ -1,151 +1,161 @@
 import SwiftUI
 
 struct RemoteSessionView: View {
-    let host: RemoteHost
+    @StateObject private var viewModel: RemoteHostViewModel
 
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var reloadID = UUID()
-    @State private var browserState = RemoteBrowserState()
-    @State private var browserCommand: RemoteBrowserCommand?
+    init(host: RemoteHost) {
+        let client = LiveHarnessRemoteClient(
+            baseURL: host.baseURL,
+            displayName: host.name,
+            accessToken: host.accessToken
+        )
+        _viewModel = StateObject(wrappedValue: RemoteHostViewModel(client: client))
+    }
+
+    init(demoClient: DemoHarnessRemoteClient = DemoHarnessRemoteClient()) {
+        _viewModel = StateObject(wrappedValue: RemoteHostViewModel(client: demoClient))
+    }
 
     var body: some View {
-        ZStack {
-            RemoteBrowserView(
-                baseURL: host.baseURL,
-                reloadID: reloadID,
-                command: browserCommand,
-                state: $browserState
-            )
-                .ignoresSafeArea(.container, edges: .bottom)
+        List {
+            connectionSection
 
-            if let errorMessage = browserState.errorMessage {
-                ContentUnavailableView {
-                    Label("电脑已离线", systemImage: "wifi.slash")
-                } description: {
-                    Text(errorMessage)
-                } actions: {
-                    Button("重新连接") {
-                        reloadID = UUID()
+            if viewModel.isLoading && viewModel.sessions.isEmpty {
+                Section {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("正在读取电脑上的任务…")
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
-                .background(.background)
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            RemoteTopBar(
-                title: browserState.isSettingsPresented
-                    ? "设置"
-                    : (browserState.sessionTitle ?? "新对话"),
-                hostName: host.name,
-                isLoading: browserState.isLoading,
-                isReady: browserState.isMobileAdaptationReady,
-                showsSessionActions: !browserState.isSettingsPresented,
-                progress: browserState.progress,
-                onBack: {
-                    if browserState.isSettingsPresented {
-                        send(.closeSettings)
-                    } else {
-                        dismiss()
+            } else if viewModel.sessions.isEmpty && viewModel.errorMessage == nil {
+                Section {
+                    ContentUnavailableView(
+                        "还没有任务",
+                        systemImage: "bubble.left.and.text.bubble.right",
+                        description: Text("先在 Harness Desktop 中创建任务，再回到这里刷新。")
+                    )
+                }
+            } else {
+                Section("最近任务") {
+                    ForEach(viewModel.sessions) { session in
+                        NavigationLink {
+                            RemoteConversationView(client: viewModel.client, session: session)
+                        } label: {
+                            RemoteSessionRow(session: session)
+                        }
                     }
-                },
-                onSessions: { send(.toggleSidebar) },
-                onNewSession: { send(.newSession) }
-            )
-        }
-        .toolbar(.hidden, for: .navigationBar)
-        .task {
-            await RemoteNotificationManager.shared.requestAuthorizationIfNeeded()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                RemoteNotificationManager.shared.clearDeliveredNotifications()
-                if browserState.errorMessage != nil {
-                    reloadID = UUID()
                 }
             }
+
+            if let error = viewModel.errorMessage {
+                Section {
+                    ConnectionErrorCard(message: error) {
+                        Task { await viewModel.refresh() }
+                    }
+                }
+            }
+        }
+        .listSectionSpacing(18)
+        .navigationTitle(viewModel.client.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await viewModel.refresh() }
+        .task { await viewModel.monitor() }
+    }
+
+    private var connectionSection: some View {
+        Section {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: viewModel.client.isDemo ? "sparkles" : "checkmark.shield.fill")
+                    .font(.title2)
+                    .foregroundStyle(viewModel.client.isDemo ? .purple : .green)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        (viewModel.client.isDemo ? Color.purple : Color.green).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 13)
+                    )
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(viewModel.client.isDemo ? "内置演示模式" : "已连接到你的电脑")
+                        .font(.headline)
+                    Text(connectionDetail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 
-    private func send(_ action: RemoteBrowserAction) {
-        browserCommand = RemoteBrowserCommand(action: action)
+    private var connectionDetail: String {
+        if viewModel.client.isDemo {
+            return "不连接网络、不调用模型，供功能体验与 App Review 使用。"
+        }
+        if let description = viewModel.description {
+            return "Harness \(description.version) · \(description.attachedSessions) 个活跃会话"
+        }
+        return "任务执行、代码和模型凭据都留在电脑上。"
     }
 }
 
-private struct RemoteTopBar: View {
-    let title: String
-    let hostName: String
-    let isLoading: Bool
-    let isReady: Bool
-    let showsSessionActions: Bool
-    let progress: Double
-    let onBack: () -> Void
-    let onSessions: () -> Void
-    let onNewSession: () -> Void
+private struct RemoteSessionRow: View {
+    let session: RemoteSessionSummary
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                toolbarButton("返回", systemImage: "chevron.left", action: onBack)
-                if showsSessionActions {
-                    toolbarButton("会话", systemImage: "sidebar.left", action: onSessions)
-                }
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(session.running ? Color.blue.opacity(0.14) : Color(.secondarySystemBackground))
+                Image(systemName: session.running ? "waveform" : "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(session.running ? .blue : .secondary)
+            }
+            .frame(width: 42, height: 42)
 
-                VStack(spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(isReady ? Color.green : Color.orange)
-                            .frame(width: 6, height: 6)
-                        Text("\(hostName) · \(connectionLabel)")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(session.running ? "执行中" : relativeUpdate)
+                    if let project = session.projectName {
+                        Text("·")
+                        Text(project)
                             .lineLimit(1)
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 6)
-
-                if showsSessionActions {
-                    toolbarButton("新建会话", systemImage: "square.and.pencil", action: onNewSession)
-                } else {
-                    Color.clear
-                        .frame(width: 44, height: 44)
-                }
-            }
-            .frame(height: 52)
-            .padding(.horizontal, 4)
-
-            if isLoading {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-            } else {
-                Divider()
+                .font(.caption)
+                .foregroundStyle(session.running ? .blue : .secondary)
             }
         }
-        .background(.bar)
+        .padding(.vertical, 3)
     }
 
-    private var connectionLabel: String {
-        if isLoading { return "连接中" }
-        return isReady ? "已连接" : "正在载入"
+    private var relativeUpdate: String {
+        let seconds = max(0, Date().timeIntervalSince(session.updatedAt))
+        if seconds < 60 { return "刚刚" }
+        if seconds < 3_600 { return "\(Int(seconds / 60)) 分钟前" }
+        if seconds < 86_400 { return "\(Int(seconds / 3_600)) 小时前" }
+        if seconds < 604_800 { return "\(Int(seconds / 86_400)) 天前" }
+        return session.updatedAt.formatted(date: .abbreviated, time: .omitted)
     }
+}
 
-    private func toolbarButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.body.weight(.medium))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+private struct ConnectionErrorCard: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("暂时无法连接", systemImage: "wifi.exclamationmark")
+                .font(.headline)
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("重新连接", action: retry)
+                .buttonStyle(.bordered)
         }
-        .accessibilityLabel(title)
+        .padding(.vertical, 4)
     }
 }

@@ -18,25 +18,12 @@ enum RemoteConnectionError: LocalizedError {
 }
 
 enum RemoteConnectionVerifier {
-    static func verify(_ baseURL: URL) async throws {
-        var request = URLRequest(url: baseURL)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        request.timeoutInterval = 10
-        request.setValue("text/html", forHTTPHeaderField: "Accept")
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw RemoteConnectionError.invalidResponse
-        }
-
-        switch httpResponse.statusCode {
-        case 200..<400:
-            return
-        case 401, 403:
-            throw RemoteConnectionError.rejected
-        default:
-            throw RemoteConnectionError.server(httpResponse.statusCode)
-        }
+    static func verify(_ connection: RemoteConnectionDescriptor) async throws {
+        let client = LiveHarnessRemoteClient(
+            baseURL: connection.baseURL,
+            displayName: connection.baseURL.host ?? "Harness",
+            accessToken: connection.accessToken
+        )
+        _ = try await client.describe()
     }
 }

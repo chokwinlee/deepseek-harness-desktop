@@ -18,7 +18,7 @@ struct AddHostView: View {
                     TextField("例如 MacBook Pro", text: $name)
 
                     HStack {
-                        TextField("https://电脑名.tailnet.ts.net:8443", text: $address)
+                        TextField("https://电脑地址", text: $address)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
@@ -37,7 +37,7 @@ struct AddHostView: View {
                 } header: {
                     Text("电脑")
                 } footer: {
-                    Text("手机和电脑需要登录同一个 Tailscale 网络。地址由 Desktop 的 Remote 页面生成。")
+                    Text("推荐扫描 Desktop 生成的二维码。Tailscale 适合跨网络；同一 Wi-Fi 模式必须通过二维码导入配对凭据。")
                 }
 
                 if let errorMessage {
@@ -79,8 +79,8 @@ struct AddHostView: View {
                 }
             }
             .onAppear {
-                if let importedURL = hostStore.consumePendingImportedURL() {
-                    address = importedURL.absoluteString
+                if let connection = hostStore.consumePendingImportedConnection() {
+                    address = connection.importedURL.absoluteString
                 }
             }
         }
@@ -89,9 +89,9 @@ struct AddHostView: View {
     private func connect() {
         errorMessage = nil
 
-        let endpoint: URL
+        let connection: RemoteConnectionDescriptor
         do {
-            endpoint = try RemoteEndpointValidator.normalizedURL(from: address)
+            connection = try RemoteEndpointValidator.connection(from: address)
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -100,8 +100,8 @@ struct AddHostView: View {
         isChecking = true
         Task {
             do {
-                try await RemoteConnectionVerifier.verify(endpoint)
-                hostStore.add(name: name, baseURL: endpoint)
+                try await RemoteConnectionVerifier.verify(connection)
+                hostStore.add(name: name, connection: connection)
                 dismiss()
             } catch {
                 errorMessage = connectionMessage(for: error)
@@ -114,11 +114,11 @@ struct AddHostView: View {
         if let urlError = error as? URLError {
             switch urlError.code {
             case .cannotFindHost, .dnsLookupFailed:
-                return "找不到电脑。请确认手机已连接 Tailscale，并且 MagicDNS 可用。"
+                return "找不到电脑。使用 Tailscale 时，请确认手机已连接 Tailnet 且 MagicDNS 可用。"
             case .cannotConnectToHost, .timedOut, .networkConnectionLost:
                 return "无法连接电脑。请确认 Desktop 正在运行且 Remote 已开启。"
             case .secureConnectionFailed, .serverCertificateUntrusted:
-                return "HTTPS 证书无效。请重新运行 Tailscale Serve 配置。"
+                return "HTTPS 证书无效。请检查 Tailscale Serve 或你自己的 HTTPS 配置。"
             default:
                 break
             }

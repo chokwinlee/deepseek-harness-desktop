@@ -36,6 +36,14 @@ test('Remote actions use the tokenized Desktop bridge', async () => {
     api.actionUrl('remote-open-https', 'desktop-token'),
     'dsh-desktop://action/remote-open-https?token=desktop-token',
   )
+  assert.equal(
+    api.actionUrl('remote-lan-enable', 'desktop-token'),
+    'dsh-desktop://action/remote-lan-enable?token=desktop-token',
+  )
+  assert.equal(
+    api.actionUrl('remote-lan-disable', 'desktop-token'),
+    'dsh-desktop://action/remote-lan-disable?token=desktop-token',
+  )
   assert.throws(() => api.actionUrl('serve-reset', 'desktop-token'))
 })
 
@@ -45,6 +53,8 @@ test('Remote state defaults closed and normalizes native payloads', async () => 
   assert.equal(initial.enabled, false)
   assert.equal(initial.busy, false)
   assert.equal(initial.port, 8443)
+  assert.equal(initial.lanEnabled, false)
+  assert.equal(initial.lanPort, 8765)
 
   const active = api.normalizeStatus({
     enabled: true,
@@ -55,6 +65,16 @@ test('Remote state defaults closed and normalizes native payloads', async () => 
   assert.equal(active.enabled, true)
   assert.equal(active.httpsReady, true)
   assert.equal(active.url, 'https://dsh-mac.example.ts.net:8443/')
+
+  const lan = api.normalizeStatus({
+    lanAvailable: true,
+    lanEnabled: true,
+    lanURL: 'http://192.168.1.20:8765/',
+    lanPairingURL: 'harnessremote://connect?url=example&token=secret',
+  })
+  assert.equal(lan.lanAvailable, true)
+  assert.equal(lan.lanEnabled, true)
+  assert.equal(lan.lanURL, 'http://192.168.1.20:8765/')
 })
 
 test('Remote copy follows the active DSH language', async () => {

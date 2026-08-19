@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use qrcode::{render::svg, QrCode};
 
 pub const REMOTE_PORT: u16 = 8443;
+pub const LAN_REMOTE_PORT: u16 = 8765;
 const SERVE_START_TIMEOUT: Duration = Duration::from_secs(12);
 const SERVE_STOP_TIMEOUT: Duration = Duration::from_secs(4);
 
@@ -241,9 +242,23 @@ pub fn https_setup_url(info: &TailscaleInfo) -> Result<String, String> {
 }
 
 pub fn pairing_url(endpoint: &str) -> Result<String, String> {
-    let mut pairing = tauri::Url::parse("dshremote://connect")
+    let mut pairing = tauri::Url::parse("harnessremote://connect")
         .map_err(|error| format!("无法生成配对地址：{error}"))?;
     pairing.query_pairs_mut().append_pair("url", endpoint);
+    Ok(pairing.to_string())
+}
+
+pub fn authenticated_pairing_url(endpoint: &str, token: &str) -> Result<String, String> {
+    if token.len() != 64 || !token.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err("无法生成局域网配对地址：访问凭据无效。".into());
+    }
+    let mut pairing = tauri::Url::parse("harnessremote://connect")
+        .map_err(|error| format!("无法生成局域网配对地址：{error}"))?;
+    pairing
+        .query_pairs_mut()
+        .append_pair("url", endpoint)
+        .append_pair("token", token)
+        .append_pair("transport", "lan");
     Ok(pairing.to_string())
 }
 
@@ -460,13 +475,13 @@ mod tests {
     }
 
     #[test]
-    fn pairing_payload_contains_only_the_remote_endpoint() {
+    fn pairing_payload_contains_the_remote_endpoint() {
         let endpoint = endpoint_url(&info());
         assert_eq!(endpoint, "https://dsh-mac.example.ts.net:8443/");
         let pairing = pairing_url(&endpoint).unwrap();
         assert_eq!(
             pairing,
-            "dshremote://connect?url=https%3A%2F%2Fdsh-mac.example.ts.net%3A8443%2F"
+            "harnessremote://connect?url=https%3A%2F%2Fdsh-mac.example.ts.net%3A8443%2F"
         );
         assert!(pairing_qr_data_uri(&pairing)
             .unwrap()
@@ -475,5 +490,13 @@ mod tests {
             https_setup_url(&info()).unwrap(),
             "https://login.tailscale.com/f/serve?node=nExampleNode"
         );
+        let lan_pairing = authenticated_pairing_url(
+            "http://192.168.1.20:8765/",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
+        assert!(lan_pairing
+            .starts_with("harnessremote://connect?url=http%3A%2F%2F192.168.1.20%3A8765%2F&token="));
+        assert!(lan_pairing.ends_with("&transport=lan"));
     }
 }

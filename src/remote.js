@@ -16,7 +16,14 @@
   const STYLE_ID = 'dsh-desktop-remote-style'
   const LAYER_ID = 'dsh-desktop-remote-layer'
   const STATUS_POLL_INTERVAL_MS = 2000
-  const ALLOWED_ACTIONS = new Set(['remote-status', 'remote-open-https', 'remote-enable', 'remote-disable'])
+  const ALLOWED_ACTIONS = new Set([
+    'remote-status',
+    'remote-open-https',
+    'remote-enable',
+    'remote-disable',
+    'remote-lan-enable',
+    'remote-lan-disable',
+  ])
 
   function languageFromTag(tag) {
     return String(tag || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'
@@ -44,6 +51,14 @@
       qrSvg: String(status.qrSvg || ''),
       error: String(status.error || ''),
       port: Number(status.port) || 8443,
+      lanAvailable: Boolean(status.lanAvailable),
+      lanEnabled: Boolean(status.lanEnabled),
+      lanBusy: Boolean(status.lanBusy),
+      lanURL: String(status.lanURL || ''),
+      lanPairingURL: String(status.lanPairingURL || ''),
+      lanQrSvg: String(status.lanQrSvg || ''),
+      lanError: String(status.lanError || ''),
+      lanPort: Number(status.lanPort) || 8765,
     })
   }
 
@@ -68,8 +83,15 @@
           disable: '关闭',
           disabling: '正在关闭…',
           pair: '配对',
+          lanEnable: '同一 Wi-Fi',
+          lanDisable: '关闭局域网',
+          lanPair: '局域网配对',
+          lanActive: '同一 Wi-Fi 可访问：{url}',
+          lanReady: '也可以只开启“同一 Wi-Fi”，无需在手机安装 Tailscale。',
+          lanUnavailable: 'Harness 启动完成后才可开启局域网直连。',
           modalTitle: '连接 iPhone',
-          modalBody: '在 DSH Remote 中扫描二维码。手机和电脑必须登录同一个 Tailnet。',
+          modalBody: '在 Harness Remote 中扫描二维码。手机和电脑必须登录同一个 Tailnet。',
+          lanModalBody: '让 iPhone 与电脑连接同一个受信任的 Wi-Fi，然后扫描二维码。配对凭据只会显示在二维码中。',
           address: 'Remote 地址',
           copy: '复制地址',
           copied: '已复制',
@@ -90,8 +112,15 @@
           disable: 'Turn off',
           disabling: 'Turning off…',
           pair: 'Pair',
+          lanEnable: 'Same Wi-Fi',
+          lanDisable: 'Turn off LAN',
+          lanPair: 'LAN Pairing',
+          lanActive: 'Available on the same Wi-Fi: {url}',
+          lanReady: 'You can also enable Same Wi-Fi without installing Tailscale on iPhone.',
+          lanUnavailable: 'Wait for Harness to finish starting before enabling LAN access.',
           modalTitle: 'Connect iPhone',
-          modalBody: 'Scan this QR code in DSH Remote. Both devices must use the same tailnet.',
+          modalBody: 'Scan this QR code in Harness Remote. Both devices must use the same tailnet.',
+          lanModalBody: 'Connect iPhone and this computer to the same trusted Wi-Fi, then scan. The pairing credential is only carried by the QR code.',
           address: 'Remote address',
           copy: 'Copy address',
           copied: 'Copied',
@@ -122,10 +151,13 @@
   let settingControls = null
   let settingPrimaryButton = null
   let settingPairButton = null
+  let settingLanButton = null
+  let settingLanPairButton = null
   let layer = null
   let layerShadow = null
   let observer = null
   let mountFrame = 0
+  let pairingTransport = 'tailscale'
 
   function currentLanguage() {
     return languageFromTag(document.documentElement.lang || navigator.language)
@@ -158,12 +190,19 @@
   }
 
   function description(copy) {
-    if (status.error) return status.error
+    if (status.lanError) return status.lanError
+    const active = []
+    if (status.enabled) active.push(copy.active.replace('{url}', status.url))
+    if (status.lanEnabled) active.push(copy.lanActive.replace('{url}', status.lanURL))
+    if (active.length) return active.join(' · ')
+    if (status.lanAvailable && (!status.installed || status.backendState !== 'Running')) {
+      return `${copy.description} ${copy.lanReady}`
+    }
+    if (status.error) return `${copy.description} ${status.error}`
     if (!status.installed) return copy.unavailable
     if (status.backendState !== 'Running') return copy.disconnected
     if (!status.magicDNS) return copy.magicDNS
     if (!status.httpsReady) return copy.https
-    if (status.enabled) return copy.active.replace('{url}', status.url)
     return `${copy.description} ${copy.restart}`
   }
 
@@ -195,25 +234,38 @@
   }
 
   function renderControls(copy) {
-    if (!settingPrimaryButton || !settingPairButton) return
+    if (!settingPrimaryButton || !settingPairButton || !settingLanButton || !settingLanPairButton) return
     if (status.enabled) {
       configureButton(settingPrimaryButton, copy.disable, '', status.busy)
       configureButton(settingPairButton, copy.pair, 'dsh-remote-primary', status.busy)
-      return
+    } else {
+      configureButton(settingPairButton, copy.pair, 'dsh-remote-primary', true, true)
+      if (status.installed
+        && status.backendState === 'Running'
+        && status.magicDNS
+        && !status.httpsReady
+        && !status.busy) {
+        configureButton(settingPrimaryButton, copy.setupHTTPS, 'dsh-remote-primary', false)
+      } else {
+        const label = status.busy
+          ? status.phase === 'stopping' ? copy.disabling : copy.enabling
+          : copy.enable
+        configureButton(settingPrimaryButton, label, 'dsh-remote-primary', !canEnable())
+      }
     }
-    configureButton(settingPairButton, copy.pair, 'dsh-remote-primary', true, true)
-    if (status.installed
-      && status.backendState === 'Running'
-      && status.magicDNS
-      && !status.httpsReady
-      && !status.busy) {
-      configureButton(settingPrimaryButton, copy.setupHTTPS, 'dsh-remote-primary', false)
-      return
-    }
-    const label = status.busy
-      ? status.phase === 'stopping' ? copy.disabling : copy.enabling
-      : copy.enable
-    configureButton(settingPrimaryButton, label, 'dsh-remote-primary', !canEnable())
+    configureButton(
+      settingLanButton,
+      status.lanEnabled ? copy.lanDisable : copy.lanEnable,
+      '',
+      status.lanBusy || (!status.lanEnabled && !status.lanAvailable),
+    )
+    configureButton(
+      settingLanPairButton,
+      copy.lanPair,
+      'dsh-remote-primary',
+      status.lanBusy,
+      !status.lanEnabled,
+    )
   }
 
   function updateSetting() {
@@ -221,7 +273,7 @@
     const copy = copyFor(currentLanguage())
     settingTitle.textContent = copy.title
     settingDescription.textContent = description(copy)
-    settingRow.toggleAttribute('data-error', Boolean(status.error))
+    settingRow.toggleAttribute('data-error', Boolean(status.lanError || (!status.lanEnabled && status.error)))
     renderControls(copy)
   }
 
@@ -245,8 +297,12 @@
         && !status.httpsReady) request('remote-open-https')
       else request('remote-enable')
     })
-    settingPairButton = createButton('', 'dsh-remote-primary', openPairing, true)
-    settingControls.append(settingPrimaryButton, settingPairButton)
+    settingPairButton = createButton('', 'dsh-remote-primary', () => openPairing(), true)
+    settingLanButton = createButton('', '', () => {
+      request(status.lanEnabled ? 'remote-lan-disable' : 'remote-lan-enable')
+    })
+    settingLanPairButton = createButton('', 'dsh-remote-primary', () => openPairing('lan'), true)
+    settingControls.append(settingPrimaryButton, settingPairButton, settingLanButton, settingLanPairButton)
     row.append(content, settingControls)
     settingRow = row
     updateSetting()
@@ -285,9 +341,11 @@
 
   async function copyAddress() {
     const button = layerShadow?.querySelector('.copy')
-    if (!button || !status.url) return
+    const pairingURL = pairingTransport === 'lan' ? status.lanPairingURL : status.pairingURL
+    const endpoint = pairingTransport === 'lan' ? status.lanURL : status.url
+    if (!button || !endpoint) return
     try {
-      await navigator.clipboard.writeText(status.url)
+      await navigator.clipboard.writeText(pairingURL || endpoint)
       button.textContent = copyFor(currentLanguage()).copied
     } catch {
       const selection = window.getSelection()
@@ -298,16 +356,21 @@
     }
   }
 
-  function openPairing() {
-    if (!status.enabled || !status.qrSvg) return
+  function openPairing(transport = 'tailscale') {
+    const lan = transport === 'lan'
+    const enabled = lan ? status.lanEnabled : status.enabled
+    const qrSvg = lan ? status.lanQrSvg : status.qrSvg
+    const endpoint = lan ? status.lanURL : status.url
+    if (!enabled || !qrSvg) return
+    pairingTransport = transport
     ensureLayer()
     const copy = copyFor(currentLanguage())
     layerShadow.querySelector('h2').textContent = copy.modalTitle
-    layerShadow.querySelector('.body').textContent = copy.modalBody
-    layerShadow.querySelector('.qr').src = status.qrSvg
+    layerShadow.querySelector('.body').textContent = lan ? copy.lanModalBody : copy.modalBody
+    layerShadow.querySelector('.qr').src = qrSvg
     layerShadow.querySelector('.qr').alt = copy.modalTitle
     layerShadow.querySelector('.label').textContent = copy.address
-    layerShadow.querySelector('.url').textContent = status.url
+    layerShadow.querySelector('.url').textContent = endpoint
     layerShadow.querySelector('.copy').textContent = copy.copy
     layerShadow.querySelector('.close').textContent = copy.close
     layer.hidden = false
@@ -320,10 +383,13 @@
 
   function publish(next) {
     const wasEnabled = status.enabled
+    const wasLanEnabled = status.lanEnabled
     status = normalizeStatus(next)
     updateSetting()
     if (!wasEnabled && status.enabled) openPairing()
-    if (!status.enabled) closePairing()
+    if (!wasLanEnabled && status.lanEnabled) openPairing('lan')
+    if (pairingTransport === 'tailscale' && !status.enabled) closePairing()
+    if (pairingTransport === 'lan' && !status.lanEnabled) closePairing()
   }
 
   function scheduleMount() {

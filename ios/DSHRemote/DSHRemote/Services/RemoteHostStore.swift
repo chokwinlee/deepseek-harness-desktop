@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 final class RemoteHostStore: ObservableObject {
     @Published private(set) var hosts: [RemoteHost] = []
-    @Published var pendingImportedURL: URL?
+    @Published var pendingImportedConnection: RemoteConnectionDescriptor?
 
     private let defaults: UserDefaults
     private let storageKey = "dsh-remote.hosts.v1"
@@ -15,12 +15,14 @@ final class RemoteHostStore: ObservableObject {
     }
 
     @discardableResult
-    func add(name: String?, baseURL: URL) -> RemoteHost {
-        if let existing = hosts.first(where: { $0.baseURL == baseURL }) {
-            return existing
+    func add(name: String?, connection: RemoteConnectionDescriptor) -> RemoteHost {
+        if let index = hosts.firstIndex(where: { $0.baseURL == connection.baseURL }) {
+            hosts[index].accessToken = connection.accessToken
+            save()
+            return hosts[index]
         }
 
-        let fallbackName = baseURL.host?
+        let fallbackName = connection.baseURL.host?
             .split(separator: ".")
             .first
             .map(String.init) ?? "My computer"
@@ -28,7 +30,8 @@ final class RemoteHostStore: ObservableObject {
         let displayName = resolvedName.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackName
         let host = RemoteHost(
             name: displayName,
-            baseURL: baseURL
+            baseURL: connection.baseURL,
+            accessToken: connection.accessToken
         )
         hosts.insert(host, at: 0)
         save()
@@ -42,16 +45,21 @@ final class RemoteHostStore: ObservableObject {
         save()
     }
 
-    func importConnectionURL(_ url: URL) {
-        guard let normalized = try? RemoteEndpointValidator.normalizedURL(from: url.absoluteString) else {
-            return
-        }
-        pendingImportedURL = normalized
+    func removeAll() {
+        hosts.removeAll()
+        save()
     }
 
-    func consumePendingImportedURL() -> URL? {
-        defer { pendingImportedURL = nil }
-        return pendingImportedURL
+    func importConnectionURL(_ url: URL) {
+        guard let connection = try? RemoteEndpointValidator.connection(from: url.absoluteString) else {
+            return
+        }
+        pendingImportedConnection = connection
+    }
+
+    func consumePendingImportedConnection() -> RemoteConnectionDescriptor? {
+        defer { pendingImportedConnection = nil }
+        return pendingImportedConnection
     }
 
     private func load() {

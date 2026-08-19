@@ -16,11 +16,15 @@
 		A10000000000000000000007 /* HostListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* HostListView.swift */; };
 		A10000000000000000000008 /* AddHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* AddHostView.swift */; };
 		A10000000000000000000009 /* QRCodeScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* QRCodeScannerView.swift */; };
-		A1000000000000000000000A /* RemoteBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* RemoteBrowserView.swift */; };
 		A1000000000000000000000B /* RemoteSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* RemoteSessionView.swift */; };
-		A1000000000000000000000C /* RemoteMobileAdaptation.js in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* RemoteMobileAdaptation.js */; };
 		A1000000000000000000000D /* RemoteNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* RemoteNotificationManager.swift */; };
 		A1000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* Assets.xcassets */; };
+		A1000000000000000000000F /* RemoteHarnessModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* RemoteHarnessModels.swift */; };
+		A10000000000000000000010 /* HarnessRemoteClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* HarnessRemoteClient.swift */; };
+		A10000000000000000000011 /* RemoteViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* RemoteViewModels.swift */; };
+		A10000000000000000000012 /* RemoteConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* RemoteConversationView.swift */; };
+		A10000000000000000000013 /* AboutRemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* AboutRemoteView.swift */; };
+		A10000000000000000000014 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,13 +37,17 @@
 		B10000000000000000000007 /* HostListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostListView.swift; sourceTree = "<group>"; };
 		B10000000000000000000008 /* AddHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddHostView.swift; sourceTree = "<group>"; };
 		B10000000000000000000009 /* QRCodeScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScannerView.swift; sourceTree = "<group>"; };
-		B1000000000000000000000A /* RemoteBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteBrowserView.swift; sourceTree = "<group>"; };
 		B1000000000000000000000B /* RemoteSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionView.swift; sourceTree = "<group>"; };
 		B1000000000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000000000000000000000D /* DSHRemote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DSHRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B1000000000000000000000E /* RemoteMobileAdaptation.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = RemoteMobileAdaptation.js; sourceTree = "<group>"; };
 		B1000000000000000000000F /* RemoteNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteNotificationManager.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000000000000000000011 /* RemoteHarnessModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHarnessModels.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* HarnessRemoteClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessRemoteClient.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* RemoteViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewModels.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* RemoteConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConversationView.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* AboutRemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutRemoteView.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,12 +73,12 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000001 /* DSHRemoteApp.swift */,
-				B1000000000000000000000E /* RemoteMobileAdaptation.js */,
 				B10000000000000000000010 /* Assets.xcassets */,
 				D10000000000000000000003 /* Models */,
 				D10000000000000000000004 /* Services */,
 				D10000000000000000000005 /* Views */,
 				B1000000000000000000000C /* Info.plist */,
+				B10000000000000000000016 /* PrivacyInfo.xcprivacy */,
 			);
 			path = DSHRemote;
 			sourceTree = "<group>";
@@ -79,6 +87,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000002 /* RemoteHost.swift */,
+				B10000000000000000000011 /* RemoteHarnessModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -90,6 +99,8 @@
 				B10000000000000000000004 /* RemoteHostStore.swift */,
 				B10000000000000000000005 /* RemoteConnectionVerifier.swift */,
 				B1000000000000000000000F /* RemoteNotificationManager.swift */,
+				B10000000000000000000012 /* HarnessRemoteClient.swift */,
+				B10000000000000000000013 /* RemoteViewModels.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -101,8 +112,9 @@
 				B10000000000000000000007 /* HostListView.swift */,
 				B10000000000000000000008 /* AddHostView.swift */,
 				B10000000000000000000009 /* QRCodeScannerView.swift */,
-				B1000000000000000000000A /* RemoteBrowserView.swift */,
 				B1000000000000000000000B /* RemoteSessionView.swift */,
+				B10000000000000000000014 /* RemoteConversationView.swift */,
+				B10000000000000000000015 /* AboutRemoteView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -173,8 +185,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000000000000000000000C /* RemoteMobileAdaptation.js in Resources */,
 				A1000000000000000000000E /* Assets.xcassets in Resources */,
+				A10000000000000000000014 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -194,9 +206,13 @@
 				A10000000000000000000007 /* HostListView.swift in Sources */,
 				A10000000000000000000008 /* AddHostView.swift in Sources */,
 				A10000000000000000000009 /* QRCodeScannerView.swift in Sources */,
-				A1000000000000000000000A /* RemoteBrowserView.swift in Sources */,
 				A1000000000000000000000B /* RemoteSessionView.swift in Sources */,
 				A1000000000000000000000D /* RemoteNotificationManager.swift in Sources */,
+				A1000000000000000000000F /* RemoteHarnessModels.swift in Sources */,
+				A10000000000000000000010 /* HarnessRemoteClient.swift in Sources */,
+				A10000000000000000000011 /* RemoteViewModels.swift in Sources */,
+				A10000000000000000000012 /* RemoteConversationView.swift in Sources */,
+				A10000000000000000000013 /* AboutRemoteView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

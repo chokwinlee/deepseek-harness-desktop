@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>DSH Remote</string>
+	<string>Harness Remote</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,17 +26,27 @@
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>CFBundleURLName</key>
-			<string>com.chokwinlee.dshremote.connect</string>
+			<string>com.chokwinlee.harnessremote.connect</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>harnessremote</string>
 				<string>dshremote</string>
 			</array>
 		</dict>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>扫描 DeepSeek Harness Desktop 显示的 Remote 配对二维码。</string>
+	<string>扫描 Harness Desktop 显示的 Remote 配对二维码。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>连接到你自己局域网内运行 Harness Desktop 的电脑。</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

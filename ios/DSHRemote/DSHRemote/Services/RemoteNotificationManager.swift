@@ -12,6 +12,12 @@ struct RemoteNotificationEvent {
     let kind: Kind
     let body: String
 
+    init(id: String, kind: Kind, body: String) {
+        self.id = id
+        self.kind = kind
+        self.body = body
+    }
+
     init?(payload: [String: Any]) {
         guard let id = payload["id"] as? String,
               !id.isEmpty,
@@ -63,17 +69,17 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
             content.title = event.kind == .completed ? "任务已完成" : "需要你确认"
             content.body = event.body.isEmpty ? event.kind.fallbackBody : String(event.body.prefix(220))
             content.sound = .default
-            content.threadIdentifier = "dsh-remote"
+            content.threadIdentifier = "harness-remote"
             content.categoryIdentifier = event.kind == .completed
-                ? "DSH_REMOTE_COMPLETED"
-                : "DSH_REMOTE_ATTENTION"
+                ? "HARNESS_REMOTE_COMPLETED"
+                : "HARNESS_REMOTE_ATTENTION"
             content.userInfo = [
                 "eventID": event.id,
                 "kind": event.kind.rawValue,
             ]
 
             let request = UNNotificationRequest(
-                identifier: "dsh-remote-\(event.id)",
+                identifier: "harness-remote-\(event.id)",
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.2, repeats: false)
             )
@@ -87,7 +93,7 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
             if active {
                 guard self.backgroundTaskID == .invalid else { return }
                 self.backgroundTaskID = UIApplication.shared.beginBackgroundTask(
-                    withName: "Monitor DeepSeek Harness task"
+                    withName: "Monitor Harness task"
                 ) { [weak self] in
                     self?.setMonitoringActive(false)
                 }
@@ -134,9 +140,9 @@ private extension RemoteNotificationEvent.Kind {
     var fallbackBody: String {
         switch self {
         case .completed:
-            "电脑上的 DeepSeek Harness 已完成本次任务。"
+            "电脑上的 Harness 已完成本次任务。"
         case .attention:
-            "DeepSeek Harness 正在等待你的选择。"
+            "Harness 正在等待你的选择。"
         }
     }
 }

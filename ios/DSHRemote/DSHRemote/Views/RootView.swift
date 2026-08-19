@@ -15,8 +15,8 @@ struct RootView: View {
             AddHostView()
                 .environmentObject(hostStore)
         }
-        .onChange(of: hostStore.pendingImportedURL) { _, importedURL in
-            if importedURL != nil {
+        .onChange(of: hostStore.pendingImportedConnection) { _, importedConnection in
+            if importedConnection != nil {
                 showsAddHost = true
             }
         }
