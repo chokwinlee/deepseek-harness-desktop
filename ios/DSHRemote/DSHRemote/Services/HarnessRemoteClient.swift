@@ -300,7 +300,43 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
 
     private let sessionID = "review-demo-session"
     private var running = false
+    private static let demoInstructionText = """
+    <system-reminder>
+    The following workspace instructions may be relevant to your work. Use them as guidance when applicable.
+
+    Instructions from:
+
+    [AGENTS.md](AGENTS.md)
+
+    # Project rules
+
+    - Read `docs/architecture.md` before changing packages.
+    - Run focused tests before release.
+    - Keep credentials and model calls on the user's computer.
+    </system-reminder>
+    """
     private var items: [RemoteConversationItem] = [
+        RemoteConversationItem(
+            id: "demo-context",
+            kind: .context,
+            title: "项目指令",
+            text: "AGENTS.md · 已载入",
+            time: Date().addingTimeInterval(-185),
+            details: [
+                RemoteDetailSection(
+                    id: "instruction-sources",
+                    title: "指令来源",
+                    content: "AGENTS.md\t已载入",
+                    kind: .list
+                ),
+                RemoteDetailSection(
+                    id: "context-raw",
+                    title: "模型接收的内容",
+                    content: DemoHarnessRemoteClient.demoInstructionText,
+                    kind: .text
+                ),
+            ]
+        ),
         RemoteConversationItem(
             id: "demo-user",
             kind: .user,
@@ -339,6 +375,21 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     ]
 
     private var demoTrajectory: [RemoteTrajectoryRecord] = [
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-context", sequence: 0, turn: nil, step: nil, kind: .context,
+            title: "项目指令", summary: "AGENTS.md · 已载入", time: Date().addingTimeInterval(-185),
+            duration: nil, state: .succeeded,
+            details: [
+                RemoteDetailSection(
+                    id: "instruction-sources", title: "指令来源",
+                    content: "AGENTS.md\t已载入", kind: .list
+                ),
+                RemoteDetailSection(
+                    id: "context-raw", title: "模型接收的内容",
+                    content: DemoHarnessRemoteClient.demoInstructionText, kind: .text
+                ),
+            ]
+        ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-input", sequence: 1, turn: 0, step: nil, kind: .input,
             title: "User", summary: "检查登录流程并给出风险清单", time: Date().addingTimeInterval(-180),
@@ -707,6 +758,17 @@ private enum ConversationFolder {
         var blocks: [Int: StreamBlock] = [:]
     }
 
+    private struct InstructionChange {
+        let path: String
+        let action: String
+        let scope: String
+    }
+
+    private struct ContextPresentation {
+        let preview: String
+        let details: [RemoteDetailSection]
+    }
+
     static func fold(_ history: SessionHistoryWire) -> RemoteConversationSnapshot {
         let entries = history.events
         let toolResults = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (String, HistoryEntryWire)? in
@@ -746,6 +808,7 @@ private enum ConversationFolder {
                     output.append(contextItem(
                         sequence: event.seq,
                         sourceKind: sourceKind,
+                        source: source,
                         text: text,
                         time: date
                     ))
@@ -896,9 +959,15 @@ private enum ConversationFolder {
             switch event.type {
             case "user/message":
                 guard let text = textContent(data["content"]) else { break }
-                let sourceKind = data["source"]?.objectValue?["kind"]?.stringValue ?? "context"
+                let source = data["source"]?.objectValue
+                let sourceKind = source?["kind"]?.stringValue ?? "context"
                 let turn = activeTurn ?? orderedTurnStarts.first(where: { $0.sequence > event.seq })?.turn
                 let isUser = sourceKind == "user"
+                let presentation = contextPresentation(
+                    sourceKind: sourceKind,
+                    source: source,
+                    text: text
+                )
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-message:\(event.seq)",
                     sequence: event.seq,
@@ -906,13 +975,17 @@ private enum ConversationFolder {
                     step: activeStep,
                     kind: isUser ? .input : .context,
                     title: isUser ? "用户消息" : contextSourceLabel(sourceKind),
-                    summary: firstMeaningfulLine(text, fallback: "消息内容"),
+                    summary: isUser
+                        ? firstMeaningfulLine(text, fallback: "消息内容")
+                        : presentation.preview,
                     time: time,
                     duration: nil,
                     state: .succeeded,
-                    details: [RemoteDetailSection(
-                        id: "message", title: "完整内容", content: limited(text), kind: .text
-                    )]
+                    details: isUser
+                        ? [RemoteDetailSection(
+                            id: "message", title: "完整内容", content: limited(text), kind: .text
+                        )]
+                        : presentation.details
                 ))
             case "request/header":
                 let header = data["header"]?.objectValue
@@ -1075,18 +1148,92 @@ private enum ConversationFolder {
     private static func contextItem(
         sequence: Int,
         sourceKind: String,
+        source: [String: JSONValue]?,
         text: String,
         time: Date
     ) -> RemoteConversationItem {
         let title = contextSourceLabel(sourceKind)
-        let preview = firstMeaningfulLine(text, fallback: "Harness 已载入一段上下文")
+        let presentation = contextPresentation(
+            sourceKind: sourceKind,
+            source: source,
+            text: text
+        )
         return RemoteConversationItem(
             id: "context:\(sequence)", sequence: sequence, kind: .context,
-            title: title, text: preview, time: time, state: .info,
-            details: [RemoteDetailSection(
-                id: "context", title: title, content: limited(text), kind: .text
-            )]
+            title: title, text: presentation.preview, time: time, state: .info,
+            details: presentation.details
         )
+    }
+
+    private static func contextPresentation(
+        sourceKind: String,
+        source: [String: JSONValue]?,
+        text: String
+    ) -> ContextPresentation {
+        var details: [RemoteDetailSection] = []
+        var preview = firstContextLine(text)
+
+        if sourceKind == "agent-instructions",
+           let changes = instructionChanges(source) {
+            let baseline = source?["baseline"]?.boolValue == true
+            let rows = changes.map { change in
+                "\(change.path)\t\(instructionAction(change.action, baseline: baseline))"
+            }
+            details.append(RemoteDetailSection(
+                id: "instruction-sources",
+                title: "指令来源",
+                content: rows.joined(separator: "\n"),
+                kind: .list
+            ))
+            if changes.count == 1, let change = changes.first {
+                preview = "\(change.path) · \(instructionAction(change.action, baseline: baseline))"
+            } else {
+                preview = "已同步 \(changes.count) 个指令文件"
+            }
+        }
+
+        details.append(RemoteDetailSection(
+            id: "context-raw",
+            title: "模型接收的内容",
+            content: text,
+            kind: .text
+        ))
+        return ContextPresentation(preview: preview, details: details)
+    }
+
+    private static func instructionChanges(
+        _ source: [String: JSONValue]?
+    ) -> [InstructionChange]? {
+        guard source?["form"]?.stringValue == "instructions",
+              let entries = source?["changes"]?.arrayValue,
+              !entries.isEmpty else { return nil }
+        var changes: [InstructionChange] = []
+        var seen = Set<String>()
+        for entry in entries {
+            guard let object = entry.objectValue,
+                  let path = object["path"]?.stringValue,
+                  !path.isEmpty,
+                  let scope = object["scope"]?.stringValue,
+                  let action = object["action"]?.stringValue,
+                  ["set", "replace", "remove"].contains(action) else { return nil }
+            if let digest = object["digest"], digest.stringValue == nil { return nil }
+            guard seen.insert("\(scope)\u{0}\(path)").inserted else { return nil }
+            changes.append(InstructionChange(path: path, action: action, scope: scope))
+        }
+        return changes.isEmpty ? nil : changes
+    }
+
+    private static func instructionAction(_ action: String, baseline: Bool) -> String {
+        if action == "remove" { return "已移除" }
+        if baseline { return "已载入" }
+        return action == "set" ? "已添加" : "已更新"
+    }
+
+    private static func firstContextLine(_ value: String) -> String {
+        let line = value.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && $0 != "<system-reminder>" && $0 != "</system-reminder>" }
+        return line ?? "Harness 已载入一段上下文"
     }
 
     private static func contextSourceLabel(_ sourceKind: String) -> String {

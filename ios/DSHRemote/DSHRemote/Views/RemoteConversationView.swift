@@ -478,7 +478,14 @@ struct RemoteConversationView: View {
     }
 
     private func inspectorItem(for record: RemoteTrajectoryRecord) -> RemoteConversationItem {
-        let kind: RemoteConversationItem.Kind = record.kind == .tool ? .tool : .status
+        let kind: RemoteConversationItem.Kind = switch record.kind {
+        case .input: .user
+        case .context: .context
+        case .request: .status
+        case .assistant: .assistant
+        case .tool: .tool
+        case .lifecycle: .status
+        }
         return RemoteConversationItem(
             id: "inspect:\(record.id)", sequence: record.sequence, kind: kind,
             title: record.title, text: record.summary, time: record.time,
@@ -1161,43 +1168,138 @@ private struct MarkdownContent: View {
 private struct ConversationDetailSheet: View {
     let item: RemoteConversationItem
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedSectionID: String?
+    @State private var copied = false
+
+    init(item: RemoteConversationItem) {
+        self.item = item
+        let preferred = item.details.first(where: { $0.id == "context-raw" })
+            ?? item.details.first
+        _selectedSectionID = State(initialValue: preferred?.id)
+    }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            detailHeader
+            if item.details.count > 1 {
+                detailTabs
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(kindLabel.uppercased())
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(kindColor)
-                        Text(item.title ?? "执行详情")
-                            .font(.headline.weight(.semibold))
-                        Text(item.text)
-                            .font(.subheadline)
+                    if let summaryText {
+                        Text(summaryText)
+                            .font(.system(size: 13))
+                            .lineSpacing(3)
                             .foregroundStyle(.secondary)
-                        MetadataLine(values: item.metadata)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ForEach(item.details) { section in
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let title = section.title {
-                                Text(title)
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
+
+                    if let section = activeSection {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let label = inlineSectionLabel(section) {
+                                Text(label)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
                             }
                             detailContent(section)
                         }
+                    } else if !item.text.isEmpty {
+                        MarkdownContent(text: item.text)
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
             }
-            .background(DSHRemoteTheme.canvas)
-            .navigationTitle("详情")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+            .id(selectedSectionID)
+        }
+        .background(DSHRemoteTheme.canvas)
+    }
+
+    private var detailHeader: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(kindColor)
+                .frame(width: 5, height: 5)
+            Text(headerTitle)
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+            if let metadata = item.metadata.first, !metadata.isEmpty {
+                Text(metadata)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button {
+                copy(copyPayload)
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 44, height: 42)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(copied ? Color.green : Color.secondary)
+            .accessibilityLabel(copied ? "已复制" : copyAccessibilityLabel)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 44, height: 42)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("关闭详情")
+        }
+        .frame(height: 42)
+        .padding(.leading, 12)
+        .padding(.trailing, 2)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(DSHRemoteTheme.hairline)
+                .frame(height: 0.5)
+        }
+    }
+
+    private var detailTabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 1) {
+                ForEach(item.details) { section in
+                    Button {
+                        selectedSectionID = section.id
+                    } label: {
+                        Text(tabTitle(section))
+                            .font(.system(size: 13))
+                            .foregroundStyle(
+                                selectedSectionID == section.id
+                                    ? DSHRemoteTheme.accent
+                                    : Color.secondary
+                            )
+                            .padding(.horizontal, 9)
+                            .frame(height: 34)
+                            .overlay(alignment: .bottom) {
+                                if selectedSectionID == section.id {
+                                    Rectangle()
+                                        .fill(DSHRemoteTheme.accent)
+                                        .frame(height: 2)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedSectionID == section.id ? .isSelected : [])
                 }
             }
+            .padding(.horizontal, 8)
+        }
+        .frame(height: 34)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(DSHRemoteTheme.hairline)
+                .frame(height: 0.5)
         }
     }
 
@@ -1205,7 +1307,11 @@ private struct ConversationDetailSheet: View {
     private func detailContent(_ section: RemoteDetailSection) -> some View {
         switch section.kind {
         case .text:
-            MarkdownContent(text: section.content)
+            if item.kind == .context, section.id == "context-raw" {
+                InstructionDocumentView(rawText: section.content)
+            } else {
+                MarkdownContent(text: section.content)
+            }
         case .code(let language):
             VStack(alignment: .leading, spacing: 6) {
                 if let language, !language.isEmpty {
@@ -1213,45 +1319,105 @@ private struct ConversationDetailSheet: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Text(codeBody(section.content))
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                Text(codeBody(section.content))
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineSpacing(5)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(12)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).stroke(DSHRemoteTheme.hairline) }
+            .padding(14)
+            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
         case .diff:
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(attributedDiff(section.content))
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineSpacing(5)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(12)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).stroke(DSHRemoteTheme.hairline) }
+            .padding(14)
+            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
         case .list:
-            Text(section.content)
-                .font(.system(size: 13))
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                .overlay { RoundedRectangle(cornerRadius: 10).stroke(DSHRemoteTheme.hairline) }
+            if section.id == "instruction-sources" {
+                InstructionSourcesView(content: section.content)
+            } else {
+                Text(section.content)
+                    .font(.system(size: 13))
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay { RoundedRectangle(cornerRadius: 10).stroke(DSHRemoteTheme.hairline) }
+            }
         }
     }
 
-    private var kindLabel: String {
-        switch item.kind {
-        case .user: "Input"
-        case .assistant: "Model"
-        case .tool: "Tool"
-        case .context: "Context"
-        case .status: "Event"
+    private var activeSection: RemoteDetailSection? {
+        item.details.first(where: { $0.id == selectedSectionID }) ?? item.details.first
+    }
+
+    private var headerTitle: String {
+        if let title = item.title, !title.isEmpty { return title }
+        return switch item.kind {
+        case .user: "用户消息"
+        case .assistant: "模型输出"
+        case .tool: "工具详情"
+        case .context: "上下文"
+        case .status: "执行详情"
+        }
+    }
+
+    private var summaryText: String? {
+        guard item.kind != .context else { return nil }
+        let value = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              value != item.title,
+              value != "<system-reminder>",
+              value != "</system-reminder>" else { return nil }
+        return value
+    }
+
+    private func inlineSectionLabel(_ section: RemoteDetailSection) -> String? {
+        guard item.details.count == 1,
+              let title = section.title,
+              !title.isEmpty,
+              title != item.title,
+              title != "完整内容" else { return nil }
+        return title
+    }
+
+    private func tabTitle(_ section: RemoteDetailSection) -> String {
+        switch section.id {
+        case "context-raw", "message": return "内容"
+        case "instruction-sources": return "来源"
+        default: return section.title ?? "详情"
+        }
+    }
+
+    private var copyPayload: String {
+        if let original = item.details.first(where: { $0.id == "context-raw" })?.content {
+            return original
+        }
+        guard let section = activeSection else { return item.text }
+        if case .code = section.kind { return codeBody(section.content) }
+        return section.content
+    }
+
+    private var copyAccessibilityLabel: String {
+        item.kind == .context ? "复制模型接收的原文" : "复制当前详情"
+    }
+
+    private func copy(_ value: String) {
+        UIPasteboard.general.setItems(
+            [["public.utf8-plain-text": value]],
+            options: [.localOnly: true]
+        )
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            copied = false
         }
     }
 
@@ -1288,6 +1454,275 @@ private struct ConversationDetailSheet: View {
             lines.removeLast()
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+private struct InstructionDocumentView: View {
+    let rawText: String
+
+    private let displayLimit = 20_000
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if presentation.isSystemReminder {
+                Label("模型上下文", systemImage: "shield.lefthalf.filled")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.green.opacity(0.09), in: Capsule())
+            }
+
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+
+            if isTruncated {
+                Label("正文仅展示前 \(displayLimit.formatted()) 个字符；复制仍包含完整原文", systemImage: "ellipsis.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            inlineText(text)
+                .font(.system(
+                    size: level == 1 ? 16 : (level == 2 ? 15 : 14),
+                    weight: .semibold
+                ))
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+        case .paragraph(let text):
+            inlineText(text)
+                .font(.system(size: 14))
+                .lineSpacing(5)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        case .listItem(let marker, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(marker)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 12, alignment: .trailing)
+                inlineText(text)
+                    .font(.system(size: 14))
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(DSHRemoteTheme.hairline)
+                    .frame(width: 2)
+                inlineText(text)
+                    .font(.system(size: 13))
+                    .lineSpacing(4)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .code(let language, let text):
+            VStack(alignment: .leading, spacing: 7) {
+                if let language, !language.isEmpty {
+                    Text(language.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(text)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .padding(14)
+            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func inlineText(_ value: String) -> Text {
+        guard let attributed = try? AttributedString(
+            markdown: value,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else { return Text(value) }
+        return Text(attributed)
+    }
+
+    private var presentation: (text: String, isSystemReminder: Bool) {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = trimmed.components(separatedBy: .newlines)
+        guard lines.count >= 2,
+              lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "<system-reminder>",
+              lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "</system-reminder>" else {
+            return (trimmed, false)
+        }
+        return (lines.dropFirst().dropLast().joined(separator: "\n"), true)
+    }
+
+    private var displayedText: String {
+        String(presentation.text.prefix(displayLimit))
+    }
+
+    private var isTruncated: Bool {
+        presentation.text.count > displayLimit
+    }
+
+    private enum Block {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case listItem(marker: String, text: String)
+        case quote(String)
+        case code(language: String?, text: String)
+    }
+
+    private var blocks: [Block] {
+        let lines = displayedText.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+        var result: [Block] = []
+        var paragraph: [String] = []
+        var index = 0
+
+        func flushParagraph() {
+            guard !paragraph.isEmpty else { return }
+            result.append(.paragraph(paragraph.joined(separator: "\n")))
+            paragraph.removeAll(keepingCapacity: true)
+        }
+
+        while index < lines.count {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if let fence = fenceInfo(trimmed) {
+                flushParagraph()
+                var codeLines: [String] = []
+                index += 1
+                while index < lines.count, !isClosingFence(lines[index], fence: fence) {
+                    codeLines.append(lines[index])
+                    index += 1
+                }
+                result.append(.code(language: fence.language, text: codeLines.joined(separator: "\n")))
+            } else if trimmed.isEmpty {
+                flushParagraph()
+            } else if let heading = headingInfo(trimmed) {
+                flushParagraph()
+                result.append(.heading(level: heading.level, text: heading.text))
+            } else if let item = listItemInfo(trimmed) {
+                flushParagraph()
+                result.append(.listItem(marker: item.marker, text: item.text))
+            } else if trimmed.hasPrefix("> ") {
+                flushParagraph()
+                result.append(.quote(String(trimmed.dropFirst(2))))
+            } else {
+                paragraph.append(line)
+            }
+            index += 1
+        }
+        flushParagraph()
+        return result
+    }
+
+    private func headingInfo(_ line: String) -> (level: Int, text: String)? {
+        let level = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level),
+              line.dropFirst(level).first == " " else { return nil }
+        return (level, String(line.dropFirst(level + 1)))
+    }
+
+    private func listItemInfo(_ line: String) -> (marker: String, text: String)? {
+        for prefix in ["- ", "* ", "+ "] where line.hasPrefix(prefix) {
+            return ("•", String(line.dropFirst(prefix.count)))
+        }
+        let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else { return nil }
+        let marker = String(parts[0])
+        guard let suffix = marker.last,
+              suffix == "." || suffix == ")",
+              marker.dropLast().allSatisfy(\.isNumber),
+              !marker.dropLast().isEmpty else { return nil }
+        return (marker, String(parts[1]))
+    }
+
+    private func fenceInfo(_ line: String) -> (character: Character, count: Int, language: String?)? {
+        guard let character = line.first, character == "`" || character == "~" else { return nil }
+        let count = line.prefix(while: { $0 == character }).count
+        guard count >= 3 else { return nil }
+        let language = line.dropFirst(count).trimmingCharacters(in: .whitespaces)
+        return (character, count, language.isEmpty ? nil : language)
+    }
+
+    private func isClosingFence(
+        _ line: String,
+        fence: (character: Character, count: Int, language: String?)
+    ) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.prefix(while: { $0 == fence.character }).count >= fence.count
+            && trimmed.allSatisfy { $0 == fence.character }
+    }
+}
+
+private struct InstructionSourcesView: View {
+    let content: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Harness 在本轮同步的项目规则")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                if index > 0 {
+                    Rectangle()
+                        .fill(DSHRemoteTheme.hairline)
+                        .frame(height: 0.5)
+                        .padding(.leading, 38)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
+                        .frame(width: 16)
+                    Text(row.path)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(row.action)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+        }
+        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).stroke(DSHRemoteTheme.hairline) }
+    }
+
+    private struct Row {
+        let path: String
+        let action: String
+    }
+
+    private var rows: [Row] {
+        content.split(separator: "\n", omittingEmptySubsequences: true).map { line in
+            let values = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            return Row(
+                path: values.first.map(String.init) ?? String(line),
+                action: values.count > 1 ? String(values[1]) : ""
+            )
+        }
     }
 }
 
