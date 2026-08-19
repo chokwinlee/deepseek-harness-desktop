@@ -128,9 +128,26 @@ private struct HostRow: View {
                     .lineLimit(1)
                 Text(host.transportLabel)
                     .font(.caption2)
-                    .foregroundStyle(host.accessToken == nil ? .blue : .orange)
+                    .foregroundStyle(transportColor)
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private var transportColor: Color {
+        switch host.transport {
+        case .loopback:
+            .orange
+        case .sameWiFi:
+            .green
+        case .unpairedLocalNetwork:
+            .red
+        case .tailscale:
+            .blue
+        case .https:
+            .indigo
+        case .custom:
+            .secondary
+        }
     }
 }
