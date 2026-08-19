@@ -6,8 +6,9 @@ protocol HarnessRemoteClient: Sendable {
 
     func describe() async throws -> RemoteHostDescription
     func sessions() async throws -> [RemoteSessionSummary]
-    func conversation(sessionID: String) async throws -> [RemoteConversationItem]
+    func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
     func send(_ text: String, to sessionID: String, steer: Bool) async throws
+    func updateQueue(sessionID: String, itemID: String, action: RemoteQueueAction) async throws
     func cancel(sessionID: String) async throws
     func respond(to interaction: RemoteInteraction, decision: RemoteInteractionDecision) async throws
     func liveEvents() -> AsyncStream<RemoteLiveEvent>
@@ -75,12 +76,12 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
             }
     }
 
-    func conversation(sessionID: String) async throws -> [RemoteConversationItem] {
+    func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
         let response: SessionHistoryWire = try await call(
             "session.history",
-            payload: SessionHistoryPayload(sessionId: sessionID, maxMessages: 80)
+            payload: SessionHistoryPayload(sessionId: sessionID, maxMessages: maxMessages)
         )
-        return ConversationFolder.fold(response.events)
+        return ConversationFolder.fold(response)
     }
 
     func send(_ text: String, to sessionID: String, steer: Bool) async throws {
@@ -94,6 +95,25 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
                 content: [PromptTextPart(type: "text", text: trimmed)],
                 clientTimeZone: TimeZone.current.identifier
             )
+        )
+    }
+
+    func updateQueue(sessionID: String, itemID: String, action: RemoteQueueAction) async throws {
+        let wireAction: QueueActionWire
+        switch action {
+        case .edit(let text):
+            wireAction = QueueActionWire(
+                kind: "edit",
+                content: [PromptTextPart(type: "text", text: text)]
+            )
+        case .remove:
+            wireAction = QueueActionWire(kind: "remove", content: nil)
+        case .steer:
+            wireAction = QueueActionWire(kind: "steer", content: nil)
+        }
+        let _: AcceptedWire = try await call(
+            "session.updateQueue",
+            payload: SessionUpdateQueuePayload(sessionId: sessionID, itemId: itemID, action: wireAction)
         )
     }
 
@@ -320,8 +340,8 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ]
     }
 
-    func conversation(sessionID: String) async throws -> [RemoteConversationItem] {
-        items
+    func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
+        RemoteConversationSnapshot(items: items, hasMore: false, stats: nil)
     }
 
     func send(_ text: String, to sessionID: String, steer: Bool) async throws {
@@ -336,9 +356,11 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         running = true
         Task {
             try? await Task.sleep(for: .seconds(1.2))
-            await finishDemoReply()
+            finishDemoReply()
         }
     }
+
+    func updateQueue(sessionID: String, itemID: String, action: RemoteQueueAction) async throws {}
 
     func cancel(sessionID: String) async throws {
         running = false
@@ -423,6 +445,15 @@ private struct SessionPromptPayload: Codable {
     let content: [PromptTextPart]
     let clientTimeZone: String
 }
+private struct SessionUpdateQueuePayload: Codable {
+    let sessionId: String
+    let itemId: String
+    let action: QueueActionWire
+}
+private struct QueueActionWire: Codable {
+    let kind: String
+    let content: [PromptTextPart]?
+}
 
 private struct RPCRequestEnvelope<Payload: Encodable>: Encodable {
     let type: String
@@ -468,6 +499,8 @@ private struct SessionProjectionsWire: Decodable {
 
 private struct SessionHistoryWire: Decodable {
     let events: [HistoryEntryWire]
+    let hasMore: Bool
+    let projections: SessionProjectionsWire?
 }
 private struct HistoryEntryWire: Decodable {
     let event: SessionEventWire
@@ -505,8 +538,11 @@ private enum LiveEventParser {
         }
 
         switch type {
-        case "session/event", "session/queue", "session/projection":
+        case "session/event", "session/projection":
             return .sessionChanged(sessionID)
+        case "session/queue":
+            let items = payload["items"]?.arrayValue?.compactMap(parseQueueItem) ?? []
+            return .queueChanged(sessionID: sessionID, items: items)
         case "approval/requested":
             guard let approvalID = payload["approvalId"]?.stringValue,
                   let toolName = payload["toolName"]?.stringValue else { return nil }
@@ -557,77 +593,23 @@ private enum LiveEventParser {
             allowsMultipleSelection: object["multiSelect"]?.boolValue ?? false
         )
     }
-}
 
-private enum ConversationFolder {
-    static func fold(_ entries: [HistoryEntryWire]) -> [RemoteConversationItem] {
-        let completedToolCalls = Set(entries.compactMap { entry -> String? in
-            guard entry.event.type == "tool/result",
-                  let data = entry.event.data.objectValue,
-                  let message = data["message"]?.objectValue,
-                  let source = message["source"]?.objectValue else { return nil }
-            return source["callId"]?.stringValue
-        })
-        var output: [RemoteConversationItem] = []
-        var partial: (id: String, text: String, time: Date)?
-
-        for entry in entries {
-            let event = entry.event
-            let date = Date(timeIntervalSince1970: event.time / 1_000)
-            switch event.type {
-            case "user/message":
-                guard let data = event.data.objectValue,
-                      data["source"]?.objectValue?["kind"]?.stringValue == "user",
-                      let text = textContent(data["content"]) else { continue }
-                output.append(RemoteConversationItem(
-                    id: "user:\(event.seq)", kind: .user, title: nil, text: text, time: date
-                ))
-            case "assistant/message":
-                partial = nil
-                guard let data = event.data.objectValue,
-                      let message = data["message"]?.objectValue,
-                      let text = textContent(message["content"]) else { continue }
-                output.append(RemoteConversationItem(
-                    id: "assistant:\(event.seq)", kind: .assistant, title: nil, text: text, time: date
-                ))
-            case "assistant/chunk":
-                guard let data = event.data.objectValue,
-                      let chunk = data["chunk"]?.objectValue,
-                      chunk["type"]?.stringValue == "block-end",
-                      let block = chunk["block"]?.objectValue,
-                      block["type"]?.stringValue == "text",
-                      let text = block["text"]?.stringValue,
-                      !text.isEmpty else { continue }
-                partial = ("stream:\(event.seq)", text, date)
-            case "tool/call":
-                guard let data = event.data.objectValue else { continue }
-                let callID = data["callId"]?.stringValue
-                let toolName = data["name"]?.stringValue ?? "工具"
-                let view = entry.view?.objectValue?["view"]?.objectValue
-                let title = safeToolTitle(view: view, fallbackName: toolName)
-                let status = safeToolDetail(
-                    view: view,
-                    completed: callID.map(completedToolCalls.contains) == true
-                )
-                output.append(RemoteConversationItem(
-                    id: "tool:\(event.seq)", kind: .tool, title: title, text: status, time: date
-                ))
-            default:
-                continue
-            }
+    private static func parseQueueItem(_ value: JSONValue) -> RemoteQueuedMessage? {
+        guard let object = value.objectValue,
+              let id = object["id"]?.stringValue,
+              let placementValue = object["placement"]?.stringValue,
+              let placement = RemoteQueuedMessage.Placement(rawValue: placementValue) else {
+            return nil
         }
-
-        if let partial {
-            output.append(RemoteConversationItem(
-                id: partial.id,
-                kind: .assistant,
-                title: nil,
-                text: partial.text,
-                time: partial.time,
-                isStreaming: true
-            ))
-        }
-        return output
+        let message = object["message"]?.objectValue
+        let text = textContent(message?["content"])
+        let preview = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RemoteQueuedMessage(
+            id: id,
+            placement: placement,
+            preview: preview.flatMap { $0.isEmpty ? nil : $0 } ?? "等待中的消息",
+            text: text
+        )
     }
 
     private static func textContent(_ value: JSONValue?) -> String? {
@@ -636,31 +618,710 @@ private enum ConversationFolder {
                   block["type"]?.stringValue == "text" else { return nil }
             return block["text"]?.stringValue
         } ?? []
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+}
+
+private enum ConversationFolder {
+    private struct StreamBlock {
+        var type: String
+        var text: String
+    }
+
+    private struct PartialAssistant {
+        var turn: Int
+        var step: Int
+        var firstSequence: Int
+        var time: Date
+        var blocks: [Int: StreamBlock] = [:]
+    }
+
+    static func fold(_ history: SessionHistoryWire) -> RemoteConversationSnapshot {
+        let entries = history.events
+        let toolResults = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (String, HistoryEntryWire)? in
+            guard entry.event.type == "tool/result", let callID = toolResultCallID(entry) else { return nil }
+            return (callID, entry)
+        })
+        let stepStarts = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (String, Double)? in
+            guard entry.event.type == "step/start",
+                  let data = entry.event.data.objectValue,
+                  let turn = int(data["turn"]),
+                  let step = int(data["step"]) else { return nil }
+            return ("\(turn):\(step)", entry.event.time)
+        })
+        let turnStarts = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (Int, Double)? in
+            guard entry.event.type == "turn/start",
+                  let turn = int(entry.event.data.objectValue?["turn"]) else { return nil }
+            return (turn, entry.event.time)
+        })
+        var output: [RemoteConversationItem] = []
+        var partial: PartialAssistant?
+
+        for entry in entries {
+            let event = entry.event
+            let date = Date(timeIntervalSince1970: event.time / 1_000)
+            switch event.type {
+            case "user/message":
+                guard let data = event.data.objectValue,
+                      let text = textContent(data["content"]) else { continue }
+                let source = data["source"]?.objectValue
+                let sourceKind = source?["kind"]?.stringValue ?? "context"
+                if sourceKind == "user" {
+                    output.append(RemoteConversationItem(
+                        id: "user:\(event.seq)", sequence: event.seq, kind: .user,
+                        title: nil, text: text, time: date
+                    ))
+                } else {
+                    output.append(contextItem(
+                        sequence: event.seq,
+                        sourceKind: sourceKind,
+                        text: text,
+                        time: date
+                    ))
+                }
+            case "assistant/message":
+                guard let data = event.data.objectValue,
+                      let message = data["message"]?.objectValue else { continue }
+                let turn = int(data["turn"])
+                let step = int(data["step"])
+                if partial?.turn == turn && partial?.step == step { partial = nil }
+                let text = textContent(message["content"]) ?? ""
+                let reasoning = reasoningContent(message["content"])
+                guard !text.isEmpty || reasoning != nil else { continue }
+                var item = RemoteConversationItem(
+                    id: "assistant:\(event.seq)", sequence: event.seq, kind: .assistant,
+                    title: nil, text: text, time: date, state: .succeeded,
+                    reasoning: reasoning
+                )
+                if let source = message["source"]?.objectValue {
+                    let provider = source["provider"]?.stringValue
+                    let model = source["model"]?.stringValue
+                    item.metadata.append([provider, model].compactMap { $0 }.joined(separator: " · "))
+                }
+                if let usage = data["usage"]?.objectValue,
+                   let outputTokens = int(usage["outputTokens"]) {
+                    item.metadata.append("\(outputTokens) tokens")
+                }
+                if let turn, let step, let started = stepStarts["\(turn):\(step)"] {
+                    item.metadata.append(durationLabel(milliseconds: event.time - started))
+                }
+                item.metadata.removeAll(where: \.isEmpty)
+                output.append(item)
+            case "assistant/chunk":
+                guard let data = event.data.objectValue,
+                      let turn = int(data["turn"]),
+                      let step = int(data["step"]),
+                      let chunk = data["chunk"]?.objectValue,
+                      let type = chunk["type"]?.stringValue else { continue }
+                if partial?.turn != turn || partial?.step != step {
+                    partial = PartialAssistant(
+                        turn: turn, step: step, firstSequence: event.seq, time: date
+                    )
+                }
+                updatePartial(&partial, chunk: chunk, type: type)
+            case "tool/call":
+                guard let data = event.data.objectValue,
+                      let callID = data["callId"]?.stringValue else { continue }
+                output.append(toolItem(call: entry, result: toolResults[callID]))
+            case "turn/end":
+                guard let data = event.data.objectValue,
+                      let reason = data["reason"]?.objectValue,
+                      let reasonKind = reason["kind"]?.stringValue,
+                      reasonKind != "completed" else { continue }
+                output.append(turnStatusItem(event: event, reason: reason, time: date))
+            case "llm/retry":
+                if let data = event.data.objectValue,
+                   partial?.turn == int(data["turn"]),
+                   partial?.step == int(data["step"]) {
+                    partial = nil
+                }
+                let data = event.data.objectValue
+                let delay = data?["delayMs"]?.numberValue.map(durationLabel(milliseconds:))
+                output.append(RemoteConversationItem(
+                    id: "retry:\(event.seq)", sequence: event.seq, kind: .status,
+                    title: "模型请求正在重试",
+                    text: delay.map { "将在 \($0) 后重试" } ?? "连接或模型请求暂时失败，Harness 会自动重试。",
+                    time: date, state: .running
+                ))
+            case "compaction/summary":
+                guard let data = event.data.objectValue,
+                      let summary = data["summary"]?.stringValue else { continue }
+                output.append(RemoteConversationItem(
+                    id: "compaction:\(event.seq)", sequence: event.seq, kind: .status,
+                    title: "上下文已整理", text: "较早内容已压缩为摘要。", time: date,
+                    state: .info,
+                    details: [RemoteDetailSection(
+                        id: "summary", title: "压缩摘要", content: summary, kind: .text
+                    )]
+                ))
+            default:
+                continue
+            }
+        }
+
+        if let partial {
+            let text = partial.blocks.sorted(by: { $0.key < $1.key })
+                .filter { $0.value.type == "text" }
+                .map(\.value.text)
+                .joined(separator: "\n")
+            let reasoning = partial.blocks.sorted(by: { $0.key < $1.key })
+                .filter { $0.value.type == "reasoning" }
+                .map(\.value.text)
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty || !reasoning.isEmpty {
+                output.append(RemoteConversationItem(
+                    id: "assistant-stream:\(partial.turn):\(partial.step)",
+                    sequence: partial.firstSequence,
+                    kind: .assistant,
+                    title: nil,
+                    text: text,
+                    time: partial.time,
+                    state: .running,
+                    reasoning: reasoning.isEmpty ? nil : reasoning,
+                    isStreaming: true
+                ))
+            }
+        }
+
+        output.sort { lhs, rhs in
+            lhs.sequence == rhs.sequence ? lhs.id < rhs.id : lhs.sequence < rhs.sequence
+        }
+        return RemoteConversationSnapshot(
+            items: output,
+            hasMore: history.hasMore,
+            stats: stats(from: history.projections),
+            trajectory: buildTrajectory(
+                entries,
+                toolResults: toolResults,
+                stepStarts: stepStarts,
+                turnStarts: turnStarts
+            )
+        )
+    }
+
+    private static func buildTrajectory(
+        _ entries: [HistoryEntryWire],
+        toolResults: [String: HistoryEntryWire],
+        stepStarts: [String: Double],
+        turnStarts: [Int: Double]
+    ) -> [RemoteTrajectoryRecord] {
+        let orderedTurnStarts = entries.compactMap { entry -> (sequence: Int, turn: Int)? in
+            guard entry.event.type == "turn/start",
+                  let turn = int(entry.event.data.objectValue?["turn"]) else { return nil }
+            return (entry.event.seq, turn)
+        }
+        var records: [RemoteTrajectoryRecord] = []
+        var activeTurn: Int?
+        var activeStep: Int?
+
+        for entry in entries {
+            let event = entry.event
+            let data = event.data.objectValue ?? [:]
+            let time = Date(timeIntervalSince1970: event.time / 1_000)
+            if event.type == "turn/start" { activeTurn = int(data["turn"]) }
+            if event.type == "step/start" { activeStep = int(data["step"]) }
+
+            switch event.type {
+            case "user/message":
+                guard let text = textContent(data["content"]) else { break }
+                let sourceKind = data["source"]?.objectValue?["kind"]?.stringValue ?? "context"
+                let turn = activeTurn ?? orderedTurnStarts.first(where: { $0.sequence > event.seq })?.turn
+                let isUser = sourceKind == "user"
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-message:\(event.seq)",
+                    sequence: event.seq,
+                    turn: turn,
+                    step: activeStep,
+                    kind: isUser ? .input : .context,
+                    title: isUser ? "用户消息" : contextSourceLabel(sourceKind),
+                    summary: firstMeaningfulLine(text, fallback: "消息内容"),
+                    time: time,
+                    duration: nil,
+                    state: .succeeded,
+                    details: [RemoteDetailSection(
+                        id: "message", title: "完整内容", content: limited(text), kind: .text
+                    )]
+                ))
+            case "request/header":
+                let header = data["header"]?.objectValue
+                let config = header?["config"]?.objectValue
+                let provider = config?["provider"]?.stringValue
+                let model = config?["model"]?.stringValue
+                let effort = config?["reasoningEffort"]?.stringValue
+                let label = [provider, model].compactMap { $0 }.joined(separator: " · ")
+                var details: [RemoteDetailSection] = []
+                if let system = header?["system"]?.stringValue {
+                    details.append(.init(id: "system", title: "系统提示", content: limited(system), kind: .text))
+                }
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-request:\(event.seq)", sequence: event.seq,
+                    turn: activeTurn, step: activeStep, kind: .request,
+                    title: "模型请求",
+                    summary: [label, effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                    time: time, duration: nil, state: .succeeded, details: details
+                ))
+            case "assistant/message":
+                guard let message = data["message"]?.objectValue else { break }
+                let text = textContent(message["content"]) ?? ""
+                let reasoning = reasoningContent(message["content"]) ?? ""
+                let turn = int(data["turn"]) ?? activeTurn
+                let step = int(data["step"]) ?? activeStep
+                let summarySource = text.isEmpty ? reasoning : text
+                var details: [RemoteDetailSection] = []
+                if !reasoning.isEmpty {
+                    details.append(.init(id: "reasoning", title: "思考过程", content: reasoning, kind: .text))
+                }
+                if !text.isEmpty {
+                    details.append(.init(id: "answer", title: "回答", content: text, kind: .text))
+                }
+                let duration = turn.flatMap { turn in
+                    step.flatMap { stepStarts["\(turn):\($0)"] }.map { max(event.time - $0, 0) / 1_000 }
+                }
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-assistant:\(event.seq)", sequence: event.seq,
+                    turn: turn, step: step, kind: .assistant,
+                    title: text.isEmpty ? "模型思考" : "模型回答",
+                    summary: firstMeaningfulLine(summarySource, fallback: "模型输出"),
+                    time: time, duration: duration, state: .succeeded, details: details
+                ))
+            case "tool/call":
+                guard let callID = data["callId"]?.stringValue else { break }
+                let item = toolItem(call: entry, result: toolResults[callID])
+                let turn = int(data["turn"]) ?? activeTurn
+                let step = int(data["step"]) ?? activeStep
+                let duration = toolResults[callID].map { max($0.event.time - event.time, 0) / 1_000 }
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-tool:\(callID)", sequence: event.seq,
+                    turn: turn, step: step, kind: .tool,
+                    title: item.title ?? "工具调用", summary: item.text,
+                    time: item.time, duration: duration, state: item.state, details: item.details
+                ))
+            case "llm/retry":
+                let turn = int(data["turn"]) ?? activeTurn
+                let step = int(data["step"]) ?? activeStep
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-retry:\(event.seq)", sequence: event.seq,
+                    turn: turn, step: step, kind: .lifecycle,
+                    title: "模型请求重试", summary: data["error"]?.objectValue?["message"]?.stringValue ?? "等待下一次请求",
+                    time: time, duration: nil, state: .running
+                ))
+            case "compaction/start":
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-compaction:\(event.seq)", sequence: event.seq,
+                    turn: activeTurn, step: activeStep, kind: .lifecycle,
+                    title: "整理上下文", summary: "正在压缩较早的会话内容",
+                    time: time, duration: nil, state: .running
+                ))
+            case "turn/end":
+                guard let turn = int(data["turn"]),
+                      let reason = data["reason"]?.objectValue else { break }
+                let reasonKind = reason["kind"]?.stringValue ?? "interrupted"
+                let status = turnStatusItem(event: event, reason: reason, time: time)
+                let duration = turnStarts[turn].map { max(event.time - $0, 0) / 1_000 }
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-turn:\(event.seq)", sequence: event.seq,
+                    turn: turn, step: nil, kind: .lifecycle,
+                    title: reasonKind == "completed" ? "本轮完成" : (status.title ?? "本轮结束"),
+                    summary: reasonKind == "completed" ? "Harness 已完成本轮任务" : status.text,
+                    time: time, duration: duration,
+                    state: reasonKind == "completed" ? .succeeded : status.state,
+                    details: status.details
+                ))
+            default:
+                break
+            }
+
+            if event.type == "step/end" { activeStep = nil }
+            if event.type == "turn/end" {
+                activeStep = nil
+                activeTurn = nil
+            }
+        }
+        return records.sorted { lhs, rhs in lhs.sequence < rhs.sequence }
+    }
+
+    private static func textContent(_ value: JSONValue?) -> String? {
+        let parts = contentTexts(value, acceptedTypes: ["text"])
         let text = parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
 
+    private static func reasoningContent(_ value: JSONValue?) -> String? {
+        let text = contentTexts(value, acceptedTypes: ["reasoning"])
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private static func contentTexts(_ value: JSONValue?, acceptedTypes: Set<String>) -> [String] {
+        value?.arrayValue?.flatMap { item -> [String] in
+            guard let block = item.objectValue,
+                  let type = block["type"]?.stringValue else { return [] }
+            if acceptedTypes.contains(type), let text = block["text"]?.stringValue {
+                return [text]
+            }
+            if type == "tool-result" {
+                return contentTexts(block["content"], acceptedTypes: acceptedTypes)
+            }
+            return []
+        } ?? []
+    }
+
+    private static func updatePartial(
+        _ partial: inout PartialAssistant?,
+        chunk: [String: JSONValue],
+        type: String
+    ) {
+        guard var value = partial else { return }
+        let index = int(chunk["index"]) ?? 0
+        switch type {
+        case "block-start":
+            value.blocks[index] = StreamBlock(
+                type: chunk["blockType"]?.stringValue ?? "other",
+                text: ""
+            )
+        case "text-delta", "reasoning-delta":
+            let blockType = type == "text-delta" ? "text" : "reasoning"
+            var block = value.blocks[index] ?? StreamBlock(type: blockType, text: "")
+            block.type = blockType
+            block.text += chunk["text"]?.stringValue ?? ""
+            value.blocks[index] = block
+        case "block-end":
+            if let block = chunk["block"]?.objectValue,
+               let blockType = block["type"]?.stringValue {
+                value.blocks[index] = StreamBlock(
+                    type: blockType,
+                    text: block["text"]?.stringValue ?? ""
+                )
+            }
+        default:
+            break
+        }
+        partial = value
+    }
+
+    private static func contextItem(
+        sequence: Int,
+        sourceKind: String,
+        text: String,
+        time: Date
+    ) -> RemoteConversationItem {
+        let title = contextSourceLabel(sourceKind)
+        let preview = firstMeaningfulLine(text, fallback: "Harness 已载入一段上下文")
+        return RemoteConversationItem(
+            id: "context:\(sequence)", sequence: sequence, kind: .context,
+            title: title, text: preview, time: time, state: .info,
+            details: [RemoteDetailSection(
+                id: "context", title: title, content: limited(text), kind: .text
+            )]
+        )
+    }
+
+    private static func contextSourceLabel(_ sourceKind: String) -> String {
+        let labels: [String: String] = [
+            "agent-instructions": "项目指令",
+            "plugin": "插件上下文",
+            "skill-catalog": "可用能力",
+            "skill-invocation": "技能上下文",
+            "session-reference": "引用会话",
+        ]
+        return labels[sourceKind] ?? "系统上下文"
+    }
+
+    private static func toolItem(
+        call: HistoryEntryWire,
+        result: HistoryEntryWire?
+    ) -> RemoteConversationItem {
+        let event = call.event
+        let data = event.data.objectValue ?? [:]
+        let callID = data["callId"]?.stringValue ?? "seq-\(event.seq)"
+        let toolName = data["name"]?.stringValue ?? "工具"
+        let callView = call.view?.objectValue?["view"]?.objectValue
+        let resultView = result?.view?.objectValue?["view"]?.objectValue
+        let resultBlock = toolResultBlock(result)
+        let isError = resultBlock?["isError"]?.boolValue == true
+        let errorCode = resultBlock?["error"]?.objectValue?["code"]?.stringValue
+        let state: RemoteConversationItem.State = result == nil
+            ? .running
+            : (errorCode == "interrupted" ? .stopped : (isError ? .failed : .succeeded))
+        let title = resultView?["title"]?.stringValue
+            ?? callView?["title"]?.stringValue
+            ?? readableToolName(toolName)
+        let cardName = resultView?["card"]?.stringValue ?? callView?["card"]?.stringValue
+        let card = toolCard(cardName)
+        let rawResult = textContent(resultBlock?["content"])
+        let presentation = toolPresentation(
+            card: card,
+            callView: callView,
+            resultView: resultView,
+            rawResult: rawResult,
+            state: state
+        )
+        var metadata: [String] = []
+        if let result {
+            metadata.append(durationLabel(milliseconds: result.event.time - event.time))
+        }
+        if let exitCode = int(resultView?["exitCode"]) {
+            metadata.append("exit \(exitCode)")
+        } else if let signal = resultView?["signal"]?.stringValue {
+            metadata.append(signal)
+        }
+        return RemoteConversationItem(
+            id: "tool:\(callID)",
+            sequence: event.seq,
+            kind: .tool,
+            title: title,
+            text: presentation.summary,
+            time: Date(timeIntervalSince1970: event.time / 1_000),
+            state: state,
+            toolCard: card,
+            toolCategory: callView?["kind"]?.stringValue,
+            details: presentation.details,
+            metadata: metadata
+        )
+    }
+
+    private static func toolPresentation(
+        card: RemoteConversationItem.ToolCard,
+        callView: [String: JSONValue]?,
+        resultView: [String: JSONValue]?,
+        rawResult: String?,
+        state: RemoteConversationItem.State
+    ) -> (summary: String, details: [RemoteDetailSection]) {
+        var sections: [RemoteDetailSection] = []
+        if let description = callView?["description"]?.stringValue {
+            sections.append(.init(id: "description", title: nil, content: description, kind: .text))
+        }
+        if let content = textContent(callView?["content"]) {
+            sections.append(.init(id: "call-content", title: "操作说明", content: content, kind: .text))
+        }
+        if let rawInput = readableJSON(callView?["rawInput"]) {
+            sections.append(.init(id: "input", title: "输入", content: rawInput, kind: .code(language: nil)))
+        }
+
+        var summary: String?
+        switch card {
+        case .terminal:
+            if let output = resultView?["output"]?.stringValue {
+                sections.append(.init(id: "terminal", title: "终端输出", content: limited(output), kind: .code(language: "console")))
+                summary = firstMeaningfulLine(output, fallback: "命令已完成")
+            }
+        case .diff:
+            let diffs = resultView?["diffs"]?.arrayValue ?? callView?["diffs"]?.arrayValue ?? []
+            for (index, diff) in diffs.enumerated() {
+                guard let object = diff.objectValue else { continue }
+                let path = object["path"]?.stringValue ?? "文件 \(index + 1)"
+                let oldText = object["oldText"]?.stringValue
+                let newText = object["newText"]?.stringValue ?? ""
+                sections.append(.init(
+                    id: "diff-\(index)", title: path,
+                    content: unifiedDiff(path: path, oldText: oldText, newText: newText),
+                    kind: .diff
+                ))
+            }
+            summary = sections.isEmpty ? nil : "修改了 \(sections.count) 个文件"
+        case .search:
+            if resultView?["shape"]?.stringValue == "paths" {
+                let paths = resultView?["paths"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                sections.append(.init(id: "paths", title: "匹配路径", content: paths.joined(separator: "\n"), kind: .list))
+            } else {
+                let files = resultView?["files"]?.arrayValue ?? []
+                for (index, file) in files.enumerated() {
+                    guard let object = file.objectValue else { continue }
+                    let path = object["path"]?.stringValue ?? "结果 \(index + 1)"
+                    let lines = object["matches"]?.arrayValue?.compactMap { match -> String? in
+                        guard let value = match.objectValue else { return nil }
+                        let number = int(value["lineNumber"]).map(String.init) ?? "?"
+                        return "\(number)  \(value["line"]?.stringValue ?? "")"
+                    } ?? []
+                    sections.append(.init(id: "match-\(index)", title: path, content: lines.joined(separator: "\n"), kind: .code(language: nil)))
+                }
+            }
+            let total = int(resultView?["total"]) ?? sections.count
+            summary = "找到 \(total) 条结果"
+        case .read:
+            let path = resultView?["path"]?.stringValue ?? "文件内容"
+            let lines = resultView?["lines"]?.arrayValue?.compactMap { line -> String? in
+                guard let value = line.objectValue else { return nil }
+                let number = int(value["number"]).map(String.init) ?? ""
+                return "\(number)  \(value["text"]?.stringValue ?? "")"
+            } ?? []
+            sections.append(.init(
+                id: "read", title: path, content: limited(lines.joined(separator: "\n")),
+                kind: .code(language: resultView?["lang"]?.stringValue)
+            ))
+            summary = "读取 \(path) · \(lines.count) 行"
+        case .web:
+            if resultView?["kind"]?.stringValue == "fetch" {
+                let status = int(resultView?["statusCode"]).map(String.init) ?? ""
+                let url = resultView?["url"]?.stringValue ?? "网页"
+                summary = "抓取完成 \(status)"
+                sections.append(.init(id: "url", title: "来源", content: url, kind: .text))
+            } else {
+                let sources = resultView?["sources"]?.arrayValue ?? []
+                let list = sources.compactMap { source -> String? in
+                    guard let value = source.objectValue,
+                          let url = value["url"]?.stringValue else { return nil }
+                    let title = value["title"]?.stringValue ?? url
+                    let snippet = value["snippet"]?.stringValue
+                    return [title, url, snippet].compactMap { $0 }.joined(separator: "\n")
+                }.joined(separator: "\n\n")
+                sections.append(.init(id: "sources", title: "来源", content: limited(list), kind: .list))
+                if let answer = resultView?["answer"]?.stringValue {
+                    sections.insert(.init(id: "answer", title: "摘要", content: answer, kind: .text), at: 0)
+                }
+                summary = "检索了 \(sources.count) 个来源"
+            }
+        case .generic:
+            if let content = textContent(resultView?["content"]) {
+                sections.append(.init(id: "result", title: "结果", content: limited(content), kind: inferredSectionKind(content)))
+                summary = firstMeaningfulLine(content, fallback: "操作已完成")
+            }
+        }
+
+        if resultView == nil, let rawResult, !rawResult.isEmpty {
+            sections.append(.init(id: "raw-result", title: "结果", content: limited(rawResult), kind: inferredSectionKind(rawResult)))
+            summary = summary ?? firstMeaningfulLine(rawResult, fallback: "操作已完成")
+        }
+        if summary == nil {
+            switch state {
+            case .running: summary = "正在电脑上执行"
+            case .failed: summary = "执行失败"
+            case .stopped: summary = "已停止"
+            case .succeeded: summary = "已完成"
+            case .info: summary = "Harness 操作"
+            }
+        }
+        return (summary ?? "Harness 操作", sections)
+    }
+
+    private static func toolResultBlock(_ entry: HistoryEntryWire?) -> [String: JSONValue]? {
+        entry?.event.data.objectValue?["message"]?.objectValue?["content"]?.arrayValue?
+            .first(where: { $0.objectValue?["type"]?.stringValue == "tool-result" })?
+            .objectValue
+    }
+
+    private static func toolResultCallID(_ entry: HistoryEntryWire) -> String? {
+        entry.event.data.objectValue?["message"]?.objectValue?["source"]?.objectValue?["callId"]?.stringValue
+            ?? toolResultBlock(entry)?["toolCallId"]?.stringValue
+    }
+
+    private static func turnStatusItem(
+        event: SessionEventWire,
+        reason: [String: JSONValue],
+        time: Date
+    ) -> RemoteConversationItem {
+        let kind = reason["kind"]?.stringValue ?? "interrupted"
+        let title: String
+        let text: String
+        let state: RemoteConversationItem.State
+        switch kind {
+        case "error":
+            title = "本轮执行失败"
+            text = reason["error"]?.objectValue?["message"]?.stringValue ?? "模型请求返回了错误。"
+            state = .failed
+        case "max-tokens":
+            title = "已达到输出上限"
+            text = "模型在完成回答前达到了本次输出 token 上限。"
+            state = .failed
+        case "aborted":
+            title = "本轮已停止"
+            text = "执行已被取消，已经产生的内容仍保留在轨迹中。"
+            state = .stopped
+        case "blocked":
+            title = "本轮已阻塞"
+            text = "Harness 无法继续当前步骤。"
+            state = .failed
+        default:
+            title = "本轮已中断"
+            text = "会话在完成前中断，已有内容已保留。"
+            state = .stopped
+        }
+        return RemoteConversationItem(
+            id: "turn-end:\(event.seq)", sequence: event.seq, kind: .status,
+            title: title, text: text, time: time, state: state
+        )
+    }
+
+    private static func stats(from projections: SessionProjectionsWire?) -> RemoteConversationStats? {
+        guard let values = projections?.values,
+              let session = values["sessionStats"]?.objectValue else { return nil }
+        let usage = values["tokenUsage"]?.objectValue
+        return RemoteConversationStats(
+            turns: int(session["turns"]) ?? 0,
+            steps: int(session["steps"]) ?? 0,
+            llmDuration: (session["llmMs"]?.numberValue ?? 0) / 1_000,
+            toolDuration: (session["toolMs"]?.numberValue ?? 0) / 1_000,
+            inputTokens: (int(usage?["uncachedInputTokens"]) ?? 0) + (int(usage?["cacheReadTokens"]) ?? 0),
+            outputTokens: int(usage?["outputTokens"]) ?? 0
+        )
+    }
+
+    private static func toolCard(_ value: String?) -> RemoteConversationItem.ToolCard {
+        switch value {
+        case "terminal": .terminal
+        case "diff": .diff
+        case "search": .search
+        case "read": .read
+        case "web": .web
+        default: .generic
+        }
+    }
+
+    private static func inferredSectionKind(_ content: String) -> RemoteDetailSection.Kind {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("```") {
+            let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+            let language = String(firstLine.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            return .code(language: language.isEmpty ? nil : language)
+        }
+        return .text
+    }
+
+    private static func unifiedDiff(path: String, oldText: String?, newText: String) -> String {
+        var lines = ["--- \(path)", "+++ \(path)"]
+        if let oldText {
+            lines.append(contentsOf: oldText.split(separator: "\n", omittingEmptySubsequences: false).map { "-\($0)" })
+        }
+        lines.append(contentsOf: newText.split(separator: "\n", omittingEmptySubsequences: false).map { "+\($0)" })
+        return limited(lines.joined(separator: "\n"))
+    }
+
+    private static func readableJSON(_ value: JSONValue?) -> String? {
+        guard let value else { return nil }
+        if let string = value.stringValue { return string }
+        guard let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else {
+            return nil
+        }
+        return String(data: pretty, encoding: .utf8)
+    }
+
+    private static func firstMeaningfulLine(_ value: String, fallback: String) -> String {
+        let line = value.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty && !$0.hasPrefix("```") })
+        guard let line else { return fallback }
+        return line.count > 120 ? String(line.prefix(117)) + "…" : line
+    }
+
+    private static func limited(_ value: String, limit: Int = 30_000) -> String {
+        guard value.count > limit else { return value }
+        return String(value.prefix(limit)) + "\n\n…内容过长，已在手机端截断。"
+    }
+
+    private static func durationLabel(milliseconds: Double) -> String {
+        let seconds = max(milliseconds, 0) / 1_000
+        return seconds < 1 ? "\(Int(seconds * 1_000)) ms" : String(format: "%.1f 秒", seconds)
+    }
+
+    private static func int(_ value: JSONValue?) -> Int? {
+        value?.numberValue.map(Int.init)
+    }
+
     private static func readableToolName(_ name: String) -> String {
         name.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-
-    private static func safeToolTitle(view: [String: JSONValue]?, fallbackName: String) -> String {
-        switch view?["kind"]?.stringValue {
-        case "execute": return "在电脑上执行操作"
-        case "read": return "读取电脑上的任务结果"
-        case "edit": return "修改项目文件"
-        default: return view?["title"]?.stringValue ?? readableToolName(fallbackName)
-        }
-    }
-
-    private static func safeToolDetail(view: [String: JSONValue]?, completed: Bool) -> String {
-        if let summary = view?["content"]?.arrayValue?.compactMap({ block -> String? in
-            guard let value = block.objectValue,
-                  value["type"]?.stringValue == "text" else { return nil }
-            return value["text"]?.stringValue
-        }).first, !summary.isEmpty {
-            return summary
-        }
-        return completed ? "已在电脑上完成" : "正在电脑上执行"
     }
 }

@@ -60,14 +60,21 @@ final class RemoteHostViewModel: ObservableObject {
 final class RemoteConversationViewModel: ObservableObject {
     @Published private(set) var session: RemoteSessionSummary
     @Published private(set) var items: [RemoteConversationItem] = []
+    @Published private(set) var trajectory: [RemoteTrajectoryRecord] = []
+    @Published private(set) var queue: [RemoteQueuedMessage] = []
+    @Published private(set) var stats: RemoteConversationStats?
+    @Published private(set) var hasMoreHistory = false
     @Published private(set) var interaction: RemoteInteraction?
     @Published private(set) var isLoading = true
+    @Published private(set) var hasLoadedInitialSnapshot = false
+    @Published private(set) var isLoadingOlder = false
     @Published private(set) var isSending = false
     @Published private(set) var isResponding = false
     @Published private(set) var errorMessage: String?
 
     let client: any HarnessRemoteClient
     private var lastRunning: Bool?
+    private var historyMessageLimit = 80
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         self.client = client
@@ -95,10 +102,16 @@ final class RemoteConversationViewModel: ObservableObject {
     func refresh(silently: Bool = false) async {
         if !silently && items.isEmpty { isLoading = true }
         do {
-            async let latestItems = client.conversation(sessionID: session.id)
+            async let latestSnapshot = client.conversation(
+                sessionID: session.id,
+                maxMessages: historyMessageLimit
+            )
             async let latestSessions = client.sessions()
-            let (newItems, sessions) = try await (latestItems, latestSessions)
-            items = newItems
+            let (snapshot, sessions) = try await (latestSnapshot, latestSessions)
+            items = snapshot.items
+            trajectory = snapshot.trajectory
+            stats = snapshot.stats
+            hasMoreHistory = snapshot.hasMore
             if let latest = sessions.first(where: { $0.id == session.id }) {
                 apply(latest)
             }
@@ -107,20 +120,50 @@ final class RemoteConversationViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        hasLoadedInitialSnapshot = true
     }
 
-    func send(_ text: String) async -> Bool {
+    func loadOlderHistory() async {
+        guard hasMoreHistory, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        historyMessageLimit += 80
+        await refresh(silently: true)
+        isLoadingOlder = false
+    }
+
+    func send(_ text: String, steer: Bool) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return false }
         isSending = true
         defer { isSending = false }
         do {
-            try await client.send(trimmed, to: session.id, steer: session.running)
+            try await client.send(trimmed, to: session.id, steer: session.running && steer)
             await refresh(silently: true)
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    func updateQueue(_ item: RemoteQueuedMessage, action: RemoteQueueAction) async {
+        do {
+            try await client.updateQueue(sessionID: session.id, itemID: item.id, action: action)
+            switch action {
+            case .edit(let text):
+                if let index = queue.firstIndex(where: { $0.id == item.id }) {
+                    queue[index] = RemoteQueuedMessage(
+                        id: item.id,
+                        placement: item.placement,
+                        preview: text,
+                        text: text
+                    )
+                }
+            case .remove, .steer:
+                queue.removeAll { $0.id == item.id }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -155,6 +198,8 @@ final class RemoteConversationViewModel: ObservableObject {
         switch event {
         case .sessionChanged(let sessionID):
             if sessionID == session.id { await refresh(silently: true) }
+        case .queueChanged(let sessionID, let items):
+            if sessionID == session.id { queue = items }
         case .interaction(let interaction):
             guard interaction.sessionID == session.id else { return }
             self.interaction = interaction

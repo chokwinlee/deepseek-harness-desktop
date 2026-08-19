@@ -56,6 +56,11 @@ enum JSONValue: Codable, Hashable, Sendable {
         guard case .bool(let value) = self else { return nil }
         return value
     }
+
+    var numberValue: Double? {
+        guard case .number(let value) = self else { return nil }
+        return value
+    }
 }
 
 struct RemoteHostDescription: Sendable {
@@ -71,20 +76,117 @@ struct RemoteSessionSummary: Identifiable, Hashable, Sendable {
     let projectName: String?
 }
 
+struct RemoteConversationSnapshot: Hashable, Sendable {
+    let items: [RemoteConversationItem]
+    let hasMore: Bool
+    let stats: RemoteConversationStats?
+    var trajectory: [RemoteTrajectoryRecord] = []
+}
+
+struct RemoteConversationStats: Hashable, Sendable {
+    let turns: Int
+    let steps: Int
+    let llmDuration: TimeInterval
+    let toolDuration: TimeInterval
+    let inputTokens: Int
+    let outputTokens: Int
+}
+
+struct RemoteDetailSection: Identifiable, Hashable, Sendable {
+    enum Kind: Hashable, Sendable {
+        case text
+        case code(language: String?)
+        case diff
+        case list
+    }
+
+    let id: String
+    let title: String?
+    let content: String
+    let kind: Kind
+}
+
 struct RemoteConversationItem: Identifiable, Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         case user
         case assistant
         case tool
+        case context
         case status
     }
 
+    enum State: Hashable, Sendable {
+        case info
+        case running
+        case succeeded
+        case failed
+        case stopped
+    }
+
+    enum ToolCard: Hashable, Sendable {
+        case generic
+        case terminal
+        case diff
+        case search
+        case read
+        case web
+    }
+
     let id: String
+    var sequence: Int = 0
     let kind: Kind
     let title: String?
     let text: String
     let time: Date
+    var state: State = .info
+    var toolCard: ToolCard? = nil
+    var toolCategory: String? = nil
+    var reasoning: String? = nil
+    var details: [RemoteDetailSection] = []
+    var metadata: [String] = []
     var isStreaming = false
+}
+
+struct RemoteQueuedMessage: Identifiable, Hashable, Sendable {
+    enum Placement: String, Hashable, Sendable {
+        case queued
+        case steering
+        case context
+    }
+
+    let id: String
+    let placement: Placement
+    let preview: String
+    let text: String?
+}
+
+struct RemoteTrajectoryRecord: Identifiable, Hashable, Sendable {
+    enum Kind: Hashable, Sendable {
+        case input
+        case context
+        case request
+        case assistant
+        case tool
+        case lifecycle
+    }
+
+    let id: String
+    let sequence: Int
+    let turn: Int?
+    let step: Int?
+    let kind: Kind
+    let title: String
+    let summary: String
+    let time: Date
+    let duration: TimeInterval?
+    let state: RemoteConversationItem.State
+    var details: [RemoteDetailSection] = []
+}
+
+enum RemoteQueueAction: Hashable, Sendable {
+    case edit(String)
+    case remove
+    case steer
 }
 
 struct RemoteQuestion: Identifiable, Hashable, Sendable {
@@ -131,6 +233,7 @@ enum RemoteInteractionDecision: Hashable, Sendable {
 
 enum RemoteLiveEvent: Hashable, Sendable {
     case sessionChanged(String)
+    case queueChanged(sessionID: String, items: [RemoteQueuedMessage])
     case interaction(RemoteInteraction)
     case interactionResolved(String)
 }
