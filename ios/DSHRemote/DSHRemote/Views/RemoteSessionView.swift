@@ -35,12 +35,21 @@ struct RemoteSessionView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             RemoteTopBar(
-                title: browserState.sessionTitle ?? "新对话",
+                title: browserState.isSettingsPresented
+                    ? "设置"
+                    : (browserState.sessionTitle ?? "新对话"),
                 hostName: host.name,
                 isLoading: browserState.isLoading,
                 isReady: browserState.isMobileAdaptationReady,
+                showsSessionActions: !browserState.isSettingsPresented,
                 progress: browserState.progress,
-                onBack: { dismiss() },
+                onBack: {
+                    if browserState.isSettingsPresented {
+                        send(.closeSettings)
+                    } else {
+                        dismiss()
+                    }
+                },
                 onSessions: { send(.toggleSidebar) },
                 onNewSession: { send(.newSession) }
             )
@@ -63,6 +72,7 @@ private struct RemoteTopBar: View {
     let hostName: String
     let isLoading: Bool
     let isReady: Bool
+    let showsSessionActions: Bool
     let progress: Double
     let onBack: () -> Void
     let onSessions: () -> Void
@@ -72,7 +82,9 @@ private struct RemoteTopBar: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 toolbarButton("返回", systemImage: "chevron.left", action: onBack)
-                toolbarButton("会话", systemImage: "sidebar.left", action: onSessions)
+                if showsSessionActions {
+                    toolbarButton("会话", systemImage: "sidebar.left", action: onSessions)
+                }
 
                 VStack(spacing: 2) {
                     Text(title)
@@ -92,7 +104,12 @@ private struct RemoteTopBar: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 6)
 
-                toolbarButton("新建会话", systemImage: "square.and.pencil", action: onNewSession)
+                if showsSessionActions {
+                    toolbarButton("新建会话", systemImage: "square.and.pencil", action: onNewSession)
+                } else {
+                    Color.clear
+                        .frame(width: 44, height: 44)
+                }
             }
             .frame(height: 52)
             .padding(.horizontal, 4)

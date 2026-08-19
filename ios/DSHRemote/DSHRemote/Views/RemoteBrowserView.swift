@@ -8,11 +8,13 @@ struct RemoteBrowserState: Equatable {
     var errorMessage: String?
     var sessionTitle: String?
     var isMobileAdaptationReady = false
+    var isSettingsPresented = false
 }
 
 enum RemoteBrowserAction: String {
     case toggleSidebar
     case newSession
+    case closeSettings
     case reload
 }
 
@@ -132,6 +134,7 @@ struct RemoteBrowserView: UIViewRepresentable {
                     self.state.wrappedValue.sessionTitle = nil
                 }
                 self.state.wrappedValue.isMobileAdaptationReady = payload["ready"] as? Bool ?? false
+                self.state.wrappedValue.isSettingsPresented = payload["settings"] as? Bool ?? false
             }
         }
 
