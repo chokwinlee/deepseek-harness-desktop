@@ -15,4 +15,4 @@ Harness Remote is an independent open-source project. It is not an official Deep
 
 Report reproducible problems at <https://github.com/chokwinlee/deepseek-harness-desktop/issues>. Include the iOS version, Desktop version, connection type, and the visible error message. Never include API keys, tailnet credentials, private source code, or confidential prompts.
 
-The built-in Review Demo is available without a computer and can be used to verify the app's interface, notifications, prompt controls, and question flow.
+When no computer has been saved, the built-in offline experience can be used to explore the app's interface, notifications, prompt controls, and question flow.

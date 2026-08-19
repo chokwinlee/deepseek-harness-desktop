@@ -295,7 +295,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
 }
 
 actor DemoHarnessRemoteClient: HarnessRemoteClient {
-    nonisolated let displayName = "审核演示"
+    nonisolated let displayName = "体验模式"
     nonisolated let isDemo = true
 
     private let sessionID = "review-demo-session"
@@ -435,7 +435,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     ]
 
     func describe() async throws -> RemoteHostDescription {
-        RemoteHostDescription(version: "Review Demo", attachedSessions: 1)
+        RemoteHostDescription(version: "Offline Demo", attachedSessions: 1)
     }
 
     func sessions() async throws -> [RemoteSessionSummary] {

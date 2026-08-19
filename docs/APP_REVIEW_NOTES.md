@@ -11,13 +11,13 @@ The app is an independent open-source project and is not affiliated with DeepSee
 No login or review credentials are required.
 
 1. Launch the app.
-2. Tap **Review Demo** in the first section.
+2. On the no-computer screen, tap **先体验一下** below the connect button.
 3. Open **Login flow release check**.
 4. Inspect the native conversation and tool-summary cards.
 5. Answer the visible confirmation question.
 6. Send a prompt; the demo simulates running and completion without network access or an LLM.
 
-The demo is clearly labeled and contains no hidden gestures.
+The offline experience is presented as an explicit secondary action when no computer has been saved and contains no hidden gestures.
 
 ## Live connection
 

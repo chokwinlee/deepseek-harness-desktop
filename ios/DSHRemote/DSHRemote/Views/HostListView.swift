@@ -6,59 +6,15 @@ struct HostListView: View {
     @State private var showsAbout = false
 
     var body: some View {
-        List {
-            Section {
-                NavigationLink {
-                    RemoteSessionView()
-                } label: {
-                    DemoModeRow()
-                }
-            } header: {
-                Text("先体验完整流程")
-            } footer: {
-                Text("演示模式不连接网络、不执行代码，也不会调用模型。")
-            }
-
+        Group {
             if hostStore.hosts.isEmpty {
-                Section {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Label("连接你自己的电脑", systemImage: "laptopcomputer.and.iphone")
-                            .font(.headline)
-                        Text("在 Harness Desktop 中开启手机 Remote。跨网络使用 Tailscale；同一受信任 Wi-Fi 可直接扫码连接。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Button("添加电脑") { showsAddHost = true }
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding(.vertical, 6)
+                EmptyConnectionView {
+                    showsAddHost = true
                 }
             } else {
-                Section("我的电脑") {
-                    ForEach(hostStore.hosts) { host in
-                        NavigationLink(value: host) {
-                            HostRow(host: host)
-                        }
-                    }
-                    .onDelete(perform: hostStore.remove)
-                }
-            }
-
-            Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("本地优先")
-                            .font(.subheadline.weight(.semibold))
-                        Text("任务、代码和模型凭据留在你的电脑；本项目不提供云端中继。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "lock.shield")
-                        .foregroundStyle(.green)
-                }
+                savedHosts
             }
         }
-        .listSectionSpacing(20)
         .navigationTitle("Harness Remote")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -67,10 +23,13 @@ struct HostListView: View {
                 } label: {
                     Label("关于与隐私", systemImage: "info.circle")
                 }
-                Button {
-                    showsAddHost = true
-                } label: {
-                    Label("添加电脑", systemImage: "plus")
+
+                if !hostStore.hosts.isEmpty {
+                    Button {
+                        showsAddHost = true
+                    } label: {
+                        Label("添加电脑", systemImage: "plus")
+                    }
                 }
             }
         }
@@ -79,32 +38,102 @@ struct HostListView: View {
                 .environmentObject(hostStore)
         }
     }
-}
 
-private struct DemoModeRow: View {
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "sparkles")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
-                .background(
-                    LinearGradient(
-                        colors: [.indigo, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 14)
-                )
-            VStack(alignment: .leading, spacing: 4) {
-                Text("审核演示")
-                    .font(.headline)
-                Text("查看任务、发送补充、处理确认")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var savedHosts: some View {
+        List {
+            Section("电脑") {
+                ForEach(hostStore.hosts) { host in
+                    NavigationLink(value: host) {
+                        HostRow(host: host)
+                    }
+                }
+                .onDelete(perform: hostStore.remove)
             }
         }
-        .padding(.vertical, 5)
+        .listStyle(.insetGrouped)
+    }
+}
+
+private struct EmptyConnectionView: View {
+    let addHost: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Image(systemName: "laptopcomputer.and.iphone")
+                    .font(.system(size: 34, weight: .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.primary)
+                    .frame(width: 68, height: 68)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+                    .padding(.bottom, 22)
+
+                Text("连接你的电脑")
+                    .font(.title2.weight(.bold))
+
+                Text("在 Harness Desktop 中开启手机 Remote，然后扫码或输入地址。")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+
+                Button(action: addHost) {
+                    Label("连接电脑", systemImage: "qrcode.viewfinder")
+                        .font(.headline)
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.primary)
+                .padding(.top, 28)
+
+                Text("支持 Tailscale 和受信任的同一 Wi-Fi")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 12)
+
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(spacing: 6) {
+                            experiencePrompt
+                            experienceLink
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            experiencePrompt
+                            experienceLink
+                        }
+                    }
+                }
+                .font(.footnote)
+                .padding(.top, 34)
+            }
+            .frame(maxWidth: 380)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 28)
+            .padding(.top, 62)
+            .padding(.bottom, 32)
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private var experiencePrompt: some View {
+        Text("还没有可连接的电脑？")
+            .foregroundStyle(.secondary)
+    }
+
+    private var experienceLink: some View {
+        NavigationLink {
+            RemoteSessionView()
+        } label: {
+            HStack(spacing: 3) {
+                Text("先体验一下")
+                Image(systemName: "arrow.right")
+                    .font(.caption2.weight(.semibold))
+            }
+        }
     }
 }
 
@@ -114,40 +143,34 @@ private struct HostRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "desktopcomputer")
-                .font(.title3)
+                .font(.body.weight(.medium))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
-                .frame(width: 40, height: 40)
-                .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .frame(width: 36, height: 36)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(host.name)
-                    .font(.body.weight(.semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(host.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(host.transportLabel)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
+                }
+
                 Text(host.address)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text(host.transportLabel)
-                    .font(.caption2)
-                    .foregroundStyle(transportColor)
+                    .truncationMode(.middle)
             }
         }
-        .padding(.vertical, 3)
-    }
-
-    private var transportColor: Color {
-        switch host.transport {
-        case .loopback:
-            .orange
-        case .sameWiFi:
-            .green
-        case .unpairedLocalNetwork:
-            .red
-        case .tailscale:
-            .blue
-        case .https:
-            .indigo
-        case .custom:
-            .secondary
-        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
     }
 }

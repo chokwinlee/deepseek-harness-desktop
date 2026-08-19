@@ -76,7 +76,7 @@ struct RemoteSessionView: View {
                     )
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(viewModel.client.isDemo ? "内置演示模式" : "已连接到你的电脑")
+                    Text(viewModel.client.isDemo ? "体验模式" : "已连接到你的电脑")
                         .font(.headline)
                     Text(connectionDetail)
                         .font(.subheadline)
@@ -89,7 +89,7 @@ struct RemoteSessionView: View {
 
     private var connectionDetail: String {
         if viewModel.client.isDemo {
-            return "不连接网络、不调用模型，供功能体验与 App Review 使用。"
+            return "使用内置示例体验任务、对话与确认流程；不会连接网络或调用模型。"
         }
         if let description = viewModel.description {
             return "Harness \(description.version) · \(description.attachedSessions) 个活跃会话"

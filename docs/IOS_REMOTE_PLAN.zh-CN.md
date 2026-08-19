@@ -132,5 +132,5 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 1. 完成 macOS + 模拟器的两种传输回归；
 2. 完成一台 Mac + 一台 iPhone 的局域网、Tailscale 与蜂窝网络真机闭环；
 3. 复用相同安全边界实现 Windows Host；
-4. 提交 TestFlight，并用内置审核演示降低 App Review 对外部硬件和账户的依赖；
+4. 提交 TestFlight，并用内置离线体验降低 App Review 对外部硬件和账户的依赖；
 5. 收集 10 位真实用户的一周使用数据，再决定是否增加后台推送服务或更多桌面控制能力。
