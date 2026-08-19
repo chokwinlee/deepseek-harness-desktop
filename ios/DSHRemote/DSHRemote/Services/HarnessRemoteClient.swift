@@ -313,14 +313,73 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             kind: .tool,
             title: "读取 4 个项目文件",
             text: "已在你的电脑上安全完成",
-            time: Date().addingTimeInterval(-160)
+            time: Date().addingTimeInterval(-160),
+            state: .succeeded,
+            toolCard: .read,
+            toolCategory: "read",
+            details: [
+                RemoteDetailSection(
+                    id: "demo-tool-files",
+                    title: "FILES",
+                    content: "Sources/Auth/SessionStore.swift\nSources/Auth/LoginView.swift\nTests/AuthTests.swift\nREADME.md",
+                    kind: .list
+                ),
+            ],
+            metadata: ["4 files", "320 ms"]
         ),
         RemoteConversationItem(
             id: "demo-assistant",
             kind: .assistant,
             title: nil,
             text: "我发现两个需要先处理的问题：登录态过期后的恢复路径，以及错误提示没有告诉用户下一步怎么做。我已经整理了一份修复计划，请你确认。",
-            time: Date().addingTimeInterval(-150)
+            time: Date().addingTimeInterval(-150),
+            reasoning: "先核对登录状态的生命周期，再沿着错误处理分支检查用户是否能恢复操作。最后用现有测试确认风险是否已经被覆盖。",
+            metadata: ["deepseek-chat", "1.7K tokens", "4.2 s"]
+        ),
+    ]
+
+    private var demoTrajectory: [RemoteTrajectoryRecord] = [
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-input", sequence: 1, turn: 0, step: nil, kind: .input,
+            title: "User", summary: "检查登录流程并给出风险清单", time: Date().addingTimeInterval(-180),
+            duration: nil, state: .succeeded
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-request", sequence: 2, turn: 0, step: 0, kind: .request,
+            title: "Model request", summary: "整理上下文并请求分析", time: Date().addingTimeInterval(-174),
+            duration: 0.12, state: .succeeded,
+            details: [
+                RemoteDetailSection(
+                    id: "demo-request-payload", title: "PAYLOAD",
+                    content: "model: deepseek-chat\nmode: normal\nproject: Sample Project", kind: .code(language: "yaml")
+                ),
+            ]
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-thinking", sequence: 3, turn: 0, step: 0, kind: .assistant,
+            title: "Think", summary: "检查登录状态生命周期和错误恢复路径", time: Date().addingTimeInterval(-170),
+            duration: 1.8, state: .succeeded
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-tool", sequence: 4, turn: 0, step: 1, kind: .tool,
+            title: "Read", summary: "读取 4 个项目文件", time: Date().addingTimeInterval(-160),
+            duration: 0.32, state: .succeeded,
+            details: [
+                RemoteDetailSection(
+                    id: "demo-trajectory-files", title: "RESULT",
+                    content: "Sources/Auth/SessionStore.swift\nSources/Auth/LoginView.swift\nTests/AuthTests.swift\nREADME.md", kind: .list
+                ),
+            ]
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-answer", sequence: 5, turn: 0, step: 2, kind: .assistant,
+            title: "Assistant", summary: "整理两个上线前风险和修复计划", time: Date().addingTimeInterval(-150),
+            duration: 2.4, state: .succeeded
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-end", sequence: 6, turn: 0, step: 2, kind: .lifecycle,
+            title: "Turn complete", summary: "等待用户确认", time: Date().addingTimeInterval(-149),
+            duration: 4.62, state: .succeeded
         ),
     ]
 
@@ -341,7 +400,19 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     }
 
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
-        RemoteConversationSnapshot(items: items, hasMore: false, stats: nil)
+        RemoteConversationSnapshot(
+            items: items,
+            hasMore: false,
+            stats: RemoteConversationStats(
+                turns: 1,
+                steps: 2,
+                llmDuration: 4.2,
+                toolDuration: 0.32,
+                inputTokens: 1_284,
+                outputTokens: 436
+            ),
+            trajectory: demoTrajectory
+        )
     }
 
     func send(_ text: String, to sessionID: String, steer: Bool) async throws {
