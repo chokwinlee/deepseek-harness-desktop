@@ -25,6 +25,7 @@
 		A10000000000000000000012 /* RemoteConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* RemoteConversationView.swift */; };
 		A10000000000000000000013 /* AboutRemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* AboutRemoteView.swift */; };
 		A10000000000000000000014 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* PrivacyInfo.xcprivacy */; };
+		A10000000000000000000015 /* RemoteDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* RemoteDesignSystem.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		B10000000000000000000014 /* RemoteConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConversationView.swift; sourceTree = "<group>"; };
 		B10000000000000000000015 /* AboutRemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutRemoteView.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B10000000000000000000017 /* RemoteDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDesignSystem.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +110,7 @@
 		D10000000000000000000005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				B10000000000000000000017 /* RemoteDesignSystem.swift */,
 				B10000000000000000000006 /* RootView.swift */,
 				B10000000000000000000007 /* HostListView.swift */,
 				B10000000000000000000008 /* AddHostView.swift */,
@@ -213,6 +216,7 @@
 				A10000000000000000000011 /* RemoteViewModels.swift in Sources */,
 				A10000000000000000000012 /* RemoteConversationView.swift in Sources */,
 				A10000000000000000000013 /* AboutRemoteView.swift in Sources */,
+				A10000000000000000000015 /* RemoteDesignSystem.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

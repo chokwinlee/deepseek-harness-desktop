@@ -133,6 +133,7 @@ final class RemoteConversationViewModel: ObservableObject {
     @Published private(set) var interaction: RemoteInteraction?
     @Published private(set) var isLoading = true
     @Published private(set) var hasLoadedInitialSnapshot = false
+    @Published private(set) var hasLoadedConversationSnapshot = false
     @Published private(set) var isLoadingOlder = false
     @Published private(set) var isSending = false
     @Published private(set) var isCancelling = false
@@ -186,6 +187,7 @@ final class RemoteConversationViewModel: ObservableObject {
             trajectory = snapshot.trajectory
             stats = snapshot.stats
             hasMoreHistory = snapshot.hasMore
+            hasLoadedConversationSnapshot = true
             if let latest = sessions.first(where: { $0.id == session.id }) {
                 apply(latest)
             }

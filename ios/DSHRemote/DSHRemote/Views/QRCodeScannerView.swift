@@ -3,9 +3,10 @@ import VisionKit
 
 struct QRCodeScannerView: UIViewControllerRepresentable {
     let onResult: (String) -> Void
+    var onError: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onResult: onResult)
+        Coordinator(onResult: onResult, onError: onError)
     }
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
@@ -19,7 +20,13 @@ struct QRCodeScannerView: UIViewControllerRepresentable {
             isHighlightingEnabled: true
         )
         controller.delegate = context.coordinator
-        try? controller.startScanning()
+        do {
+            try controller.startScanning()
+        } catch {
+            DispatchQueue.main.async {
+                onError?(error.localizedDescription)
+            }
+        }
         return controller
     }
 
@@ -31,10 +38,12 @@ struct QRCodeScannerView: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         private let onResult: (String) -> Void
+        private let onError: ((String) -> Void)?
         private var hasDeliveredResult = false
 
-        init(onResult: @escaping (String) -> Void) {
+        init(onResult: @escaping (String) -> Void, onError: ((String) -> Void)?) {
             self.onResult = onResult
+            self.onError = onError
         }
 
         func dataScanner(
@@ -51,6 +60,15 @@ struct QRCodeScannerView: UIViewControllerRepresentable {
                 hasDeliveredResult = true
                 onResult(value)
                 return
+            }
+        }
+
+        func dataScanner(
+            _ dataScanner: DataScannerViewController,
+            becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable
+        ) {
+            DispatchQueue.main.async { [onError] in
+                onError?(error.localizedDescription)
             }
         }
     }

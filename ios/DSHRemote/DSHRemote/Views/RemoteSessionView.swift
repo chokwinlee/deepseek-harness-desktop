@@ -2,34 +2,6 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-private enum RemoteProjectsTheme {
-    static let accent = Color(red: 0.40, green: 0.62, blue: 1.00)
-
-    static let canvas = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.082, green: 0.082, blue: 0.090, alpha: 1)
-            : UIColor(red: 0.965, green: 0.965, blue: 0.975, alpha: 1)
-    })
-
-    static let surface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.137, green: 0.137, blue: 0.141, alpha: 1)
-            : UIColor.white
-    })
-
-    static let mutedSurface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.173, green: 0.173, blue: 0.180, alpha: 1)
-            : UIColor(red: 0.925, green: 0.925, blue: 0.937, alpha: 1)
-    })
-
-    static let hairline = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor.white.withAlphaComponent(0.10)
-            : UIColor.black.withAlphaComponent(0.08)
-    })
-}
-
 struct RemoteSessionView: View {
     @StateObject private var viewModel: RemoteHostViewModel
     @State private var expandedProjectIDs: Set<String> = []
@@ -93,16 +65,26 @@ struct RemoteSessionView: View {
                             .padding(.horizontal, 2)
                         }
 
-                        ForEach(projectGroups) { project in
-                            RemoteProjectCard(
-                                project: project,
-                                client: viewModel.client,
-                                isExpanded: expandedProjectIDs.contains(project.id),
-                                showsAllSessions: fullyExpandedProjectIDs.contains(project.id),
-                                toggleExpanded: { toggleProject(project.id) },
-                                toggleAllSessions: { toggleAllSessions(project.id) }
-                            )
+                        VStack(spacing: 0) {
+                            ForEach(Array(projectGroups.enumerated()), id: \.element.id) { index, project in
+                                RemoteProjectCard(
+                                    project: project,
+                                    client: viewModel.client,
+                                    isExpanded: expandedProjectIDs.contains(project.id),
+                                    showsAllSessions: fullyExpandedProjectIDs.contains(project.id),
+                                    toggleExpanded: { toggleProject(project.id) },
+                                    toggleAllSessions: { toggleAllSessions(project.id) }
+                                )
+
+                                if index < projectGroups.count - 1 {
+                                    Rectangle()
+                                        .fill(RemoteTheme.hairline)
+                                        .frame(height: 0.5)
+                                        .padding(.leading, 52)
+                                }
+                            }
                         }
+                        .remoteSurface(cornerRadius: 14)
                     }
                 }
             }
@@ -110,9 +92,21 @@ struct RemoteSessionView: View {
             .padding(.top, 14)
             .padding(.bottom, 28)
         }
-        .background(RemoteProjectsTheme.canvas.ignoresSafeArea())
-        .navigationTitle(viewModel.client.displayName)
-        .navigationBarTitleDisplayMode(.inline)
+        .background(RemoteTheme.canvas.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            RemotePageHeader(
+                title: viewModel.client.displayName,
+                subtitle: "项目与会话"
+            ) {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("正在同步")
+                }
+            }
+        }
+        .remoteNavigationChromeHidden()
         .refreshable { await viewModel.refresh() }
         .task { await viewModel.monitor() }
         .onChange(of: projectExpansionKey, initial: true) { _, _ in
@@ -150,31 +144,29 @@ struct RemoteSessionView: View {
     }
 
     private var emptyProjectsView: some View {
-        ContentUnavailableView(
-            "还没有项目",
-            systemImage: "folder",
-            description: Text("先在 Harness Desktop 中添加项目或打开一个目录。")
+        RemoteEmptyState(
+            icon: "folder",
+            title: "还没有项目",
+            message: "先在 Harness Desktop 中添加项目或打开一个目录。"
         )
         .frame(maxWidth: .infinity)
         .padding(.top, 72)
     }
 
     private var projectCatalogLoadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("正在读取电脑上的项目…")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 92)
+        RemoteLoadingState(
+            icon: "folder",
+            title: "正在读取项目",
+            message: "从电脑同步项目分组和会话归属"
+        )
+        .padding(.top, 72)
     }
 
     private var projectCatalogUnavailableView: some View {
-        ContentUnavailableView(
-            "暂时无法读取项目",
-            systemImage: "folder.badge.questionmark",
-            description: Text("会话服务已响应，但项目分组暂不可用。下拉即可重试。")
+        RemoteEmptyState(
+            icon: "folder.badge.questionmark",
+            title: "暂时无法读取项目",
+            message: "会话服务已响应，但项目分组暂不可用。下拉即可重试。"
         )
         .frame(maxWidth: .infinity)
         .padding(.top, 72)
@@ -403,7 +395,7 @@ private struct RemoteProjectCard: View {
 
             if isExpanded {
                 Divider()
-                    .overlay(RemoteProjectsTheme.hairline)
+                    .overlay(RemoteTheme.hairline)
                     .padding(.leading, 48)
 
                 if project.sessions.isEmpty {
@@ -424,7 +416,7 @@ private struct RemoteProjectCard: View {
 
                         if index < visibleSessions.count - 1 || hasHiddenSessions || showsAllSessions {
                             Divider()
-                                .overlay(RemoteProjectsTheme.hairline)
+                                .overlay(RemoteTheme.hairline)
                                 .padding(.leading, 48)
                         }
                     }
@@ -439,7 +431,7 @@ private struct RemoteProjectCard: View {
                                     .font(.caption.weight(.semibold))
                             }
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(RemoteProjectsTheme.accent)
+                            .foregroundStyle(RemoteTheme.accent)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)
                         }
@@ -448,12 +440,7 @@ private struct RemoteProjectCard: View {
                 }
             }
         }
-        .background(RemoteProjectsTheme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(RemoteProjectsTheme.hairline, lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(isExpanded ? RemoteTheme.raisedSurface.opacity(0.45) : Color.clear)
     }
 
     @ViewBuilder
@@ -486,7 +473,7 @@ private struct RemoteProjectCard: View {
 
             Image(systemName: isExpanded ? "folder.fill" : "folder")
                 .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(RemoteProjectsTheme.accent)
+                .foregroundStyle(RemoteTheme.accent)
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -521,13 +508,13 @@ private struct RemoteProjectCard: View {
              ? "\(project.runningCount) 个运行中"
              : "\(project.sessions.count) 个会话")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(project.runningCount > 0 ? RemoteProjectsTheme.accent : .secondary)
+            .foregroundStyle(project.runningCount > 0 ? RemoteTheme.accent : .secondary)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(
                 project.runningCount > 0
-                    ? RemoteProjectsTheme.accent.opacity(0.13)
-                    : RemoteProjectsTheme.mutedSurface,
+                    ? RemoteTheme.accent.opacity(0.13)
+                    : RemoteTheme.mutedSurface,
                 in: Capsule()
             )
             .fixedSize(horizontal: true, vertical: false)
@@ -575,7 +562,7 @@ private struct RemoteProjectSessionRow: View {
                 HStack(spacing: 6) {
                     if session.running {
                         Text("执行中")
-                            .foregroundStyle(RemoteProjectsTheme.accent)
+                            .foregroundStyle(RemoteTheme.accent)
                     }
                     Text(relativeUpdate)
                         .foregroundStyle(.secondary)
@@ -604,11 +591,11 @@ private struct RemoteProjectSessionRow: View {
         if session.running {
             ZStack {
                 Circle()
-                    .fill(RemoteProjectsTheme.accent.opacity(0.16))
+                    .fill(RemoteTheme.accent.opacity(0.16))
                     .frame(width: 20, height: 20)
                 Image(systemName: "waveform")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(RemoteProjectsTheme.accent)
+                    .foregroundStyle(RemoteTheme.accent)
             }
         } else {
             Color.clear
@@ -640,7 +627,8 @@ private struct StaleProjectsBanner: View {
                     Button("重试", action: retry)
                         .font(.subheadline.weight(.semibold))
                         .buttonStyle(.plain)
-                        .foregroundStyle(RemoteProjectsTheme.accent)
+                        .foregroundStyle(RemoteTheme.accent)
+                        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -650,22 +638,23 @@ private struct StaleProjectsBanner: View {
                     Button("重试", action: retry)
                         .font(.subheadline.weight(.semibold))
                         .buttonStyle(.plain)
-                        .foregroundStyle(RemoteProjectsTheme.accent)
+                        .foregroundStyle(RemoteTheme.accent)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
             }
         }
         .padding(13)
-        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .background(RemoteTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+                .stroke(RemoteTheme.warning.opacity(0.18), lineWidth: 1)
         }
     }
 
     private var bannerMessage: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(.orange)
+                .foregroundStyle(RemoteTheme.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("连接中断 · 显示上次结果")
                     .font(.subheadline.weight(.semibold))
@@ -683,19 +672,13 @@ private struct ProjectsConnectionError: View {
     let retry: () -> Void
 
     var body: some View {
-        ContentUnavailableView {
-            Label("无法连接这台电脑", systemImage: "wifi.exclamationmark")
-        } description: {
-            VStack(spacing: 6) {
-                Text("请确认电脑上的 Harness Desktop 与 Remote 已开启。")
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        } actions: {
-            Button("重新连接", action: retry)
-                .buttonStyle(.borderedProminent)
-                .tint(RemoteProjectsTheme.accent)
+        RemoteEmptyState(
+            icon: "wifi.exclamationmark",
+            title: "无法连接这台电脑",
+            message: "请确认 Harness Desktop 正在运行且手机 Remote 已开启。\n\(message)",
+            action: retry
+        ) {
+            Label("重新连接", systemImage: "arrow.clockwise")
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 72)
@@ -732,10 +715,10 @@ private struct ProjectsLoadingView: View {
                 }
                 .foregroundStyle(.secondary.opacity(0.22))
                 .padding(16)
-                .background(RemoteProjectsTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 14))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(RemoteProjectsTheme.hairline, lineWidth: 1)
+                        .stroke(RemoteTheme.hairline, lineWidth: 1)
                 }
                 .accessibilityHidden(true)
             }

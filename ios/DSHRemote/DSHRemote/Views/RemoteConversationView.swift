@@ -1,42 +1,6 @@
 import SwiftUI
 import UIKit
 
-private enum DSHRemoteTheme {
-    static let accent = Color(red: 0.40, green: 0.62, blue: 1.00)
-    static let thinking = Color(red: 0.55, green: 0.49, blue: 0.96)
-    static let tool = Color(red: 0.92, green: 0.55, blue: 0.25)
-
-    static let canvas = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.082, green: 0.082, blue: 0.090, alpha: 1)
-            : UIColor(red: 0.973, green: 0.973, blue: 0.978, alpha: 1)
-    })
-
-    static let surface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.137, green: 0.137, blue: 0.141, alpha: 1)
-            : UIColor.white
-    })
-
-    static let mutedSurface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.173, green: 0.173, blue: 0.180, alpha: 1)
-            : UIColor(red: 0.925, green: 0.925, blue: 0.937, alpha: 1)
-    })
-
-    static let codeSurface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.095, green: 0.095, blue: 0.102, alpha: 1)
-            : UIColor(red: 0.94, green: 0.94, blue: 0.95, alpha: 1)
-    })
-
-    static let hairline = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor.white.withAlphaComponent(0.10)
-            : UIColor.black.withAlphaComponent(0.08)
-    })
-}
-
 struct RemoteConversationView: View {
     private enum BusyDelivery {
         case queue
@@ -44,8 +8,8 @@ struct RemoteConversationView: View {
     }
 
     private enum ViewMode: String, CaseIterable {
-        case conversation = "Chat"
-        case trajectory = "Trajectory"
+        case conversation = "对话"
+        case trajectory = "轨迹"
     }
 
     @StateObject private var viewModel: RemoteConversationViewModel
@@ -65,6 +29,14 @@ struct RemoteConversationView: View {
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         _viewModel = StateObject(wrappedValue: RemoteConversationViewModel(client: client, session: session))
+        #if DEBUG
+        let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"]
+        _viewMode = State(initialValue: scenario == "trajectory" ? .trajectory : .conversation)
+        _showsModelPicker = State(initialValue: scenario == "models")
+        if scenario == "details" {
+            _selectedDetail = State(initialValue: Self.debugDetailItem)
+        }
+        #endif
     }
 
     var body: some View {
@@ -83,20 +55,35 @@ struct RemoteConversationView: View {
                                 }
                             }
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(DSHRemoteTheme.accent)
+                            .foregroundStyle(RemoteTheme.accent)
                             .buttonStyle(.plain)
-                            .padding(.vertical, 8)
+                            .frame(minHeight: 44)
                             .disabled(viewModel.isLoadingOlder)
                         }
 
                         if viewModel.isLoading && viewModel.items.isEmpty {
-                            ProgressView("正在同步任务…")
-                                .padding(.top, 54)
+                            RemoteLoadingState(
+                                icon: "arrow.triangle.2.circlepath",
+                                title: "正在同步会话",
+                                message: "从你的电脑读取对话、轨迹和运行状态"
+                            )
+                            .padding(.top, 46)
+                        } else if !viewModel.hasLoadedConversationSnapshot,
+                                  let error = viewModel.errorMessage {
+                            RemoteEmptyState(
+                                icon: "wifi.exclamationmark",
+                                title: "暂时无法读取会话",
+                                message: error,
+                                action: { Task { await viewModel.refresh() } }
+                            ) {
+                                Label("重新连接", systemImage: "arrow.clockwise")
+                            }
+                            .padding(.top, 38)
                         } else if viewMode == .conversation && viewModel.items.isEmpty {
-                            ContentUnavailableView(
-                                "开始一项任务",
-                                systemImage: "text.bubble",
-                                description: Text("输入你的目标，Harness 会在电脑上的当前项目中执行。")
+                            RemoteEmptyState(
+                                icon: "text.bubble",
+                                title: "开始一项任务",
+                                message: "输入你的目标，Harness 会在电脑上的当前项目中执行。"
                             )
                             .padding(.top, 38)
                         } else if viewMode == .conversation {
@@ -146,10 +133,10 @@ struct RemoteConversationView: View {
                             Label("\(unseenUpdates) 条更新", systemImage: "arrow.down")
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
+                                .frame(minHeight: 44)
                                 .foregroundStyle(.primary)
-                                .background(DSHRemoteTheme.surface, in: Capsule())
-                                .overlay { Capsule().stroke(DSHRemoteTheme.hairline) }
+                                .background(RemoteTheme.surface, in: Capsule())
+                                .overlay { Capsule().stroke(RemoteTheme.hairline) }
                                 .shadow(color: .black.opacity(0.14), radius: 10, y: 4)
                         }
                         .buttonStyle(.plain)
@@ -185,14 +172,26 @@ struct RemoteConversationView: View {
                     if wasLoading && !isLoading { lastItemCount = viewModel.items.count }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    bottomDock(bottomSafeArea: viewport.safeAreaInsets.bottom)
+                    if viewModel.hasLoadedConversationSnapshot {
+                        bottomDock(bottomSafeArea: viewport.safeAreaInsets.bottom)
+                    }
                 }
             }
         }
-        .background(DSHRemoteTheme.canvas)
+        .background(RemoteTheme.canvas)
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                sessionMetaLine
+                RemotePageHeader(
+                    title: viewModel.session.title,
+                    subtitle: viewModel.session.projectName ?? "Harness 会话"
+                ) {
+                    RemoteStatusPill(
+                        text: viewModel.session.running ? "执行中" : "待命",
+                        color: viewModel.session.running ? RemoteTheme.accent : RemoteTheme.success,
+                        icon: viewModel.session.running ? "waveform" : "checkmark"
+                    )
+                }
+                sessionSummaryLine
                 DSHConversationTabBar(selection: $viewMode)
 
                 if viewMode == .trajectory {
@@ -206,22 +205,33 @@ struct RemoteConversationView: View {
                         Label("有一项问题等待确认", systemImage: "exclamationmark.bubble.fill")
                             .font(.caption.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .foregroundStyle(.orange)
-                            .background(Color.orange.opacity(0.08))
+                            .frame(minHeight: 44)
+                            .foregroundStyle(RemoteTheme.warning)
+                            .background(RemoteTheme.warning.opacity(0.08))
                     }
                     .buttonStyle(.plain)
                 }
+
+                if let error = viewModel.errorMessage, viewModel.hasLoadedConversationSnapshot {
+                    RemoteInlineNotice(
+                        title: "操作没有完成",
+                        message: error,
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .danger,
+                        actionTitle: "关闭",
+                        action: viewModel.dismissError
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                }
                 Rectangle()
-                    .fill(DSHRemoteTheme.hairline)
+                    .fill(RemoteTheme.hairline)
                     .frame(height: 0.5)
             }
-            .background(DSHRemoteTheme.canvas.opacity(0.98))
+            .background(RemoteTheme.canvas.opacity(0.98))
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
-        .navigationTitle(viewModel.session.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(DSHRemoteTheme.canvas, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .remoteNavigationChromeHidden()
         .task { await viewModel.monitor() }
         .onChange(of: viewModel.session.running) { wasRunning, isRunning in
             if !wasRunning && isRunning { busyDelivery = .queue }
@@ -229,17 +239,14 @@ struct RemoteConversationView: View {
         .sheet(item: $selectedDetail) { item in
             ConversationDetailSheet(item: item)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(RemoteTheme.canvas)
         }
         .sheet(isPresented: $showsModelPicker) {
             RemoteModelSelectionSheet(viewModel: viewModel)
                 .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .alert("连接出现问题", isPresented: errorBinding) {
-            Button("好", role: .cancel) { viewModel.dismissError() }
-        } message: {
-            Text(viewModel.errorMessage ?? "未知错误")
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(RemoteTheme.canvas)
         }
     }
 
@@ -248,11 +255,14 @@ struct RemoteConversationView: View {
     }
 
     private func bottomDock(bottomSafeArea: CGFloat) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             if viewModel.queue.contains(where: { $0.placement == .queued }) {
                 QueueDockView(queue: viewModel.queue, isRunning: viewModel.session.running) { item, action in
                     Task { await viewModel.updateQueue(item, action: action) }
                 }
+                .padding(.horizontal, 8)
+                .padding(.bottom, -5)
+                .zIndex(0)
             }
             if let interaction = viewModel.interaction {
                 InteractionCard(
@@ -263,8 +273,10 @@ struct RemoteConversationView: View {
                     }
                 )
                 .id(interaction.id)
+                .zIndex(1)
             } else {
                 composer
+                    .zIndex(1)
             }
         }
         .padding(.horizontal, 10)
@@ -274,12 +286,13 @@ struct RemoteConversationView: View {
         )
         .background(
             LinearGradient(
-                colors: [DSHRemoteTheme.canvas.opacity(0), DSHRemoteTheme.canvas],
+                colors: [RemoteTheme.canvas.opacity(0), RemoteTheme.canvas],
                 startPoint: .top,
                 endPoint: .center
             )
             .ignoresSafeArea()
         )
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private func dockBottomPadding(bottomSafeArea: CGFloat) -> CGFloat {
@@ -288,33 +301,20 @@ struct RemoteConversationView: View {
         return -min(8, bottomSafeArea - 24)
     }
 
-    private var sessionMetaLine: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(viewModel.session.running ? DSHRemoteTheme.accent : Color.green)
-                .frame(width: 7, height: 7)
-            Text(viewModel.session.running ? "Running" : "Ready")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(viewModel.session.running ? DSHRemoteTheme.accent : .secondary)
-            if let project = viewModel.session.projectName {
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text(project)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            if let stats = viewModel.stats, stats.turns > 0 {
-                Text("\(stats.turns) turns · \(stats.steps) calls")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+    @ViewBuilder
+    private var sessionSummaryLine: some View {
+        if let stats = viewModel.stats, stats.turns > 0 {
+            HStack {
+                Spacer(minLength: 8)
+                Text("\(stats.turns) 轮 · \(stats.steps) 次调用")
+                    .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 7)
-        .padding(.bottom, 3)
     }
 
     private var trajectorySearch: some View {
@@ -333,13 +333,15 @@ struct RemoteConversationView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(DSHRemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 9))
+        .frame(minHeight: 44)
+        .background(RemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 9))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -355,16 +357,16 @@ struct RemoteConversationView: View {
             if !modelIsRoutable {
                 Label("当前模型不可用，请重新选择", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(RemoteTheme.warning)
             }
 
             composerControls
         }
         .padding(12)
-        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 22))
         .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(DSHRemoteTheme.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
     }
@@ -418,7 +420,7 @@ struct RemoteConversationView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 9)
             .frame(minHeight: 34)
-            .background(DSHRemoteTheme.mutedSurface, in: Capsule())
+            .background(RemoteTheme.mutedSurface, in: Capsule())
             .contentShape(Capsule())
             .frame(minHeight: 44)
         }
@@ -437,7 +439,7 @@ struct RemoteConversationView: View {
                 } else if viewModel.modelErrorMessage != nil && viewModel.modelDirectory == nil {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(RemoteTheme.warning)
                 }
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 1) {
@@ -491,15 +493,15 @@ struct RemoteConversationView: View {
                         if viewModel.isCancelling {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.red)
+                                .tint(RemoteTheme.danger)
                         } else {
                             Image(systemName: "stop.fill")
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(.red)
+                                .foregroundStyle(RemoteTheme.danger)
                         }
                     }
                     .frame(width: 34, height: 34)
-                    .background(Color.red.opacity(0.10), in: Circle())
+                    .background(RemoteTheme.danger.opacity(0.10), in: Circle())
                     .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -530,7 +532,7 @@ struct RemoteConversationView: View {
                 }
                 .foregroundStyle(.white)
                 .frame(width: 34, height: 34)
-                .background(DSHRemoteTheme.accent, in: Circle())
+                .background(RemoteTheme.accent, in: Circle())
                 .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
@@ -604,12 +606,13 @@ struct RemoteConversationView: View {
                                 .font(.subheadline.weight(selection == mode ? .semibold : .regular))
                                 .foregroundStyle(selection == mode ? Color.primary : Color.secondary)
                             Rectangle()
-                                .fill(selection == mode ? DSHRemoteTheme.accent : Color.clear)
+                                .fill(selection == mode ? RemoteTheme.accent : Color.clear)
                                 .frame(
                                     width: mode == .conversation ? 36 : 70,
                                     height: 2
                                 )
                         }
+                        .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selection == mode ? .isSelected : [])
@@ -620,6 +623,51 @@ struct RemoteConversationView: View {
             .padding(.top, 4)
         }
     }
+
+    #if DEBUG
+    private static var debugDetailItem: RemoteConversationItem {
+        RemoteConversationItem(
+            id: "debug-instruction-detail",
+            kind: .context,
+            title: "项目指令",
+            text: "AGENTS.md · 已载入",
+            time: Date(),
+            state: .succeeded,
+            details: [
+                RemoteDetailSection(
+                    id: "instruction-sources",
+                    title: "指令来源",
+                    content: "AGENTS.md\t已载入\ndocs/AGENTS.md\t已载入",
+                    kind: .list
+                ),
+                RemoteDetailSection(
+                    id: "context-raw",
+                    title: "模型接收的内容",
+                    content: """
+                    <system-reminder>
+                    The following workspace instructions may be relevant to your work.
+
+                    Instructions from:
+
+                    [AGENTS.md](AGENTS.md)
+
+                    # Project rules
+
+                    - Read `docs/architecture.md` before changing packages.
+                    - Run focused tests before release.
+                    - Keep credentials and model calls on the user's computer.
+
+                    ```sh
+                    npm test
+                    ```
+                    </system-reminder>
+                    """,
+                    kind: .text
+                ),
+            ]
+        )
+    }
+    #endif
 
     private func inspectorItem(for record: RemoteTrajectoryRecord) -> RemoteConversationItem {
         let kind: RemoteConversationItem.Kind = switch record.kind {
@@ -642,12 +690,6 @@ struct RemoteConversationView: View {
         value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
     }
 
-    private var errorBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.dismissError() } }
-        )
-    }
 }
 
 private struct RemoteModelSelectionSheet: View {
@@ -662,66 +704,72 @@ private struct RemoteModelSelectionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            List {
+        VStack(spacing: 0) {
+            RemoteSheetHeader(
+                title: "模型与推理",
+                subtitle: selectedCatalogModel.map { "当前：\($0.name)" } ?? "选择下一次请求使用的模型"
+            ) {
+                if viewModel.isLoadingModels || viewModel.isSelectingModel {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 32, height: 44)
+                        .accessibilityLabel(
+                            viewModel.isSelectingModel ? "正在切换模型" : "正在读取模型"
+                        )
+                }
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: RemoteTheme.sectionSpacing) {
                 if viewModel.modelDirectory == nil && viewModel.isLoadingModels {
-                    Section {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                            Text("正在读取电脑上的模型…")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    RemoteInlineNotice(
+                        title: "正在读取电脑上的模型",
+                        message: "模型目录由 Harness Desktop 提供。",
+                        icon: "cpu",
+                        tone: .info
+                    )
                 }
 
                 if let error = viewModel.modelErrorMessage {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("模型操作失败", systemImage: "exclamationmark.triangle.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.orange)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("重新载入") {
-                                Task { await viewModel.refreshModels() }
-                            }
-                            .font(.subheadline.weight(.semibold))
-                        }
-                        .padding(.vertical, 3)
-                    }
+                    RemoteInlineNotice(
+                        title: "模型操作失败",
+                        message: error,
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .danger,
+                        actionTitle: "重新读取",
+                        action: { Task { await viewModel.refreshModels() } }
+                    )
                 }
 
                 if let directory = viewModel.modelDirectory {
                     if !directory.routable {
-                        Section {
-                            Label(
-                                "当前模型无法路由。选择可用模型后才能继续发送。",
-                                systemImage: "exclamationmark.triangle.fill"
-                            )
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                        }
+                        RemoteInlineNotice(
+                            title: "当前模型不可用",
+                            message: "请选择一个可路由模型后再继续发送。",
+                            icon: "exclamationmark.triangle.fill",
+                            tone: .warning
+                        )
                     } else if selectedCatalogModel == nil {
-                        Section {
-                            Label(
-                                "当前路由仍可用，但该模型已不在目录中。请选择新的模型。",
-                                systemImage: "info.circle"
-                            )
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        }
+                        RemoteInlineNotice(
+                            title: "当前模型已不在目录中",
+                            message: "现有路由仍可用，但建议选择新的模型。",
+                            icon: "info.circle",
+                            tone: .info
+                        )
                     }
 
-                    Section {
-                        Text("选择会在这个会话的下一次请求生效，电脑也会尝试将它保存为 Harness 的默认模型。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    RemoteInlineNotice(
+                        title: "切换范围",
+                        message: "选择会从这个会话的下一次请求生效，电脑也会尝试保存为 Harness 的默认模型。",
+                        icon: "arrow.triangle.2.circlepath",
+                        tone: .info
+                    )
 
                     ForEach(directory.groups) { group in
-                        Section(group.name) {
-                            ForEach(group.models) { model in
+                        VStack(alignment: .leading, spacing: 9) {
+                            RemoteSectionHeader(title: group.name, detail: "\(group.models.count) 个模型")
+                            VStack(spacing: 0) {
+                                ForEach(Array(group.models.enumerated()), id: \.element.id) { index, model in
                                 Button {
                                     chooseModel(provider: group.id, model: model.id)
                                 } label: {
@@ -734,13 +782,24 @@ private struct RemoteModelSelectionSheet: View {
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(viewModel.isSelectingModel)
+
+                                    if index < group.models.count - 1 {
+                                        Rectangle()
+                                            .fill(RemoteTheme.hairline)
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 14)
+                                    }
+                                }
                             }
+                            .remoteSurface(cornerRadius: 14)
                         }
                     }
 
                     if !effortOptions.isEmpty {
-                        Section("推理强度") {
-                            ForEach(effortOptions) { option in
+                        VStack(alignment: .leading, spacing: 9) {
+                            RemoteSectionHeader(title: "推理强度")
+                            VStack(spacing: 0) {
+                                ForEach(Array(effortOptions.enumerated()), id: \.element.id) { index, option in
                                 Button {
                                     chooseEffort(option.value)
                                 } label: {
@@ -752,23 +811,33 @@ private struct RemoteModelSelectionSheet: View {
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(viewModel.isSelectingModel)
+
+                                    if index < effortOptions.count - 1 {
+                                        Rectangle()
+                                            .fill(RemoteTheme.hairline)
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 14)
+                                    }
+                                }
                             }
+                            .remoteSurface(cornerRadius: 14)
                         }
                     }
 
                     if directory.groups.allSatisfy({ $0.models.isEmpty }) {
-                        Section {
-                            ContentUnavailableView(
-                                "没有可选择的模型",
-                                systemImage: "cpu",
-                                description: Text("请先在 Harness Desktop 中配置模型提供方。")
-                            )
-                        }
+                        RemoteEmptyState(
+                            icon: "cpu",
+                            title: "没有可选择的模型",
+                            message: "请先在 Harness Desktop 中配置模型提供方。"
+                        )
+                        .padding(.vertical, 28)
                     }
 
                     if !directory.failures.isEmpty {
-                        Section("部分提供方不可用") {
-                            ForEach(directory.failures) { failure in
+                        VStack(alignment: .leading, spacing: 9) {
+                            RemoteSectionHeader(title: "部分提供方不可用")
+                            VStack(spacing: 0) {
+                                ForEach(Array(directory.failures.enumerated()), id: \.element.id) { index, failure in
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(failure.name)
                                         .font(.subheadline.weight(.medium))
@@ -776,33 +845,30 @@ private struct RemoteModelSelectionSheet: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(13)
+
+                                    if index < directory.failures.count - 1 {
+                                        Rectangle()
+                                            .fill(RemoteTheme.hairline)
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 13)
+                                    }
+                                }
                             }
+                            .remoteSurface(cornerRadius: 14)
                         }
                     }
-
                 }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("选择模型")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    if viewModel.isLoadingModels || viewModel.isSelectingModel {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel(
-                                viewModel.isSelectingModel ? "正在切换模型" : "正在读取模型"
-                            )
-                    }
-                }
+                .padding(.horizontal, RemoteTheme.pagePadding)
+                .padding(.top, 18)
+                .padding(.bottom, 32)
             }
             .refreshable { await viewModel.refreshModels() }
-            .task { await viewModel.refreshModels() }
         }
+        .background(RemoteTheme.canvas.ignoresSafeArea())
+        .task { await viewModel.refreshModels() }
     }
 
     private var selectedCatalogModel: RemoteModelCatalogEntry? {
@@ -854,11 +920,16 @@ private struct RemoteModelSelectionSheet: View {
             Spacer(minLength: 8)
             if selected {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(DSHRemoteTheme.accent)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(RemoteTheme.accent, in: Circle())
                     .accessibilityHidden(true)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(minHeight: 54)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -921,7 +992,7 @@ private struct ConversationItemView: View {
                     MarkdownContent(text: item.text)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(DSHRemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 16))
+                        .background(RemoteTheme.userBubble, in: RoundedRectangle(cornerRadius: 22))
                 }
             }
         case .assistant:
@@ -936,13 +1007,13 @@ private struct ConversationItemView: View {
                             if item.isStreaming {
                                 ProgressView()
                                     .controlSize(.mini)
-                                    .tint(DSHRemoteTheme.thinking)
+                                    .tint(RemoteTheme.thinking)
                             } else {
                                 Image(systemName: "brain.head.profile")
                                     .font(.caption)
-                                    .foregroundStyle(DSHRemoteTheme.thinking)
+                                    .foregroundStyle(RemoteTheme.thinking)
                             }
-                            Text(item.isStreaming ? "Thinking" : "Think")
+                            Text(item.isStreaming ? "思考中" : "思考")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Text("·")
@@ -956,7 +1027,7 @@ private struct ConversationItemView: View {
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.tertiary)
                         }
-                        .frame(minHeight: 36)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -978,7 +1049,7 @@ private struct ConversationItemView: View {
                 if item.isStreaming {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
-                        Text("Generating")
+                        Text("生成中")
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -995,7 +1066,7 @@ private struct ConversationItemView: View {
                             }
                         } label: {
                             Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                                .frame(width: 28, height: 28)
+                                .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1010,49 +1081,20 @@ private struct ConversationItemView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    guard !item.details.isEmpty else { return }
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        showsToolDetails.toggle()
+                if item.details.isEmpty {
+                    toolHeader
+                        .accessibilityElement(children: .combine)
+                } else {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            showsToolDetails.toggle()
+                        }
+                    } label: {
+                        toolHeader
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: toolIcon)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(DSHRemoteTheme.tool)
-                            .frame(width: 18)
-                        Text(item.title ?? "Tool")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if !item.text.isEmpty {
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                            Text(item.text)
-                                .font(.caption)
-                                .foregroundStyle(item.state == .failed ? .red : .secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 6)
-                        if item.state == .running {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Circle()
-                                .fill(stateColor)
-                                .frame(width: 6, height: 6)
-                        }
-                        if !item.details.isEmpty {
-                            Image(systemName: showsToolDetails ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .padding(.horizontal, showsToolDetails ? 10 : 0)
-                    .padding(.vertical, 8)
-                    .frame(minHeight: 40)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityHint(showsToolDetails ? "收起工具详情" : "展开工具详情")
                 }
-                .buttonStyle(.plain)
 
                 if showsToolDetails, let detail = item.details.first {
                     VStack(alignment: .leading, spacing: 9) {
@@ -1074,20 +1116,22 @@ private struct ConversationItemView: View {
                             }
                             Spacer()
                             Button("查看详情", action: onOpenDetails)
-                                .font(.caption.weight(.semibold))
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                                .buttonStyle(RemoteActionButtonStyle(
+                                    kind: .secondary,
+                                    fillsWidth: false,
+                                    compact: true
+                                ))
                         }
                     }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
                 }
             }
-            .background(showsToolDetails ? DSHRemoteTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .background(showsToolDetails ? RemoteTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: 10))
             .overlay {
                 if showsToolDetails {
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(DSHRemoteTheme.accent.opacity(0.65), lineWidth: 1)
+                        .stroke(RemoteTheme.accent.opacity(0.65), lineWidth: 1)
                 }
             }
         case .context:
@@ -1097,7 +1141,7 @@ private struct ConversationItemView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
-                    Text(item.title ?? "Context")
+                    Text(item.title ?? "上下文")
                         .font(.caption.weight(.semibold))
                     Text("·")
                         .foregroundStyle(.tertiary)
@@ -1113,7 +1157,7 @@ private struct ConversationItemView: View {
                     }
                 }
                 .padding(.vertical, 7)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1141,12 +1185,50 @@ private struct ConversationItemView: View {
                     }
                 }
                 .padding(.vertical, 7)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(item.details.isEmpty)
         }
+    }
+
+    private var toolHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: toolIcon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(RemoteTheme.tool)
+                .frame(width: 18)
+            Text(item.title ?? "工具")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            if !item.text.isEmpty {
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(item.text)
+                    .font(.caption)
+                    .foregroundStyle(item.state == .failed ? RemoteTheme.danger : .secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if item.state == .running {
+                ProgressView().controlSize(.mini)
+            } else {
+                Circle()
+                    .fill(stateColor)
+                    .frame(width: 6, height: 6)
+            }
+            if !item.details.isEmpty {
+                Image(systemName: showsToolDetails ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, showsToolDetails ? 10 : 0)
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     private func reasoningPreview(_ value: String) -> String {
@@ -1176,26 +1258,26 @@ private struct ConversationItemView: View {
                     .textSelection(.enabled)
             }
             .padding(8)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 7))
+            .background(RemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 7))
         }
     }
 
     private var stateLabel: String {
         switch item.state {
-        case .running: "Running"
-        case .succeeded: "Done"
-        case .failed: "Failed"
-        case .stopped: "Stopped"
-        case .info: "Info"
+        case .running: "执行中"
+        case .succeeded: "已完成"
+        case .failed: "失败"
+        case .stopped: "已停止"
+        case .info: "信息"
         }
     }
 
     private var stateColor: Color {
         switch item.state {
-        case .running: .blue
-        case .succeeded: .green
-        case .failed: .red
-        case .stopped: .orange
+        case .running: RemoteTheme.accent
+        case .succeeded: RemoteTheme.success
+        case .failed: RemoteTheme.danger
+        case .stopped: RemoteTheme.warning
         case .info: .secondary
         }
     }
@@ -1243,25 +1325,26 @@ private struct TrajectoryLedgerView: View {
             trajectoryOverview
                 .padding(.bottom, 8)
             Rectangle()
-                .fill(DSHRemoteTheme.hairline)
+                .fill(RemoteTheme.hairline)
                 .frame(height: 0.5)
 
             if filteredRecords.isEmpty {
-                ContentUnavailableView(
-                    query.isEmpty ? "暂无轨迹" : "没有匹配结果",
-                    systemImage: "point.3.connected.trianglepath.dotted"
+                RemoteEmptyState(
+                    icon: query.isEmpty ? "point.3.connected.trianglepath.dotted" : "magnifyingglass",
+                    title: query.isEmpty ? "暂无轨迹" : "没有匹配结果",
+                    message: query.isEmpty ? "Harness 开始执行后，步骤会按顺序出现在这里。" : "换一个关键词搜索标题、摘要或工具输出。"
                 )
                 .padding(.vertical, 42)
             } else {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
-                            Text(group.turn.map { "TURN \($0 + 1)" } ?? "CONTEXT")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            Text(group.turn.map { "第 \($0 + 1) 轮" } ?? "会话上下文")
+                                .font(.caption2.weight(.bold))
                                 .foregroundStyle(.tertiary)
                             Spacer()
-                            Text("\(group.records.count) EVENTS")
-                                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            Text("\(group.records.count) 条事件")
+                                .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                         }
                         .padding(.top, 13)
@@ -1269,17 +1352,22 @@ private struct TrajectoryLedgerView: View {
 
                         VStack(spacing: 0) {
                             ForEach(Array(group.records.enumerated()), id: \.element.id) { index, record in
-                                Button {
-                                    onOpenDetails(record)
-                                } label: {
+                                if record.details.isEmpty {
                                     trajectoryRow(record)
+                                        .accessibilityElement(children: .combine)
+                                } else {
+                                    Button {
+                                        onOpenDetails(record)
+                                    } label: {
+                                        trajectoryRow(record)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityHint("查看事件详情")
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(record.details.isEmpty)
 
                                 if index < group.records.count - 1 {
                                     Rectangle()
-                                        .fill(DSHRemoteTheme.hairline)
+                                        .fill(RemoteTheme.hairline)
                                         .frame(height: 0.5)
                                         .padding(.leading, 31)
                                 }
@@ -1294,10 +1382,10 @@ private struct TrajectoryLedgerView: View {
     private func trajectoryRow(_ record: RemoteTrajectoryRecord) -> some View {
         HStack(alignment: .center, spacing: 9) {
             Image(systemName: icon(for: record.kind))
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 19, height: 19)
-                .background(kindColor(record).opacity(0.92), in: RoundedRectangle(cornerRadius: 5))
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(kindColor(record))
+                .frame(width: 24, height: 24)
+                .background(kindColor(record).opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(record.title)
@@ -1305,8 +1393,8 @@ private struct TrajectoryLedgerView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if let step = record.step {
-                        Text("STEP \(step + 1)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        Text("步骤 \(step + 1)")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -1325,7 +1413,7 @@ private struct TrajectoryLedgerView: View {
                     }
                     Text("#\(record.sequence)")
                 }
-                .font(.system(size: 8, design: .monospaced))
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
             }
         }
@@ -1336,9 +1424,9 @@ private struct TrajectoryLedgerView: View {
 
     private var ledgerToolbar: some View {
         HStack(spacing: 13) {
-            metric("Duration", value: durationLabel(trajectoryDuration))
-            metric("Turns", value: "\(Set(filteredRecords.compactMap(\.turn)).count)")
-            metric("Calls", value: "\(filteredRecords.filter { $0.kind == .tool }.count)")
+            metric("耗时", value: durationLabel(trajectoryDuration))
+            metric("轮次", value: "\(Set(filteredRecords.compactMap(\.turn)).count)")
+            metric("调用", value: "\(filteredRecords.filter { $0.kind == .tool }.count)")
             Spacer(minLength: 0)
         }
         .padding(.vertical, 9)
@@ -1356,27 +1444,27 @@ private struct TrajectoryLedgerView: View {
 
     private func metric(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased())
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
+            Text(label)
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.secondary)
         }
     }
 
     private var trajectoryOverview: some View {
         VStack(spacing: 5) {
-            timelineLane("Input", kinds: [.input, .context])
-            timelineLane("Model", kinds: [.request, .assistant])
-            timelineLane("Tools", kinds: [.tool, .lifecycle])
+            timelineLane("输入", kinds: [.input, .context])
+            timelineLane("模型", kinds: [.request, .assistant])
+            timelineLane("工具", kinds: [.tool, .lifecycle])
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
-        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 9))
         .overlay {
             RoundedRectangle(cornerRadius: 9)
-                .stroke(DSHRemoteTheme.hairline, lineWidth: 1)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
         }
     }
 
@@ -1386,7 +1474,7 @@ private struct TrajectoryLedgerView: View {
     ) -> some View {
         HStack(spacing: 7) {
             Text(title)
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.tertiary)
                 .frame(width: 34, alignment: .leading)
             GeometryReader { geometry in
@@ -1397,7 +1485,7 @@ private struct TrajectoryLedgerView: View {
 
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(DSHRemoteTheme.hairline)
+                        .fill(RemoteTheme.hairline)
                         .frame(height: 2)
                     ForEach(visible) { record in
                         RoundedRectangle(cornerRadius: 2)
@@ -1456,20 +1544,20 @@ private struct TrajectoryLedgerView: View {
     }
 
     private func kindColor(_ record: RemoteTrajectoryRecord) -> Color {
-        if record.state == .failed { return .red }
-        if record.state == .stopped { return .orange }
+        if record.state == .failed { return RemoteTheme.danger }
+        if record.state == .stopped { return RemoteTheme.warning }
         return switch record.kind {
-        case .input: DSHRemoteTheme.accent
-        case .context: .green
+        case .input: RemoteTheme.accent
+        case .context: RemoteTheme.success
         case .request: .cyan
-        case .assistant: DSHRemoteTheme.thinking
-        case .tool: DSHRemoteTheme.tool
+        case .assistant: RemoteTheme.thinking
+        case .tool: RemoteTheme.tool
         case .lifecycle: .secondary
         }
     }
 
     private func durationLabel(_ value: TimeInterval) -> String {
-        value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f s", value)
+        value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
     }
 }
 
@@ -1527,12 +1615,12 @@ private struct MarkdownContent: View {
                     }
                     .padding(11)
                     .background(
-                        inverted ? Color.white.opacity(0.14) : DSHRemoteTheme.codeSurface,
+                        inverted ? Color.white.opacity(0.14) : RemoteTheme.codeSurface,
                         in: RoundedRectangle(cornerRadius: 10)
                     )
                     .overlay {
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(inverted ? Color.white.opacity(0.08) : DSHRemoteTheme.hairline)
+                            .stroke(inverted ? Color.white.opacity(0.08) : RemoteTheme.hairline)
                     }
                 }
             }
@@ -1581,7 +1669,7 @@ private struct ConversationDetailSheet: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if let summaryText {
                         Text(summaryText)
-                            .font(.system(size: 13))
+                            .font(.subheadline)
                             .lineSpacing(3)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1591,7 +1679,7 @@ private struct ConversationDetailSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             if let label = inlineSectionLabel(section) {
                                 Text(label)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.caption.weight(.medium))
                                     .foregroundStyle(.secondary)
                             }
                             detailContent(section)
@@ -1606,7 +1694,7 @@ private struct ConversationDetailSheet: View {
             }
             .id(selectedSectionID)
         }
-        .background(DSHRemoteTheme.canvas)
+        .background(RemoteTheme.canvas)
     }
 
     private var detailHeader: some View {
@@ -1615,11 +1703,11 @@ private struct ConversationDetailSheet: View {
                 .fill(kindColor)
                 .frame(width: 5, height: 5)
             Text(headerTitle)
-                .font(.system(size: 14, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .lineLimit(1)
             if let metadata = item.metadata.first, !metadata.isEmpty {
                 Text(metadata)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -1629,11 +1717,11 @@ private struct ConversationDetailSheet: View {
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .medium))
-                    .frame(width: 44, height: 42)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(copied ? Color.green : Color.secondary)
+            .foregroundStyle(copied ? RemoteTheme.success : Color.secondary)
             .accessibilityLabel(copied ? "已复制" : copyAccessibilityLabel)
 
             Button {
@@ -1641,19 +1729,19 @@ private struct ConversationDetailSheet: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 44, height: 42)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .accessibilityLabel("关闭详情")
         }
-        .frame(height: 42)
+        .frame(minHeight: 44)
         .padding(.leading, 12)
         .padding(.trailing, 2)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(DSHRemoteTheme.hairline)
+                .fill(RemoteTheme.hairline)
                 .frame(height: 0.5)
         }
     }
@@ -1666,18 +1754,18 @@ private struct ConversationDetailSheet: View {
                         selectedSectionID = section.id
                     } label: {
                         Text(tabTitle(section))
-                            .font(.system(size: 13))
+                            .font(.subheadline)
                             .foregroundStyle(
                                 selectedSectionID == section.id
-                                    ? DSHRemoteTheme.accent
+                                    ? RemoteTheme.accent
                                     : Color.secondary
                             )
                             .padding(.horizontal, 9)
-                            .frame(height: 34)
+                            .frame(minHeight: 44)
                             .overlay(alignment: .bottom) {
                                 if selectedSectionID == section.id {
                                     Rectangle()
-                                        .fill(DSHRemoteTheme.accent)
+                                        .fill(RemoteTheme.accent)
                                         .frame(height: 2)
                                 }
                             }
@@ -1688,10 +1776,10 @@ private struct ConversationDetailSheet: View {
             }
             .padding(.horizontal, 8)
         }
-        .frame(height: 34)
+        .frame(minHeight: 44)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(DSHRemoteTheme.hairline)
+                .fill(RemoteTheme.hairline)
                 .frame(height: 0.5)
         }
     }
@@ -1713,36 +1801,36 @@ private struct ConversationDetailSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Text(codeBody(section.content))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(.caption, design: .monospaced))
                     .lineSpacing(5)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
+            .background(RemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
         case .diff:
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(attributedDiff(section.content))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(.caption, design: .monospaced))
                     .lineSpacing(5)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .padding(14)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
+            .background(RemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
         case .list:
             if section.id == "instruction-sources" {
                 InstructionSourcesView(content: section.content)
             } else {
                 Text(section.content)
-                    .font(.system(size: 13))
+                    .font(.subheadline)
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay { RoundedRectangle(cornerRadius: 10).stroke(DSHRemoteTheme.hairline) }
+                    .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay { RoundedRectangle(cornerRadius: 10).stroke(RemoteTheme.hairline) }
             }
         }
     }
@@ -1816,10 +1904,10 @@ private struct ConversationDetailSheet: View {
 
     private var kindColor: Color {
         switch item.kind {
-        case .user: DSHRemoteTheme.accent
-        case .assistant: DSHRemoteTheme.thinking
-        case .tool: DSHRemoteTheme.tool
-        case .context: .green
+        case .user: RemoteTheme.accent
+        case .assistant: RemoteTheme.thinking
+        case .tool: RemoteTheme.tool
+        case .context: RemoteTheme.success
         case .status: .secondary
         }
     }
@@ -1859,11 +1947,11 @@ private struct InstructionDocumentView: View {
         VStack(alignment: .leading, spacing: 12) {
             if presentation.isSystemReminder {
                 Label("模型上下文", systemImage: "shield.lefthalf.filled")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.green)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(RemoteTheme.success)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(Color.green.opacity(0.09), in: Capsule())
+                    .background(RemoteTheme.success.opacity(0.09), in: Capsule())
             }
 
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -1884,17 +1972,14 @@ private struct InstructionDocumentView: View {
         switch block {
         case .heading(let level, let text):
             inlineText(text)
-                .font(.system(
-                    size: level == 1 ? 16 : (level == 2 ? 15 : 14),
-                    weight: .semibold
-                ))
+                .font(level == 1 ? .headline : .subheadline.weight(.semibold))
                 .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
         case .paragraph(let text):
             inlineText(text)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .lineSpacing(5)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1902,11 +1987,11 @@ private struct InstructionDocumentView: View {
         case .listItem(let marker, let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(marker)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(.system(.footnote, design: .monospaced).weight(.medium))
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 12, alignment: .trailing)
                 inlineText(text)
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1914,10 +1999,10 @@ private struct InstructionDocumentView: View {
         case .quote(let text):
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(DSHRemoteTheme.hairline)
+                    .fill(RemoteTheme.hairline)
                     .frame(width: 2)
                 inlineText(text)
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .lineSpacing(4)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -1927,19 +2012,19 @@ private struct InstructionDocumentView: View {
             VStack(alignment: .leading, spacing: 7) {
                 if let language, !language.isEmpty {
                     Text(language.uppercased())
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
                         .foregroundStyle(.secondary)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(text)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(.caption, design: .monospaced))
                         .lineSpacing(5)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .padding(14)
-            .background(DSHRemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
+            .background(RemoteTheme.codeSurface, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -2069,7 +2154,7 @@ private struct InstructionSourcesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Harness 在本轮同步的项目规则")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -2077,17 +2162,17 @@ private struct InstructionSourcesView: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 if index > 0 {
                     Rectangle()
-                        .fill(DSHRemoteTheme.hairline)
+                        .fill(RemoteTheme.hairline)
                         .frame(height: 0.5)
                         .padding(.leading, 38)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Image(systemName: "doc.text")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.green)
+                        .font(.caption)
+                        .foregroundStyle(RemoteTheme.success)
                         .frame(width: 16)
                     Text(row.path)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(row.action)
@@ -2099,8 +2184,8 @@ private struct InstructionSourcesView: View {
                 .padding(.vertical, 10)
             }
         }
-        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).stroke(DSHRemoteTheme.hairline) }
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).stroke(RemoteTheme.hairline) }
     }
 
     private struct Row {
@@ -2130,28 +2215,22 @@ private struct QueueDockView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Button {
-                guard queued.count > 1 else { return }
-                withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
-            } label: {
-                HStack {
-                    Label("排队 · \(queued.count)", systemImage: "tray.full")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    if queued.count > 1 {
-                        Image(systemName: expanded ? "chevron.down" : "chevron.up")
-                            .font(.caption.weight(.bold))
-                    }
+            if queued.count > 1 {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
+                } label: {
+                    queueHeader
                 }
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityHint(expanded ? "收起排队消息" : "展开排队消息")
+            } else {
+                queueHeader
+                    .accessibilityElement(children: .combine)
             }
-            .buttonStyle(.plain)
 
             if expanded || queued.count == 1 {
                 Rectangle()
-                    .fill(DSHRemoteTheme.hairline)
+                    .fill(RemoteTheme.hairline)
                     .frame(height: 0.5)
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -2182,16 +2261,16 @@ private struct QueueDockView: View {
                                 } label: {
                                     Image(systemName: "ellipsis")
                                         .font(.caption.weight(.bold))
-                                        .frame(width: 30, height: 30)
+                                        .frame(width: 44, height: 44)
                                 }
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .frame(minHeight: 38)
+                            .frame(minHeight: 44)
 
                             if index < queued.count - 1 {
                                 Rectangle()
-                                    .fill(DSHRemoteTheme.hairline)
+                                    .fill(RemoteTheme.hairline)
                                     .frame(height: 0.5)
                                     .padding(.leading, 34)
                             }
@@ -2201,33 +2280,56 @@ private struct QueueDockView: View {
                 .frame(maxHeight: 180)
             }
         }
-        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).stroke(DSHRemoteTheme.hairline) }
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).stroke(RemoteTheme.hairline) }
         .sheet(item: $editingItem) { item in
-            NavigationStack {
-                TextEditor(text: $editText)
-                    .padding(12)
-                    .navigationTitle("编辑等待消息")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("取消") { editingItem = nil }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("保存") {
-                                let value = editText.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !value.isEmpty { onAction(item, .edit(value)) }
-                                editingItem = nil
-                            }
-                        }
+            VStack(spacing: 0) {
+                RemoteSheetHeader(
+                    title: "编辑等待消息",
+                    subtitle: "保存后会更新电脑上的排队内容"
+                ) {
+                    Button("保存") {
+                        let value = editText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !value.isEmpty { onAction(item, .edit(value)) }
+                        editingItem = nil
                     }
+                    .buttonStyle(RemoteActionButtonStyle(kind: .primary, fillsWidth: false, compact: true))
+                    .disabled(editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                TextEditor(text: $editText)
+                    .scrollContentBackground(.hidden)
+                    .padding(13)
+                    .background(RemoteTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(RemoteTheme.hairline, lineWidth: 1)
+                    }
+                    .padding(16)
             }
+            .background(RemoteTheme.canvas.ignoresSafeArea())
             .presentationDetents([.medium])
         }
     }
 
     private var queued: [RemoteQueuedMessage] {
         queue.filter { $0.placement == .queued }
+    }
+
+    private var queueHeader: some View {
+        HStack {
+            Label("排队 · \(queued.count)", systemImage: "tray.full")
+                .font(.caption.weight(.semibold))
+            Spacer()
+            if queued.count > 1 {
+                Image(systemName: expanded ? "chevron.down" : "chevron.up")
+                    .font(.caption.weight(.bold))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
@@ -2244,69 +2346,88 @@ private struct InteractionCard: View {
     let isResponding: Bool
     let onRespond: (RemoteInteractionDecision) -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selected: [String: Set<String>] = [:]
     @State private var custom: [String: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 11) {
                 Image(systemName: "exclamationmark.bubble.fill")
-                Text("需要你确认")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(RemoteTheme.warning)
+                    .frame(width: 32, height: 32)
+                    .background(RemoteTheme.warning.opacity(0.11), in: RoundedRectangle(cornerRadius: 9))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("需要你确认")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Harness 已暂停，等待你的选择")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text("Harness paused")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.orange)
-            .padding(.horizontal, 13)
-            .frame(height: 38)
-            .background(Color.orange.opacity(0.08))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Rectangle()
+                .fill(RemoteTheme.hairline)
+                .frame(height: 0.5)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     switch interaction.kind {
                     case .approval(let toolName, let reason):
-                        Text(reason ?? "Harness 请求在电脑上执行 \(toolName)。")
-                            .font(.body)
-                        HStack {
-                            Button("拒绝", role: .destructive) { onRespond(.reject) }
-                                .buttonStyle(.bordered)
-                            Spacer()
-                            Button("仅允许本次") { onRespond(.allowOnce) }
-                                .buttonStyle(.borderedProminent)
-                                .tint(DSHRemoteTheme.accent)
+                        VStack(alignment: .leading, spacing: 8) {
+                            RemoteStatusPill(text: toolName, color: RemoteTheme.tool, icon: "wrench.and.screwdriver")
+                            Text(reason ?? "Harness 请求在电脑上执行这项操作。")
+                                .font(.body)
+                                .lineSpacing(3)
                         }
                     case .questions(let questions):
-                        ForEach(questions) { question in
+                        ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
                             questionView(question)
-                        }
-                        HStack {
-                            Button("暂不处理", role: .cancel) { onRespond(.cancelQuestions) }
-                                .buttonStyle(.bordered)
-                            Spacer()
-                            Button("确认选择") { onRespond(.answer(answers(for: questions))) }
-                                .buttonStyle(.borderedProminent)
-                                .tint(DSHRemoteTheme.accent)
-                                .disabled(!questions.allSatisfy(isAnswered))
+                            if index < questions.count - 1 {
+                                Rectangle()
+                                    .fill(RemoteTheme.hairline)
+                                    .frame(height: 0.5)
+                            }
                         }
                     }
                 }
                 .padding(14)
             }
-            .frame(maxHeight: 360)
+            .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 238 : 318)
+
+            Rectangle()
+                .fill(RemoteTheme.hairline)
+                .frame(height: 0.5)
+
+            interactionActions
+                .padding(12)
+                .background(RemoteTheme.raisedSurface.opacity(0.62))
         }
-        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 17))
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 20))
         .overlay {
-            RoundedRectangle(cornerRadius: 17)
-                .stroke(Color.orange.opacity(0.30), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(RemoteTheme.warning.opacity(0.28), lineWidth: 1)
         }
+        .shadow(color: RemoteTheme.shadow.opacity(0.55), radius: 10, y: 4)
         .disabled(isResponding)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .overlay {
             if isResponding {
-                ProgressView()
-                    .padding(14)
-                    .background(.regularMaterial, in: Circle())
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(RemoteTheme.surface.opacity(0.82))
+                    VStack(spacing: 9) {
+                        ProgressView()
+                        Text("正在提交…")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -2315,48 +2436,111 @@ private struct InteractionCard: View {
     private func questionView(_ question: RemoteQuestion) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let header = question.header {
-                Text(header.uppercased())
+                Text(header)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(RemoteTheme.warning)
             }
-            Text(question.question).font(.body.weight(.semibold))
+            Text(question.question)
+                .font(.body.weight(.semibold))
+                .lineSpacing(2)
             if let detail = question.detail {
                 Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            ForEach(question.options) { option in
-                Button {
-                    toggle(option.label, for: question)
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: isSelected(option.label, for: question)
-                              ? (question.allowsMultipleSelection ? "checkmark.square.fill" : "checkmark.circle.fill")
-                              : (question.allowsMultipleSelection ? "square" : "circle"))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option.label).font(.subheadline.weight(.semibold))
-                            if let description = option.description {
-                                Text(description).font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
+                    Button {
+                        toggle(option.label, for: question)
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: isSelected(option.label, for: question)
+                                  ? (question.allowsMultipleSelection ? "checkmark.square.fill" : "checkmark.circle.fill")
+                                  : (question.allowsMultipleSelection ? "square" : "circle"))
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(
+                                    isSelected(option.label, for: question)
+                                        ? RemoteTheme.accent
+                                        : Color.secondary
+                                )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.label).font(.subheadline.weight(.semibold))
+                                if let description = option.description {
+                                    Text(description).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
+                            Spacer()
                         }
-                        Spacer()
+                        .contentShape(Rectangle())
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 9)
+                        .frame(minHeight: 50)
+                        .background(
+                            isSelected(option.label, for: question)
+                                ? RemoteTheme.accent.opacity(0.10)
+                                : Color.clear
+                        )
                     }
-                    .contentShape(Rectangle())
-                    .padding(9)
-                    .background(
-                        isSelected(option.label, for: question)
-                            ? DSHRemoteTheme.accent.opacity(0.10)
-                            : DSHRemoteTheme.mutedSurface.opacity(0.55),
-                        in: RoundedRectangle(cornerRadius: 9)
-                    )
+                    .buttonStyle(.plain)
+
+                    if index < question.options.count - 1 {
+                        Rectangle()
+                            .fill(RemoteTheme.hairline)
+                            .frame(height: 0.5)
+                            .padding(.leading, 40)
+                    }
                 }
-                .buttonStyle(.plain)
             }
+            .background(RemoteTheme.raisedSurface.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(RemoteTheme.hairline, lineWidth: 1)
+            }
+
             TextField("其他回答（可选）", text: customBinding(for: question), axis: .vertical)
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 9)
-                .background(DSHRemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 9))
+                .lineLimit(1...4)
+                .remoteFieldSurface()
+        }
+    }
+
+    @ViewBuilder
+    private var interactionActions: some View {
+        switch interaction.kind {
+        case .approval:
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 8) {
+                    Button("仅允许本次") { onRespond(.allowOnce) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .primary, compact: true))
+                    Button("拒绝") { onRespond(.reject) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .danger, compact: true))
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Button("拒绝") { onRespond(.reject) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .danger, compact: true))
+                    Button("仅允许本次") { onRespond(.allowOnce) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .primary, compact: true))
+                }
+            }
+        case .questions(let questions):
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 8) {
+                    Button("确认选择") { onRespond(.answer(answers(for: questions))) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .primary, compact: true))
+                        .disabled(!questions.allSatisfy(isAnswered))
+                    Button("暂不处理") { onRespond(.cancelQuestions) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .ghost, compact: true))
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Button("暂不处理") { onRespond(.cancelQuestions) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .ghost, compact: true))
+                    Button("确认选择") { onRespond(.answer(answers(for: questions))) }
+                        .buttonStyle(RemoteActionButtonStyle(kind: .primary, compact: true))
+                        .disabled(!questions.allSatisfy(isAnswered))
+                }
+            }
         }
     }
 

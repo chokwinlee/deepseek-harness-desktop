@@ -443,7 +443,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             text: "我发现两个需要先处理的问题：登录态过期后的恢复路径，以及错误提示没有告诉用户下一步怎么做。我已经整理了一份修复计划，请你确认。",
             time: Date().addingTimeInterval(-150),
             reasoning: "先核对登录状态的生命周期，再沿着错误处理分支检查用户是否能恢复操作。最后用现有测试确认风险是否已经被覆盖。",
-            metadata: ["deepseek-chat", "1.7K tokens", "4.2 s"]
+            metadata: ["deepseek-chat", "1.7K tokens", "4.2 秒"]
         ),
     ]
 
@@ -465,12 +465,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-input", sequence: 1, turn: 0, step: nil, kind: .input,
-            title: "User", summary: "检查登录流程并给出风险清单", time: Date().addingTimeInterval(-180),
+            title: "用户消息", summary: "检查登录流程并给出风险清单", time: Date().addingTimeInterval(-180),
             duration: nil, state: .succeeded
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-request", sequence: 2, turn: 0, step: 0, kind: .request,
-            title: "Model request", summary: "整理上下文并请求分析", time: Date().addingTimeInterval(-174),
+            title: "模型请求", summary: "整理上下文并请求分析", time: Date().addingTimeInterval(-174),
             duration: 0.12, state: .succeeded,
             details: [
                 RemoteDetailSection(
@@ -481,12 +481,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-thinking", sequence: 3, turn: 0, step: 0, kind: .assistant,
-            title: "Think", summary: "检查登录状态生命周期和错误恢复路径", time: Date().addingTimeInterval(-170),
+            title: "模型思考", summary: "检查登录状态生命周期和错误恢复路径", time: Date().addingTimeInterval(-170),
             duration: 1.8, state: .succeeded
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-tool", sequence: 4, turn: 0, step: 1, kind: .tool,
-            title: "Read", summary: "读取 4 个项目文件", time: Date().addingTimeInterval(-160),
+            title: "读取文件", summary: "读取 4 个项目文件", time: Date().addingTimeInterval(-160),
             duration: 0.32, state: .succeeded,
             details: [
                 RemoteDetailSection(
@@ -497,12 +497,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-answer", sequence: 5, turn: 0, step: 2, kind: .assistant,
-            title: "Assistant", summary: "整理两个上线前风险和修复计划", time: Date().addingTimeInterval(-150),
+            title: "模型回答", summary: "整理两个上线前风险和修复计划", time: Date().addingTimeInterval(-150),
             duration: 2.4, state: .succeeded
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-end", sequence: 6, turn: 0, step: 2, kind: .lifecycle,
-            title: "Turn complete", summary: "等待用户确认", time: Date().addingTimeInterval(-149),
+            title: "本轮完成", summary: "等待用户确认", time: Date().addingTimeInterval(-149),
             duration: 4.62, state: .succeeded
         ),
     ]
@@ -673,7 +673,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     }
 
     nonisolated func liveEvents() -> AsyncStream<RemoteLiveEvent> {
-        AsyncStream { continuation in
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "trajectory" {
+            return AsyncStream { continuation in continuation.finish() }
+        }
+        #endif
+        return AsyncStream { continuation in
             let task = Task {
                 try? await Task.sleep(for: .milliseconds(700))
                 guard !Task.isCancelled else { return }
