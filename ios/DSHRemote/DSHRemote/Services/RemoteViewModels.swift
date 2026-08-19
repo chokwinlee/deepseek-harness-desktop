@@ -125,18 +125,24 @@ final class RemoteConversationViewModel: ObservableObject {
     @Published private(set) var trajectory: [RemoteTrajectoryRecord] = []
     @Published private(set) var queue: [RemoteQueuedMessage] = []
     @Published private(set) var stats: RemoteConversationStats?
+    @Published private(set) var modelDirectory: RemoteModelDirectory?
+    @Published private(set) var isLoadingModels = false
+    @Published private(set) var isSelectingModel = false
+    @Published private(set) var modelErrorMessage: String?
     @Published private(set) var hasMoreHistory = false
     @Published private(set) var interaction: RemoteInteraction?
     @Published private(set) var isLoading = true
     @Published private(set) var hasLoadedInitialSnapshot = false
     @Published private(set) var isLoadingOlder = false
     @Published private(set) var isSending = false
+    @Published private(set) var isCancelling = false
     @Published private(set) var isResponding = false
     @Published private(set) var errorMessage: String?
 
     let client: any HarnessRemoteClient
     private var lastRunning: Bool?
     private var historyMessageLimit = 80
+    private var modelGeneration = 0
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         self.client = client
@@ -144,6 +150,9 @@ final class RemoteConversationViewModel: ObservableObject {
     }
 
     func monitor() async {
+        let modelsTask = Task { [weak self] in
+            await self?.refreshModels()
+        }
         let eventsTask = Task { [weak self] in
             guard let self else { return }
             for await event in client.liveEvents() {
@@ -151,7 +160,10 @@ final class RemoteConversationViewModel: ObservableObject {
                 await handle(event)
             }
         }
-        defer { eventsTask.cancel() }
+        defer {
+            modelsTask.cancel()
+            eventsTask.cancel()
+        }
 
         await refresh()
         while !Task.isCancelled {
@@ -193,6 +205,64 @@ final class RemoteConversationViewModel: ObservableObject {
         isLoadingOlder = false
     }
 
+    func refreshModels() async {
+        guard !isSelectingModel else { return }
+        modelGeneration += 1
+        let generation = modelGeneration
+        isSelectingModel = false
+        isLoadingModels = true
+        defer {
+            if generation == modelGeneration { isLoadingModels = false }
+        }
+
+        do {
+            let directory = try await client.models(sessionID: session.id)
+            guard generation == modelGeneration, !Task.isCancelled else { return }
+            modelDirectory = directory
+            modelErrorMessage = nil
+        } catch {
+            guard generation == modelGeneration, !Task.isCancelled else { return }
+            modelErrorMessage = error.localizedDescription
+        }
+    }
+
+    func selectModel(_ selection: RemoteModelSelection) async -> Bool {
+        guard !isSelectingModel else { return false }
+        modelGeneration += 1
+        let generation = modelGeneration
+        isLoadingModels = false
+        isSelectingModel = true
+        defer {
+            if generation == modelGeneration { isSelectingModel = false }
+        }
+
+        do {
+            let selected = try await client.selectModel(sessionID: session.id, selection: selection)
+            guard generation == modelGeneration, !Task.isCancelled else { return false }
+            if let directory = modelDirectory {
+                modelDirectory = RemoteModelDirectory(
+                    current: selected,
+                    routable: true,
+                    groups: directory.groups,
+                    failures: directory.failures
+                )
+            } else {
+                modelDirectory = RemoteModelDirectory(
+                    current: selected,
+                    routable: true,
+                    groups: [],
+                    failures: []
+                )
+            }
+            modelErrorMessage = nil
+            return true
+        } catch {
+            guard generation == modelGeneration, !Task.isCancelled else { return false }
+            modelErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func send(_ text: String, steer: Bool) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return false }
@@ -230,7 +300,9 @@ final class RemoteConversationViewModel: ObservableObject {
     }
 
     func cancel() async {
-        guard session.running else { return }
+        guard session.running, !isCancelling else { return }
+        isCancelling = true
+        defer { isCancelling = false }
         do {
             try await client.cancel(sessionID: session.id)
             await refresh(silently: true)

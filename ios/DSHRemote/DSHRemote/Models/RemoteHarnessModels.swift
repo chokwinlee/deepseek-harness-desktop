@@ -107,6 +107,49 @@ struct RemoteConversationStats: Hashable, Sendable {
     let outputTokens: Int
 }
 
+struct RemoteModelSelection: Hashable, Sendable {
+    let provider: String
+    let model: String
+    let reasoningEffort: String?
+}
+
+struct RemoteModelReasoningEffort: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let description: String?
+}
+
+struct RemoteModelReasoning: Hashable, Sendable {
+    let efforts: [RemoteModelReasoningEffort]
+    let defaultEffort: String?
+}
+
+struct RemoteModelCatalogEntry: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let description: String?
+    let reasoning: RemoteModelReasoning?
+}
+
+struct RemoteModelProviderGroup: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let models: [RemoteModelCatalogEntry]
+}
+
+struct RemoteModelCatalogFailure: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let message: String
+}
+
+struct RemoteModelDirectory: Hashable, Sendable {
+    let current: RemoteModelSelection
+    let routable: Bool
+    let groups: [RemoteModelProviderGroup]
+    let failures: [RemoteModelCatalogFailure]
+}
+
 struct RemoteDetailSection: Identifiable, Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         case text

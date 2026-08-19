@@ -59,6 +59,9 @@ struct RemoteConversationView: View {
     @State private var unseenUpdates = 0
     @State private var lastItemCount = 0
     @State private var shouldFollowNextSend = false
+    @State private var showsModelPicker = false
+    @FocusState private var composerFocused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         _viewModel = StateObject(wrappedValue: RemoteConversationViewModel(client: client, session: session))
@@ -181,6 +184,9 @@ struct RemoteConversationView: View {
                 .onChange(of: viewModel.isLoadingOlder) { wasLoading, isLoading in
                     if wasLoading && !isLoading { lastItemCount = viewModel.items.count }
                 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottomDock(bottomSafeArea: viewport.safeAreaInsets.bottom)
+                }
             }
         }
         .background(DSHRemoteTheme.canvas)
@@ -212,45 +218,22 @@ struct RemoteConversationView: View {
             }
             .background(DSHRemoteTheme.canvas.opacity(0.98))
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                if viewModel.queue.contains(where: { $0.placement == .queued }) {
-                    QueueDockView(queue: viewModel.queue) { item, action in
-                        Task { await viewModel.updateQueue(item, action: action) }
-                    }
-                }
-                if let interaction = viewModel.interaction {
-                    InteractionCard(
-                        interaction: interaction,
-                        isResponding: viewModel.isResponding,
-                        onRespond: { decision in
-                            Task { await viewModel.respond(decision) }
-                        }
-                    )
-                    .id(interaction.id)
-                } else {
-                    composer
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 6)
-            .background(
-                LinearGradient(
-                    colors: [DSHRemoteTheme.canvas.opacity(0), DSHRemoteTheme.canvas],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .ignoresSafeArea()
-            )
-        }
         .navigationTitle(viewModel.session.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(DSHRemoteTheme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task { await viewModel.monitor() }
+        .onChange(of: viewModel.session.running) { wasRunning, isRunning in
+            if !wasRunning && isRunning { busyDelivery = .queue }
+        }
         .sheet(item: $selectedDetail) { item in
             ConversationDetailSheet(item: item)
                 .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showsModelPicker) {
+            RemoteModelSelectionSheet(viewModel: viewModel)
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .alert("连接出现问题", isPresented: errorBinding) {
@@ -262,6 +245,47 @@ struct RemoteConversationView: View {
 
     private var contentIsPositioned: Bool {
         !viewModel.hasLoadedInitialSnapshot || viewModel.items.isEmpty || didInitialPosition
+    }
+
+    private func bottomDock(bottomSafeArea: CGFloat) -> some View {
+        VStack(spacing: 8) {
+            if viewModel.queue.contains(where: { $0.placement == .queued }) {
+                QueueDockView(queue: viewModel.queue, isRunning: viewModel.session.running) { item, action in
+                    Task { await viewModel.updateQueue(item, action: action) }
+                }
+            }
+            if let interaction = viewModel.interaction {
+                InteractionCard(
+                    interaction: interaction,
+                    isResponding: viewModel.isResponding,
+                    onRespond: { decision in
+                        Task { await viewModel.respond(decision) }
+                    }
+                )
+                .id(interaction.id)
+            } else {
+                composer
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(
+            .bottom,
+            dockBottomPadding(bottomSafeArea: bottomSafeArea)
+        )
+        .background(
+            LinearGradient(
+                colors: [DSHRemoteTheme.canvas.opacity(0), DSHRemoteTheme.canvas],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .ignoresSafeArea()
+        )
+    }
+
+    private func dockBottomPadding(bottomSafeArea: CGFloat) -> CGFloat {
+        guard !composerFocused, viewModel.interaction == nil else { return 2 }
+        guard bottomSafeArea >= 30 else { return bottomSafeArea > 0 ? 0 : 2 }
+        return -min(8, bottomSafeArea - 24)
     }
 
     private var sessionMetaLine: some View {
@@ -321,121 +345,249 @@ struct RemoteConversationView: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("告诉 Harness 接下来要做什么", text: $draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .font(.body)
-                    .disabled(viewModel.interaction != nil)
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("告诉 Harness 接下来要做什么", text: $draft, axis: .vertical)
+                .lineLimit(1...6)
+                .font(.body)
+                .focused($composerFocused)
+                .disabled(viewModel.interaction != nil || !modelIsRoutable)
 
-                HStack(spacing: 9) {
-                    if viewModel.session.running {
-                        Menu {
-                            Button {
-                                busyDelivery = .queue
-                            } label: {
-                                Label("排队到下一轮", systemImage: busyDelivery == .queue ? "checkmark" : "list.bullet")
-                            }
-                            Button {
-                                busyDelivery = .steer
-                            } label: {
-                                Label("补充当前步骤", systemImage: busyDelivery == .steer ? "checkmark" : "arrow.triangle.branch")
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: busyDelivery == .queue ? "list.bullet" : "arrow.triangle.branch")
-                                Text(busyDelivery == .queue ? "Queue" : "Steer")
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 8, weight: .bold))
-                            }
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(DSHRemoteTheme.mutedSurface, in: Capsule())
-                        }
-                    } else {
-                        Label("Harness", systemImage: "sparkles")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+            if !modelIsRoutable {
+                Label("当前模型不可用，请重新选择", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
+            composerControls
+        }
+        .padding(12)
+        .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(DSHRemoteTheme.hairline, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
+    }
+
+    @ViewBuilder
+    private var composerControls: some View {
+        if dynamicTypeSize.isAccessibilitySize && viewModel.session.running {
+            VStack(spacing: 2) {
+                HStack(spacing: 8) {
+                    modelSelector
                     Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    deliverySelector
+                    Spacer(minLength: 0)
+                    composerActions
+                }
+            }
+        } else {
+            HStack(spacing: 7) {
+                if viewModel.session.running {
+                    deliverySelector
+                }
+                modelSelector
+                Spacer(minLength: 0)
+                composerActions
+            }
+        }
+    }
 
-                    if viewModel.session.running {
-                        Button {
-                            Task { await viewModel.cancel() }
-                        } label: {
+    private var deliverySelector: some View {
+        Menu {
+            Button {
+                busyDelivery = .queue
+            } label: {
+                Label("排队发送", systemImage: busyDelivery == .queue ? "checkmark" : "list.bullet")
+            }
+            Button {
+                busyDelivery = .steer
+            } label: {
+                Label("插话发送", systemImage: busyDelivery == .steer ? "checkmark" : "arrow.triangle.branch")
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: busyDelivery == .queue ? "list.bullet" : "arrow.triangle.branch")
+                Text(busyDelivery == .queue ? "排队" : "插话")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .frame(minHeight: 34)
+            .background(DSHRemoteTheme.mutedSurface, in: Capsule())
+            .contentShape(Capsule())
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel("发送方式")
+        .accessibilityValue(busyDelivery == .queue ? "排队发送" : "插话发送")
+    }
+
+    private var modelSelector: some View {
+        Button {
+            showsModelPicker = true
+        } label: {
+            HStack(alignment: dynamicTypeSize.isAccessibilitySize ? .top : .center, spacing: 4) {
+                if viewModel.isLoadingModels && viewModel.modelDirectory == nil {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else if viewModel.modelErrorMessage != nil && viewModel.modelDirectory == nil {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.orange)
+                }
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(modelTriggerName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let effort = selectedEffortName {
+                            Text(effort)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                } else {
+                    Text(modelTriggerName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let effort = selectedEffortName {
+                        Text("· \(effort)")
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .frame(
+                maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 170,
+                minHeight: 44,
+                alignment: .leading
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isSelectingModel)
+        .accessibilityLabel(modelAccessibilityLabel)
+        .accessibilityHint("打开模型选择")
+        .layoutPriority(1)
+    }
+
+    private var composerActions: some View {
+        HStack(spacing: 2) {
+            if viewModel.session.running {
+                Button {
+                    Task { await viewModel.cancel() }
+                } label: {
+                    Group {
+                        if viewModel.isCancelling {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.red)
+                        } else {
                             Image(systemName: "stop.fill")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.red)
-                                .frame(width: 30, height: 30)
-                                .background(Color.red.opacity(0.10), in: Circle())
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("停止任务")
                     }
+                    .frame(width: 34, height: 34)
+                    .background(Color.red.opacity(0.10), in: Circle())
+                    .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isCancelling)
+                .accessibilityLabel(viewModel.isCancelling ? "正在停止任务" : "停止任务")
+            }
 
-                    Button {
-                        let outgoing = draft
-                        shouldFollowNextSend = true
-                        Task {
-                            if await viewModel.send(outgoing, steer: busyDelivery == .steer) {
-                                draft = ""
-                            } else {
-                                shouldFollowNextSend = false
-                            }
-                        }
-                    } label: {
-                        Group {
-                            if viewModel.isSending {
-                                ProgressView()
-                                    .tint(.white)
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: viewModel.session.running && busyDelivery == .queue ? "text.badge.plus" : "arrow.up")
-                                    .font(.caption.weight(.bold))
-                            }
-                        }
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(DSHRemoteTheme.accent, in: Circle())
+            Button {
+                let outgoing = draft
+                shouldFollowNextSend = true
+                Task {
+                    if await viewModel.send(outgoing, steer: busyDelivery == .steer) {
+                        draft = ""
+                    } else {
+                        shouldFollowNextSend = false
                     }
-                    .buttonStyle(.plain)
-                    .disabled(
-                        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || viewModel.isSending
-                        || viewModel.interaction != nil
-                    )
-                    .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
-                    .accessibilityLabel(viewModel.session.running ? "补充指令" : "发送")
                 }
+            } label: {
+                Group {
+                    if viewModel.isSending {
+                        ProgressView()
+                            .tint(.white)
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: viewModel.session.running && busyDelivery == .queue ? "text.badge.plus" : "arrow.up")
+                            .font(.caption.weight(.bold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(DSHRemoteTheme.accent, in: Circle())
+                .frame(width: 44, height: 44)
             }
-            .padding(12)
-            .background(DSHRemoteTheme.surface, in: RoundedRectangle(cornerRadius: 17))
-            .overlay {
-                RoundedRectangle(cornerRadius: 17)
-                    .stroke(DSHRemoteTheme.hairline, lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
+            .buttonStyle(.plain)
+            .disabled(!canSendDraft)
+            .opacity(canSendDraft ? 1 : 0.45)
+            .accessibilityLabel(sendAccessibilityLabel)
+        }
+    }
 
-            if let stats = viewModel.stats, stats.turns > 0 {
-                HStack(spacing: 7) {
-                    Text("\(stats.turns) turns")
-                    Text("·")
-                    Text("\(stats.steps) calls")
-                    Text("·")
-                    Text("LLM \(durationText(stats.llmDuration))")
-                    Text("·")
-                    Text("↑\(compactCount(stats.inputTokens)) ↓\(compactCount(stats.outputTokens))")
-                }
-                .font(.system(size: 9, weight: .regular, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
+    private var canSendDraft: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !viewModel.isSending
+            && !viewModel.isSelectingModel
+            && viewModel.interaction == nil
+            && modelIsRoutable
+    }
+
+    private var modelIsRoutable: Bool {
+        viewModel.modelDirectory?.routable != false
+    }
+
+    private var selectedAdvertisedModel: (group: RemoteModelProviderGroup, model: RemoteModelCatalogEntry)? {
+        guard let directory = viewModel.modelDirectory else { return nil }
+        for group in directory.groups {
+            if let model = group.models.first(where: {
+                group.id == directory.current.provider && $0.id == directory.current.model
+            }) {
+                return (group, model)
             }
         }
+        return nil
+    }
+
+    private var modelTriggerName: String {
+        if let selectedAdvertisedModel { return selectedAdvertisedModel.model.name }
+        if viewModel.isLoadingModels && viewModel.modelDirectory == nil { return "读取模型…" }
+        return "选择模型"
+    }
+
+    private var selectedEffortName: String? {
+        guard let directory = viewModel.modelDirectory,
+              let reasoning = selectedAdvertisedModel?.model.reasoning else { return nil }
+        let effortID = directory.current.reasoningEffort ?? reasoning.defaultEffort
+        guard let effortID else { return "默认" }
+        return reasoning.efforts.first(where: { $0.id == effortID })?.name ?? effortID
+    }
+
+    private var modelAccessibilityLabel: String {
+        if let effort = selectedEffortName {
+            return "模型，\(modelTriggerName)，推理强度 \(effort)"
+        }
+        return "模型，\(modelTriggerName)"
+    }
+
+    private var sendAccessibilityLabel: String {
+        guard viewModel.session.running else { return "发送" }
+        return busyDelivery == .queue ? "排队发送" : "插话发送"
     }
 
     private struct DSHConversationTabBar: View {
@@ -469,14 +621,6 @@ struct RemoteConversationView: View {
         }
     }
 
-    private func compactCount(_ count: Int) -> String {
-        switch count {
-        case 1_000_000...: String(format: "%.1fM", Double(count) / 1_000_000)
-        case 1_000...: String(format: "%.1fK", Double(count) / 1_000)
-        default: "\(count)"
-        }
-    }
-
     private func inspectorItem(for record: RemoteTrajectoryRecord) -> RemoteConversationItem {
         let kind: RemoteConversationItem.Kind = switch record.kind {
         case .input: .user
@@ -503,6 +647,255 @@ struct RemoteConversationView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.dismissError() } }
         )
+    }
+}
+
+private struct RemoteModelSelectionSheet: View {
+    private struct EffortOption: Identifiable {
+        let id: String
+        let value: String?
+        let name: String
+        let description: String?
+    }
+
+    @ObservedObject var viewModel: RemoteConversationViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if viewModel.modelDirectory == nil && viewModel.isLoadingModels {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("正在读取电脑上的模型…")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let error = viewModel.modelErrorMessage {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("模型操作失败", systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("重新载入") {
+                                Task { await viewModel.refreshModels() }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+
+                if let directory = viewModel.modelDirectory {
+                    if !directory.routable {
+                        Section {
+                            Label(
+                                "当前模型无法路由。选择可用模型后才能继续发送。",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                        }
+                    } else if selectedCatalogModel == nil {
+                        Section {
+                            Label(
+                                "当前路由仍可用，但该模型已不在目录中。请选择新的模型。",
+                                systemImage: "info.circle"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Section {
+                        Text("选择会在这个会话的下一次请求生效，电脑也会尝试将它保存为 Harness 的默认模型。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(directory.groups) { group in
+                        Section(group.name) {
+                            ForEach(group.models) { model in
+                                Button {
+                                    chooseModel(provider: group.id, model: model.id)
+                                } label: {
+                                    selectionRow(
+                                        title: model.name,
+                                        description: model.description,
+                                        selected: directory.current.provider == group.id
+                                            && directory.current.model == model.id
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isSelectingModel)
+                            }
+                        }
+                    }
+
+                    if !effortOptions.isEmpty {
+                        Section("推理强度") {
+                            ForEach(effortOptions) { option in
+                                Button {
+                                    chooseEffort(option.value)
+                                } label: {
+                                    selectionRow(
+                                        title: option.name,
+                                        description: option.description,
+                                        selected: effectiveEffort == option.value
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isSelectingModel)
+                            }
+                        }
+                    }
+
+                    if directory.groups.allSatisfy({ $0.models.isEmpty }) {
+                        Section {
+                            ContentUnavailableView(
+                                "没有可选择的模型",
+                                systemImage: "cpu",
+                                description: Text("请先在 Harness Desktop 中配置模型提供方。")
+                            )
+                        }
+                    }
+
+                    if !directory.failures.isEmpty {
+                        Section("部分提供方不可用") {
+                            ForEach(directory.failures) { failure in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(failure.name)
+                                        .font(.subheadline.weight(.medium))
+                                    Text(failure.message)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("选择模型")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if viewModel.isLoadingModels || viewModel.isSelectingModel {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                viewModel.isSelectingModel ? "正在切换模型" : "正在读取模型"
+                            )
+                    }
+                }
+            }
+            .refreshable { await viewModel.refreshModels() }
+            .task { await viewModel.refreshModels() }
+        }
+    }
+
+    private var selectedCatalogModel: RemoteModelCatalogEntry? {
+        guard let directory = viewModel.modelDirectory else { return nil }
+        return directory.groups
+            .first(where: { $0.id == directory.current.provider })?
+            .models.first(where: { $0.id == directory.current.model })
+    }
+
+    private var effortOptions: [EffortOption] {
+        guard let reasoning = selectedCatalogModel?.reasoning else { return [] }
+        var options: [EffortOption] = []
+        if reasoning.defaultEffort == nil {
+            options.append(EffortOption(
+                id: "provider-default",
+                value: nil,
+                name: "提供方默认",
+                description: "由当前模型提供方决定推理强度"
+            ))
+        }
+        options.append(contentsOf: reasoning.efforts.map {
+            EffortOption(id: "effort:\($0.id)", value: $0.id, name: $0.name, description: $0.description)
+        })
+        return options
+    }
+
+    private var effectiveEffort: String? {
+        guard let directory = viewModel.modelDirectory else { return nil }
+        return directory.current.reasoningEffort ?? selectedCatalogModel?.reasoning?.defaultEffort
+    }
+
+    private func selectionRow(
+        title: String,
+        description: String?,
+        selected: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                if let description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(DSHRemoteTheme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func chooseModel(provider: String, model: String) {
+        guard let directory = viewModel.modelDirectory else { return }
+        if directory.current.provider == provider && directory.current.model == model {
+            dismiss()
+            return
+        }
+        Task {
+            if await viewModel.selectModel(RemoteModelSelection(
+                provider: provider,
+                model: model,
+                reasoningEffort: nil
+            )) {
+                dismiss()
+            }
+        }
+    }
+
+    private func chooseEffort(_ effort: String?) {
+        guard let current = viewModel.modelDirectory?.current else { return }
+        if effectiveEffort == effort {
+            dismiss()
+            return
+        }
+        Task {
+            if await viewModel.selectModel(RemoteModelSelection(
+                provider: current.provider,
+                model: current.model,
+                reasoningEffort: effort
+            )) {
+                dismiss()
+            }
+        }
     }
 }
 
@@ -1728,6 +2121,7 @@ private struct InstructionSourcesView: View {
 
 private struct QueueDockView: View {
     let queue: [RemoteQueuedMessage]
+    let isRunning: Bool
     let onAction: (RemoteQueuedMessage, RemoteQueueAction) -> Void
 
     @State private var expanded = false
@@ -1741,7 +2135,7 @@ private struct QueueDockView: View {
                 withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack {
-                    Label("Queue · \(queued.count)", systemImage: "tray.full")
+                    Label("排队 · \(queued.count)", systemImage: "tray.full")
                         .font(.caption.weight(.semibold))
                     Spacer()
                     if queued.count > 1 {
@@ -1771,8 +2165,10 @@ private struct QueueDockView: View {
                                     .lineLimit(2)
                                 Spacer()
                                 Menu {
-                                    Button("插入当前步骤", systemImage: "arrow.triangle.branch") {
-                                        onAction(item, .steer)
+                                    if isRunning {
+                                        Button("插话发送", systemImage: "arrow.triangle.branch") {
+                                            onAction(item, .steer)
+                                        }
                                     }
                                     if let text = item.text {
                                         Button("编辑", systemImage: "pencil") {

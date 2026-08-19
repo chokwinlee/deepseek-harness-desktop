@@ -82,7 +82,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 ### 局域网直连边界
 
 - Harness 本身仍只绑定 `127.0.0.1`；Desktop 另启 `:8765` 代理，不能把 Harness 直接绑定到 `0.0.0.0`。
-- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作仍不对局域网入口开放。
+- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
 - HTTP 与 WebSocket 都要求二维码中的 bearer，转发到 Harness 前会剥离认证头并重写 loopback Host。
 - 裸局域网 HTTP 地址不能在 iOS 手输；缺少凭据时客户端拒绝保存。
 - 该路径有认证但没有链路加密，只允许用户明确启用并用于受信任家庭/办公 Wi-Fi；不受信任网络使用 Tailscale HTTPS。
@@ -105,11 +105,12 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 
 1. `session.list` 与 `session.history`；会话摘要保留上游原始 `cwd`，并兼容 macOS/Linux `/` 和 Windows `\\` 路径提取项目名；
 2. 只读 `workspace.list` 作为增强信息，提供电脑端的项目标题、路径、会话顺序和归档集合；接口缺失或请求失败时，会话列表仍按 `session.list` 与 `cwd` 正常展示；
-3. `session.prompt`，支持 `queue` 和 `steer`；
-4. `session.prompt` 的 `queue` / `steer` 与 `session.cancel`；
-5. `/api/events.mux` WebSocket 重连；
-6. approval/question 的 `/api/respond`；
-7. 只读工具视图与 diff。
+3. `session.models` 与 `session.selectModel`，读取并切换当前会话的 provider、model 与可选 reasoning effort；选中值用于下一次提示词组装，Host 同时 best-effort 把它保存为部署默认值。模型目录在进入会话和每次打开选择器时刷新，整目录失败保留上一次可用状态；
+4. `session.prompt`，支持 `queue` 和 `steer`；
+5. `session.updateQueue` 与 `session.cancel`；
+6. `/api/events.mux` WebSocket 重连；
+7. approval/question 的 `/api/respond`；
+8. 只读工具视图与 diff。
 
 每次升级 `@deepseek-ai/dsh` 都必须重新核对 `dsh-host-apiproxy` 类型。当前协议属于开发预览，不能把 rc.6 的线格式复制成长期稳定的 iOS 公共 API；更稳妥的做法是在 Desktop 中增加一个版本化的窄 Remote Adapter，由它把上游变化隔离在电脑端。
 

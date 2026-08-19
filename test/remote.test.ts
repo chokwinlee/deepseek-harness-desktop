@@ -110,3 +110,11 @@ test('LAN Remote exposes workspace grouping as read-only enrichment', async () =
     /'\/api\/workspace\.(?:create|rename|delete|insertBefore|insertSessionBefore|archiveSession)'/,
   )
 })
+
+test('LAN Remote exposes conversation model and queue controls', async () => {
+  const source = await readFile(join(process.cwd(), 'scripts', 'lan-remote-proxy.mjs'), 'utf8')
+  assert.match(source, /'\/api\/session\.models'/)
+  assert.match(source, /'\/api\/session\.selectModel'/)
+  assert.match(source, /'\/api\/session\.updateQueue'/)
+  assert.doesNotMatch(source, /'\/api\/(?:llm|settings|credentials)\./)
+})

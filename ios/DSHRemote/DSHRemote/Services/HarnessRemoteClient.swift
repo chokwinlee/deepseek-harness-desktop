@@ -8,6 +8,8 @@ protocol HarnessRemoteClient: Sendable {
     func workspaces() async throws -> RemoteWorkspaceSnapshot
     func sessions() async throws -> [RemoteSessionSummary]
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
+    func models(sessionID: String) async throws -> RemoteModelDirectory
+    func selectModel(sessionID: String, selection: RemoteModelSelection) async throws -> RemoteModelSelection
     func send(_ text: String, to sessionID: String, steer: Bool) async throws
     func updateQueue(sessionID: String, itemID: String, action: RemoteQueueAction) async throws
     func cancel(sessionID: String) async throws
@@ -109,6 +111,30 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
             payload: SessionHistoryPayload(sessionId: sessionID, maxMessages: maxMessages)
         )
         return ConversationFolder.fold(response)
+    }
+
+    func models(sessionID: String) async throws -> RemoteModelDirectory {
+        let response: SessionModelsWire = try await call(
+            "session.models",
+            payload: SessionIDPayload(sessionId: sessionID)
+        )
+        return response.remoteValue
+    }
+
+    func selectModel(
+        sessionID: String,
+        selection: RemoteModelSelection
+    ) async throws -> RemoteModelSelection {
+        let response: SessionSelectModelWire = try await call(
+            "session.selectModel",
+            payload: SessionSelectModelPayload(
+                sessionId: sessionID,
+                provider: selection.provider,
+                model: selection.model,
+                reasoningEffort: selection.reasoningEffort
+            )
+        )
+        return response.selected.remoteValue
     }
 
     func send(_ text: String, to sessionID: String, steer: Bool) async throws {
@@ -342,6 +368,11 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
 
     private let sessionID = "review-demo-session"
     private var running = false
+    private var selectedModel = RemoteModelSelection(
+        provider: "deepseek-official",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "high"
+    )
     private static let demoInstructionText = """
     <system-reminder>
     The following workspace instructions may be relevant to your work. Use them as guidance when applicable.
@@ -526,6 +557,71 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         )
     }
 
+    func models(sessionID: String) async throws -> RemoteModelDirectory {
+        RemoteModelDirectory(
+            current: selectedModel,
+            routable: true,
+            groups: [
+                RemoteModelProviderGroup(
+                    id: "deepseek-official",
+                    name: "DeepSeek",
+                    models: [
+                        RemoteModelCatalogEntry(
+                            id: "deepseek-v4-flash",
+                            name: "DeepSeek-V4-Flash",
+                            description: "快速完成日常编码与分析",
+                            reasoning: RemoteModelReasoning(
+                                efforts: [
+                                    .init(id: "off", name: "Off", description: "关闭深度推理"),
+                                    .init(id: "high", name: "High", description: "适合复杂编码任务"),
+                                    .init(id: "max", name: "Max", description: "投入最多推理时间"),
+                                ],
+                                defaultEffort: "high"
+                            )
+                        ),
+                        RemoteModelCatalogEntry(
+                            id: "deepseek-v4-pro",
+                            name: "DeepSeek-V4-Pro",
+                            description: "面向更复杂的长程任务",
+                            reasoning: RemoteModelReasoning(
+                                efforts: [
+                                    .init(id: "off", name: "Off", description: "关闭深度推理"),
+                                    .init(id: "high", name: "High", description: "适合复杂编码任务"),
+                                    .init(id: "max", name: "Max", description: "投入最多推理时间"),
+                                ],
+                                defaultEffort: "high"
+                            )
+                        ),
+                    ]
+                ),
+            ],
+            failures: []
+        )
+    }
+
+    func selectModel(
+        sessionID: String,
+        selection: RemoteModelSelection
+    ) async throws -> RemoteModelSelection {
+        let directory = try await models(sessionID: sessionID)
+        guard let model = directory.groups
+            .first(where: { $0.id == selection.provider })?
+            .models.first(where: { $0.id == selection.model }) else {
+            throw HarnessRemoteClientError.api(code: "model-unavailable", message: "这个模型当前不可用。")
+        }
+        let acceptedEffort = selection.reasoningEffort ?? model.reasoning?.defaultEffort
+        if let acceptedEffort,
+           model.reasoning?.efforts.contains(where: { $0.id == acceptedEffort }) != true {
+            throw HarnessRemoteClientError.api(code: "model-unavailable", message: "这个推理强度当前不可用。")
+        }
+        selectedModel = RemoteModelSelection(
+            provider: selection.provider,
+            model: selection.model,
+            reasoningEffort: acceptedEffort
+        )
+        return selectedModel
+    }
+
     func send(_ text: String, to sessionID: String, steer: Bool) async throws {
         let now = Date()
         items.append(RemoteConversationItem(
@@ -619,6 +715,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
 
 private struct EmptyPayload: Codable {}
 private struct SessionIDPayload: Codable { let sessionId: String }
+private struct SessionSelectModelPayload: Codable {
+    let sessionId: String
+    let provider: String
+    let model: String
+    let reasoningEffort: String?
+}
 private struct SessionHistoryPayload: Codable { let sessionId: String; let maxMessages: Int }
 private struct PromptTextPart: Codable { let type: String; let text: String }
 private struct SessionPromptPayload: Codable {
@@ -695,6 +797,91 @@ private struct SessionHistoryWire: Decodable {
     let events: [HistoryEntryWire]
     let hasMore: Bool
     let projections: SessionProjectionsWire?
+}
+
+private struct SessionModelsWire: Decodable {
+    let current: ModelSelectionWire
+    let routable: Bool
+    let groups: [ModelProviderGroupWire]
+    let failures: [ModelCatalogFailureWire]
+
+    var remoteValue: RemoteModelDirectory {
+        RemoteModelDirectory(
+            current: current.remoteValue,
+            routable: routable,
+            groups: groups.map(\.remoteValue),
+            failures: failures.map(\.remoteValue)
+        )
+    }
+}
+
+private struct SessionSelectModelWire: Decodable {
+    let selected: ModelSelectionWire
+}
+
+private struct ModelSelectionWire: Decodable {
+    let provider: String
+    let model: String
+    let reasoningEffort: String?
+
+    var remoteValue: RemoteModelSelection {
+        RemoteModelSelection(provider: provider, model: model, reasoningEffort: reasoningEffort)
+    }
+}
+
+private struct ModelProviderGroupWire: Decodable {
+    let id: String
+    let name: String
+    let models: [ModelCatalogEntryWire]
+
+    var remoteValue: RemoteModelProviderGroup {
+        RemoteModelProviderGroup(id: id, name: name, models: models.map(\.remoteValue))
+    }
+}
+
+private struct ModelCatalogEntryWire: Decodable {
+    let id: String
+    let name: String
+    let description: String?
+    let reasoning: ModelReasoningWire?
+
+    var remoteValue: RemoteModelCatalogEntry {
+        RemoteModelCatalogEntry(
+            id: id,
+            name: name,
+            description: description,
+            reasoning: reasoning?.remoteValue
+        )
+    }
+}
+
+private struct ModelReasoningWire: Decodable {
+    let efforts: [ModelReasoningEffortWire]
+    let defaultEffort: String?
+
+    var remoteValue: RemoteModelReasoning {
+        RemoteModelReasoning(efforts: efforts.map(\.remoteValue), defaultEffort: defaultEffort)
+    }
+}
+
+private struct ModelReasoningEffortWire: Decodable {
+    let id: String
+    let name: String
+    let description: String?
+
+    var remoteValue: RemoteModelReasoningEffort {
+        RemoteModelReasoningEffort(id: id, name: name, description: description)
+    }
+}
+
+private struct ModelCatalogFailureWire: Decodable {
+    let id: String
+    let name: String
+    let message: String
+
+    var remoteValue: RemoteModelCatalogFailure {
+        RemoteModelCatalogFailure(id: id, name: name, message: message)
+    }
 }
 private struct HistoryEntryWire: Decodable {
     let event: SessionEventWire
