@@ -32,7 +32,7 @@ DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/
 
 - **Multimodal sessions** — paste or attach images and send them through the normal Harness conversation flow when the selected provider and model declare image input support. Image messages remain visible in session history.
 - **Usage at a glance on macOS** — see today and seven-day token totals, estimated cost, active task count, and aggregate running throughput without leaving the current session.
-- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.2.1 · Harness rc.8`.
+- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.3.0 · Harness rc.8`.
 - **Ready to run** — bundles a pinned Node.js sidecar, the official Harness runtime, native modules, and release-time runtime checks. Harness stays on a random `127.0.0.1` port.
 
 Cost figures are estimates derived from local token logs and available public model prices. Unmatched models stay visibly unpriced rather than being counted as free.

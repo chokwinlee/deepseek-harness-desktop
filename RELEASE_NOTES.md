@@ -1,4 +1,4 @@
-# DSH Desktop v0.2.1
+# DSH Desktop v0.3.0
 
 <!-- dsh-summary:zh -->
 ## 中文
