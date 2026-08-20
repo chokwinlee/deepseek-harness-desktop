@@ -12,6 +12,12 @@ window.__ModuleLoader__.load({
     const RUNTIME_EVENT = 'dsh-desktop-runtime'
     const CODEX_PACKAGE = '@deepseek-ai/dsh-subagent-codex'
     const CODEX_PRESET = 'desktop-codex'
+    const CLAUDE_CODE_PACKAGE = '@deepseek-ai/dsh-subagent-claude-code'
+    const CLAUDE_CODE_PRESET = 'desktop-claude-code'
+    const PRODUCT_SUBAGENTS = [
+      { key: 'codex', statusKey: 'codex', packageName: CODEX_PACKAGE, presetId: CODEX_PRESET, mark: 'CX', configureAction: 'configure-codex-preset' },
+      { key: 'claude', statusKey: 'claudeCode', packageName: CLAUDE_CODE_PACKAGE, presetId: CLAUDE_CODE_PRESET, mark: 'CC', configureAction: 'configure-claude-code-preset' }
+    ]
     const inject = ['slots', 'locale', 'connection']
 
     const en = {
@@ -54,6 +60,24 @@ window.__ModuleLoader__.load({
       codexConfiguring: 'Creating Codex preset…',
       codexSelecting: 'Updating default preset…',
       codexPermission: 'The installed provider uses Codex approval mode never and the native sandbox. Advanced provider modes remain in the web profile configuration.',
+      claudeTitle: 'Claude Code subagent',
+      claudeIntro: 'Install Claude Code only when you need a separate coding agent. DSH starts one non-persisted Claude Code query for each delegated task.',
+      claudeBundle: 'Runtime bundle',
+      claudeBundleHint: 'Downloads the official platform-specific Claude Code runtime. Native Claude settings and sign-in remain authoritative.',
+      claudePreset: 'Agent preset',
+      claudePresetHint: 'Creates a Standard + Claude Code preset. New sessions can then expose the subagent_claude_code tool.',
+      claudeNotInstalled: 'Not installed',
+      claudeInstalled: 'Installed',
+      claudeRestartRequired: 'Restart required',
+      claudePresetReady: 'Preset ready',
+      claudeReady: 'Default for new sessions',
+      claudeInstall: 'Install Claude Code',
+      claudeConfigure: 'Create preset',
+      claudeUseDefault: 'Use by default',
+      claudeInstalling: 'Installing Claude Code…',
+      claudeConfiguring: 'Creating Claude Code preset…',
+      claudeSelecting: 'Updating default preset…',
+      claudePermission: 'The installed provider uses Claude Code permission mode dontAsk. Advanced provider modes remain in the web profile configuration.',
       cliTitle: 'Command-line integration',
       cliManaged: 'The Desktop dsh command is enabled and shares this web profile.',
       cliManagedRestart: 'The Desktop dsh command is enabled. Open a new Terminal window to use it with this web profile.',
@@ -107,6 +131,24 @@ window.__ModuleLoader__.load({
       codexConfiguring: '正在创建 Codex 预设…',
       codexSelecting: '正在更新默认预设…',
       codexPermission: '安装后的 provider 默认使用 Codex 的 never 批准模式和原生沙箱。高级模式继续在 web profile 配置中管理。',
+      claudeTitle: 'Claude Code 子代理',
+      claudeIntro: '只在需要独立编码 Agent 时安装 Claude Code。每次调度都会启动一个不保留会话的 Claude Code query。',
+      claudeBundle: '运行时 Bundle',
+      claudeBundleHint: '按当前平台下载官方 Claude Code 运行时，继续使用本机 Claude 的登录状态与配置。',
+      claudePreset: 'Agent 预设',
+      claudePresetHint: '创建“Standard + Claude Code”预设，让新会话可以使用 subagent_claude_code 工具。',
+      claudeNotInstalled: '尚未安装',
+      claudeInstalled: '已安装',
+      claudeRestartRequired: '需要重启',
+      claudePresetReady: '预设已就绪',
+      claudeReady: '新会话默认使用',
+      claudeInstall: '安装 Claude Code',
+      claudeConfigure: '创建预设',
+      claudeUseDefault: '设为默认',
+      claudeInstalling: '正在安装 Claude Code…',
+      claudeConfiguring: '正在创建 Claude Code 预设…',
+      claudeSelecting: '正在更新默认预设…',
+      claudePermission: '安装后的 provider 默认使用 Claude Code 的 dontAsk 权限模式。高级模式继续在 web profile 配置中管理。',
       cliTitle: '命令行集成',
       cliManaged: '桌面版 dsh 命令已启用，并与这里共享同一个 web profile。',
       cliManagedRestart: '桌面版 dsh 命令已启用；请新开一个终端窗口，再使用与这里共享的 web profile。',
@@ -170,13 +212,63 @@ window.__ModuleLoader__.load({
       return pending?.changes?.[0]?.name || pending?.packages?.[0] || pending?.spec || 'Plugin change'
     }
 
+    function ProductSubagentPanel({ t, product, view, hostStatus, pending, busy }) {
+      const copy = suffix => t(`${product.key}${suffix}`)
+      const productStatus = view.status
+      const action = view.action
+      return React.createElement('section', { className: 'dpm-panel', 'aria-labelledby': `dpm-${product.key}-title` },
+        React.createElement('div', { className: 'dpm-codex-head' },
+          React.createElement('div', { className: 'dpm-codex-mark', 'aria-hidden': 'true' }, product.mark),
+          React.createElement('div', { className: 'dpm-codex-copy' },
+            React.createElement('h3', { id: `dpm-${product.key}-title` }, copy('Title')),
+            React.createElement('p', { className: 'dpm-subtle' }, copy('Intro'))
+          ),
+          React.createElement('span', { className: 'dpm-tag', 'data-active': view.stageActive ? 'true' : undefined }, view.isDefault ? copy('Ready') : view.stage)
+        ),
+        React.createElement('div', { className: 'dpm-codex-rows' },
+          React.createElement('div', { className: 'dpm-codex-row' },
+            React.createElement('div', { className: 'dpm-codex-row-copy' },
+              React.createElement('strong', null, copy('Bundle')),
+              React.createElement('p', { className: 'dpm-subtle' }, copy('BundleHint'))
+            ),
+            React.createElement('div', { className: 'dpm-codex-row-action' },
+              React.createElement('span', { className: 'dpm-tag', 'data-active': productStatus?.active && !pending ? 'true' : undefined }, productStatus?.installed ? (pending ? copy('RestartRequired') : copy('Installed')) : copy('NotInstalled')),
+              action && !productStatus?.installed ? React.createElement('button', {
+                type: 'button', className: `dpm-button${action.primary ? ' dpm-primary' : ''}`,
+                disabled: !hostStatus || busy || view.selecting || Boolean(pending), onClick: action.run
+              }, action.label) : null
+            )
+          ),
+          React.createElement('div', { className: 'dpm-codex-row' },
+            React.createElement('div', { className: 'dpm-codex-row-copy' },
+              React.createElement('strong', null, copy('Preset')),
+              React.createElement('p', { className: 'dpm-subtle' }, copy('PresetHint'))
+            ),
+            React.createElement('div', { className: 'dpm-codex-row-action' },
+              React.createElement('span', { className: 'dpm-tag', 'data-active': productStatus?.presetReady ? 'true' : undefined }, view.isDefault ? copy('Ready') : productStatus?.presetReady ? copy('PresetReady') : copy('NotInstalled')),
+              action && productStatus?.installed && !pending ? React.createElement('button', {
+                type: 'button', className: `dpm-button${action.primary ? ' dpm-primary' : ''}`, disabled: busy || view.selecting,
+                onClick: action.run
+              }, view.selecting ? copy('Selecting') : action.label) : null
+            )
+          )
+        ),
+        React.createElement('p', { className: 'dpm-codex-note' }, copy('Permission')),
+        React.createElement('p', {
+          className: 'dpm-status', role: view.error ? 'alert' : 'status',
+          'data-error': view.error ? 'true' : undefined
+        }, view.error || (view.isInstalling ? copy('Installing') : view.operationText))
+      )
+    }
+
     function DesktopPluginManagerTab({ t, api }) {
       const bridge = window[BRIDGE_KEY]
       const [spec, setSpec] = React.useState('')
       const [confirmRemove, setConfirmRemove] = React.useState('')
-      const [codexDefault, setCodexDefault] = React.useState(false)
-      const [codexSelecting, setCodexSelecting] = React.useState(false)
-      const [codexError, setCodexError] = React.useState('')
+      const [productDefaults, setProductDefaults] = React.useState({})
+      const [selectingProduct, setSelectingProduct] = React.useState('')
+      const [installingProduct, setInstallingProduct] = React.useState('')
+      const [productErrors, setProductErrors] = React.useState({})
       const empty = React.useMemo(() => ({ status: null, busyOperation: '', error: '' }), [])
       const state = React.useSyncExternalStore(
         bridge?.subscribe || (() => () => {}),
@@ -187,31 +279,41 @@ window.__ModuleLoader__.load({
       const busy = Boolean(state.busyOperation)
       const pending = status?.pending
       const installed = status?.installed || []
-      const codex = status?.codex || null
+      const readyPresetSignature = PRODUCT_SUBAGENTS
+        .filter(product => status?.[product.statusKey]?.presetReady)
+        .map(product => product.presetId)
+        .join('|')
 
       React.useEffect(() => {
         bridge?.request('status')
       }, [bridge])
 
-      const loadCodexDefault = React.useCallback(async () => {
-        if (!api || !codex?.presetReady) {
-          setCodexDefault(false)
+      const loadProductDefaults = React.useCallback(async () => {
+        if (!api || !readyPresetSignature) {
+          setProductDefaults({})
           return
         }
         try {
           const response = await api.agentPresets.list({})
           if (!response.result.ok) throw new Error(response.result.error.message)
-          const row = response.result.value.presets.find(preset => preset.id === CODEX_PRESET)
-          setCodexDefault(Boolean(row?.isDefault))
-          setCodexError('')
+          setProductDefaults(Object.fromEntries(PRODUCT_SUBAGENTS.map(product => [
+            product.key,
+            Boolean(response.result.value.presets.find(preset => preset.id === product.presetId)?.isDefault)
+          ])))
+          setProductErrors({})
         } catch (error) {
-          setCodexError(error instanceof Error ? error.message : String(error))
+          const message = error instanceof Error ? error.message : String(error)
+          setProductErrors(Object.fromEntries(PRODUCT_SUBAGENTS.map(product => [product.key, message])))
         }
-      }, [api, codex?.presetReady])
+      }, [api, readyPresetSignature])
 
       React.useEffect(() => {
-        loadCodexDefault()
-      }, [loadCodexDefault])
+        loadProductDefaults()
+      }, [loadProductDefaults])
+
+      React.useEffect(() => {
+        if (!state.busyOperation) setInstallingProduct('')
+      }, [state.busyOperation])
 
       const submit = event => {
         event.preventDefault()
@@ -229,21 +331,25 @@ window.__ModuleLoader__.load({
         bridge?.request('remove-plugin', { name })
       }
 
-      const useCodexByDefault = async () => {
-        if (!api || !codex?.presetReady || codexSelecting) return
-        setCodexSelecting(true)
-        setCodexError('')
+      const useProductByDefault = async product => {
+        const productStatus = status?.[product.statusKey]
+        if (!api || !productStatus?.presetReady || selectingProduct) return
+        setSelectingProduct(product.key)
+        setProductErrors(current => ({ ...current, [product.key]: '' }))
         try {
           const response = await api.settings.update({
             ns: 'agent-presets',
-            patch: { default: CODEX_PRESET }
+            patch: { default: product.presetId }
           })
           if (!response.result.ok) throw new Error(response.result.error.message)
-          await loadCodexDefault()
+          await loadProductDefaults()
         } catch (error) {
-          setCodexError(error instanceof Error ? error.message : String(error))
+          setProductErrors(current => ({
+            ...current,
+            [product.key]: error instanceof Error ? error.message : String(error)
+          }))
         } finally {
-          setCodexSelecting(false)
+          setSelectingProduct('')
         }
       }
 
@@ -251,38 +357,56 @@ window.__ModuleLoader__.load({
         ? t('installing')
         : state.busyOperation === 'remove-plugin'
           ? t('removing')
-          : state.busyOperation === 'configure-codex-preset'
-            ? t('codexConfiguring')
           : state.busyOperation === 'restart-harness'
             ? t('restarting')
             : ''
 
-      let codexStage = t('codexNotInstalled')
-      let codexStageActive = false
-      let codexAction = null
-      if (codex?.installed) {
-        codexStage = pending ? t('codexRestartRequired') : codex?.presetReady ? t('codexPresetReady') : t('codexInstalled')
-        codexStageActive = Boolean(codex.active && !pending)
-      }
-      if (!codex?.installed) {
-        codexAction = {
-          label: t('codexInstall'),
-          primary: true,
-          run: () => bridge?.request('install-plugin', { spec: codex?.bundleSpec || CODEX_PACKAGE })
+      const productViews = PRODUCT_SUBAGENTS.map(product => {
+        const productStatus = status?.[product.statusKey] || null
+        const copy = suffix => t(`${product.key}${suffix}`)
+        const isDefault = Boolean(productDefaults[product.key])
+        let stage = copy('NotInstalled')
+        let stageActive = false
+        let action = null
+        if (productStatus?.installed) {
+          stage = pending ? copy('RestartRequired') : productStatus.presetReady ? copy('PresetReady') : copy('Installed')
+          stageActive = Boolean(productStatus.active && !pending)
         }
-      } else if (!pending && codex.active && !codex.presetReady) {
-        codexAction = {
-          label: t('codexConfigure'),
-          primary: true,
-          run: () => bridge?.request('configure-codex-preset')
+        if (!productStatus?.installed) {
+          action = {
+            label: copy('Install'),
+            primary: true,
+            run: () => {
+              setInstallingProduct(product.key)
+              bridge?.request('install-plugin', { spec: productStatus?.bundleSpec || product.packageName })
+            }
+          }
+        } else if (!pending && productStatus.active && !productStatus.presetReady) {
+          action = {
+            label: copy('Configure'),
+            primary: true,
+            run: () => bridge?.request(product.configureAction)
+          }
+        } else if (!pending && productStatus.presetReady && !isDefault) {
+          action = {
+            label: copy('UseDefault'),
+            primary: false,
+            run: () => useProductByDefault(product)
+          }
         }
-      } else if (!pending && codex.presetReady && !codexDefault) {
-        codexAction = {
-          label: t('codexUseDefault'),
-          primary: false,
-          run: useCodexByDefault
+        return {
+          product,
+          status: productStatus,
+          stage,
+          stageActive,
+          isDefault,
+          action,
+          selecting: selectingProduct === product.key,
+          isInstalling: installingProduct === product.key,
+          error: state.error || productErrors[product.key] || '',
+          operationText: state.busyOperation === product.configureAction ? copy('Configuring') : operationText
         }
-      }
+      })
 
       let cliText = t('cliDisabled')
       let cliLabel = t('enableCli')
@@ -313,49 +437,15 @@ window.__ModuleLoader__.load({
             onClick: () => bridge?.request('restart-harness')
           }, t('restart'))
         ) : null,
-        bridge ? React.createElement('section', { className: 'dpm-panel', 'aria-labelledby': 'dpm-codex-title' },
-          React.createElement('div', { className: 'dpm-codex-head' },
-            React.createElement('div', { className: 'dpm-codex-mark', 'aria-hidden': 'true' }, 'CX'),
-            React.createElement('div', { className: 'dpm-codex-copy' },
-              React.createElement('h3', { id: 'dpm-codex-title' }, t('codexTitle')),
-              React.createElement('p', { className: 'dpm-subtle' }, t('codexIntro'))
-            ),
-            React.createElement('span', { className: 'dpm-tag', 'data-active': codexStageActive ? 'true' : undefined }, codexDefault ? t('codexReady') : codexStage)
-          ),
-          React.createElement('div', { className: 'dpm-codex-rows' },
-            React.createElement('div', { className: 'dpm-codex-row' },
-              React.createElement('div', { className: 'dpm-codex-row-copy' },
-                React.createElement('strong', null, t('codexBundle')),
-                React.createElement('p', { className: 'dpm-subtle' }, t('codexBundleHint'))
-              ),
-              React.createElement('div', { className: 'dpm-codex-row-action' },
-                React.createElement('span', { className: 'dpm-tag', 'data-active': codex?.active && !pending ? 'true' : undefined }, codex?.installed ? (pending ? t('codexRestartRequired') : t('codexInstalled')) : t('codexNotInstalled')),
-                codexAction && !codex?.installed ? React.createElement('button', {
-                  type: 'button', className: `dpm-button${codexAction.primary ? ' dpm-primary' : ''}`,
-                  disabled: !status || busy || codexSelecting || Boolean(pending), onClick: codexAction.run
-                }, codexAction.label) : null
-              )
-            ),
-            React.createElement('div', { className: 'dpm-codex-row' },
-              React.createElement('div', { className: 'dpm-codex-row-copy' },
-                React.createElement('strong', null, t('codexPreset')),
-                React.createElement('p', { className: 'dpm-subtle' }, t('codexPresetHint'))
-              ),
-              React.createElement('div', { className: 'dpm-codex-row-action' },
-                React.createElement('span', { className: 'dpm-tag', 'data-active': codex?.presetReady ? 'true' : undefined }, codexDefault ? t('codexReady') : codex?.presetReady ? t('codexPresetReady') : t('codexNotInstalled')),
-                codexAction && codex?.installed && !pending ? React.createElement('button', {
-                  type: 'button', className: `dpm-button${codexAction.primary ? ' dpm-primary' : ''}`, disabled: busy || codexSelecting,
-                  onClick: codexAction.run
-                }, codexSelecting ? t('codexSelecting') : codexAction.label) : null
-              )
-            )
-          ),
-          React.createElement('p', { className: 'dpm-codex-note' }, t('codexPermission')),
-          React.createElement('p', {
-            className: 'dpm-status', role: state.error || codexError ? 'alert' : 'status',
-            'data-error': state.error || codexError ? 'true' : undefined
-          }, state.error || codexError || (state.busyOperation === 'install-plugin' && !codex?.installed ? t('codexInstalling') : operationText))
-        ) : null,
+        bridge ? productViews.map(view => React.createElement(ProductSubagentPanel, {
+          key: view.product.key,
+          t,
+          product: view.product,
+          view,
+          hostStatus: status,
+          pending,
+          busy
+        })) : null,
         React.createElement('section', { className: 'dpm-panel', 'aria-labelledby': 'dpm-install-title' },
           React.createElement('div', { className: 'dpm-panel-head' },
             React.createElement('div', null,
