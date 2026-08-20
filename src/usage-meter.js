@@ -55,9 +55,19 @@
     },
   }
 
+  function resolveLocaleFromHints(hints, languages) {
+    const text = (hints || []).filter(Boolean).join(' ')
+    if (/\b(New Session|Workspaces|Settings)\b/i.test(text)) return 'en'
+    if (/(新会话|工作区|设置)/.test(text)) return 'zh'
+    return (languages || []).some(value => String(value || '').toLowerCase().startsWith('zh')) ? 'zh' : 'en'
+  }
+
   function locale() {
-    const hints = [document?.documentElement?.lang, ...(navigator?.languages || [])]
-    return hints.some(value => String(value || '').toLowerCase().startsWith('zh')) ? 'zh' : 'en'
+    const controls = [...document.querySelectorAll('button')].map(element => element.textContent)
+    return resolveLocaleFromHints(
+      [document.documentElement.lang, ...controls],
+      [...(navigator.languages || []), navigator.language],
+    )
   }
 
   function localDayKey(timestamp) {
@@ -326,6 +336,7 @@
       localDayKey,
       matchOpenRouterModel,
       openRouterPrice,
+      resolveLocaleFromHints,
       sessionAverageTps,
       startOfLocalDay,
       sumSessionTps,
@@ -338,8 +349,8 @@
   const isMac = /Mac/i.test(navigator.platform || navigator.userAgent || '')
   if (!trustedHarness || !isMac) return
 
-  const language = locale()
-  const t = copy[language]
+  let language = locale()
+  let t = copy[language]
   const records = new Map()
   const runningSessions = new Set()
   const sessionStatsById = new Map()
@@ -525,6 +536,12 @@
   function render() {
     renderTimer = 0
     if (!summaryButton || !popover) return
+    const nextLanguage = locale()
+    if (nextLanguage !== language) {
+      language = nextLanguage
+      t = copy[language]
+      popover.setAttribute('aria-label', t.tokens)
+    }
     runningTps = currentTps()
     const { today, sevenDays } = aggregateUsage()
     const ready = snapshotLoaded && openRouterLoaded

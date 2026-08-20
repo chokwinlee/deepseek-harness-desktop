@@ -13,6 +13,7 @@ interface UsageMeterTestApi {
     cacheRead: number
   } | null
   matchOpenRouterModel(index: unknown, provider: string, model: string): { id: string } | null
+  resolveLocaleFromHints(hints: unknown[], languages: unknown[]): 'zh' | 'en'
   sessionAverageTps(stats: unknown): number
   sumSessionTps(stats: unknown[]): number
 }
@@ -29,6 +30,15 @@ async function loadUsageMeter() {
   assert.ok(sandbox.__DSH_USAGE_METER_TEST_API__)
   return { api: sandbox.__DSH_USAGE_METER_TEST_API__, source }
 }
+
+test('follows the visible Harness language before the system language', async () => {
+  const { api } = await loadUsageMeter()
+
+  assert.equal(api.resolveLocaleFromHints(['New Session Workspaces Settings'], ['zh-CN']), 'en')
+  assert.equal(api.resolveLocaleFromHints(['新会话 工作区 设置'], ['en-US']), 'zh')
+  assert.equal(api.resolveLocaleFromHints([], ['zh-CN', 'en-US']), 'zh')
+  assert.equal(api.resolveLocaleFromHints([], ['en-US']), 'en')
+})
 
 test('applies the time-versioned official DeepSeek V4 price before catalog fallback', async () => {
   const { api } = await loadUsageMeter()
