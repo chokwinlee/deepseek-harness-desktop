@@ -21,7 +21,7 @@
 
 ![DSH Desktop](docs/images/readme-hero-zh-CN.png)
 
-*Harness rc.8 的真实图片输入会话，同时展开 Token 与费用统计，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
+*macOS 下载包低于 90 MB，完整内置 Harness rc.8 运行时。*
 
 DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。当前构建使用 `@deepseek-ai/dsh@0.1.0-rc.8`，侧边栏会同时显示桌面版与内置 Harness 版本。应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
@@ -32,12 +32,17 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 
 - **多模态会话**　所选服务商与模型声明支持图片输入后，可以直接粘贴或附加图片，并沿用 Harness 的标准会话流程。图片消息会保留在会话历史中。
 - **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
+- **轻巧的 macOS 安装包**　低于 90 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
 - **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.3.0 · Harness rc.8`。
 - **开箱即用**　应用内置固定版本的 Node.js sidecar、官方 Harness 运行时、原生模块和发行检查。Harness 只绑定到随机的 `127.0.0.1` 端口。
 
 费用来自本地 Token 记录和可用的公开模型价格，只作为估算。无法匹配价格的模型会明确显示为未定价，不会被当作免费。
 
-## 用量统计
+## 多模态与用量统计
+
+![多模态会话与用量统计](docs/images/readme-features-zh-CN.png)
+
+*Harness rc.8 的真实图片输入会话，同时展开 Token 与费用统计，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
 
 标题栏会持续显示精简摘要。展开后可以查看输入、输出、缓存、费用和实时吞吐率。用量记录来自本地 Harness 会话日志，价格信息可能从公开模型目录获取。
 
