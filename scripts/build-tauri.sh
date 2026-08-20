@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build the signed macOS Tauri artifact for DeepSeek Harness Desktop.
+# Build the signed macOS Tauri artifact for DSH Desktop.
 # Usage: scripts/build-tauri.sh [arm64|x86_64]
-# Outputs: release/DeepSeek Harness Desktop.app, release/*.dmg, release/*.zip
+# Outputs: release/DSH Desktop.app, release/*.dmg, release/*.zip
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -148,7 +148,7 @@ echo ">> building Tauri $VERSION for $TRIPLE"
 )
 
 BUNDLE_ROOT="src-tauri/target/${TRIPLE}/release/bundle"
-APP="$BUNDLE_ROOT/macos/DeepSeek Harness Desktop.app"
+APP="$BUNDLE_ROOT/macos/DSH Desktop.app"
 [ -d "$APP" ] || { echo "Tauri app not found: $APP" >&2; exit 1; }
 
 codesign --verify --deep --strict --verbose=4 "$APP"
@@ -156,12 +156,12 @@ codesign --verify --deep --strict --verbose=4 "$APP"
 # Tauri's styled DMG helper drives Finder and can time out on headless Intel
 # GitHub runners. Build the same drag-to-Applications layout with hdiutil only.
 DMG_STAGE="$BUILD_TEMP/dmg-root"
-TAURI_DMG="$BUNDLE_ROOT/dmg/DeepSeek-Harness-Desktop-${VERSION}-${ARTIFACT_ARCH}.dmg"
+TAURI_DMG="$BUNDLE_ROOT/dmg/DSH-Desktop-${VERSION}-${ARTIFACT_ARCH}.dmg"
 mkdir -p "$DMG_STAGE" "$BUNDLE_ROOT/dmg"
-ditto "$APP" "$DMG_STAGE/DeepSeek Harness Desktop.app"
+ditto "$APP" "$DMG_STAGE/DSH Desktop.app"
 ln -s /Applications "$DMG_STAGE/Applications"
 hdiutil create \
-  -volname "DeepSeek Harness Desktop" \
+  -volname "DSH Desktop" \
   -srcfolder "$DMG_STAGE" \
   -fs HFS+ \
   -format UDZO \
@@ -170,13 +170,13 @@ hdiutil imageinfo "$TAURI_DMG" >/dev/null
 
 echo ">> collecting release artifacts"
 mkdir -p release
-find "release/DeepSeek Harness Desktop.app" -depth -delete 2>/dev/null || true
-cp -R "$APP" "release/DeepSeek Harness Desktop.app"
-cp "$TAURI_DMG" "release/DeepSeek-Harness-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.dmg"
+find "release/DSH Desktop.app" -depth -delete 2>/dev/null || true
+cp -R "$APP" "release/DSH Desktop.app"
+cp "$TAURI_DMG" "release/DSH-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.dmg"
 ditto -c -k --sequesterRsrc --keepParent \
-  "release/DeepSeek Harness Desktop.app" \
-  "release/DeepSeek-Harness-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.zip"
+  "release/DSH Desktop.app" \
+  "release/DSH-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.zip"
 
-echo "✅ built: release/DeepSeek Harness Desktop.app ($TRIPLE)"
-echo "   dmg: release/DeepSeek-Harness-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.dmg"
-echo "   zip: release/DeepSeek-Harness-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.zip"
+echo "✅ built: release/DSH Desktop.app ($TRIPLE)"
+echo "   dmg: release/DSH-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.dmg"
+echo "   zip: release/DSH-Desktop-${VERSION}-mac-${ARTIFACT_ARCH}.zip"

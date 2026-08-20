@@ -68,7 +68,7 @@ export class HarnessSupervisor {
 
     const child = spawn(
       this.options.executable,
-      ['--expose-internals', this.options.script, 'web', '--host', '127.0.0.1', '--port', '0'],
+      ['--expose-internals', this.options.script, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'],
       {
         cwd: this.options.cwd,
         env: this.options.env,

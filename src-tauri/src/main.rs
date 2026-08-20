@@ -6,6 +6,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, BufReader};
 #[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -34,6 +36,32 @@ const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+const PRODUCT_NAME: &str = "DSH Desktop";
+const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
+
+#[derive(Clone, Copy)]
+struct ProductSubagent {
+    package: &'static str,
+    preset_id: &'static str,
+    tool_id: &'static str,
+    preset_name: &'static str,
+    preset_description: &'static str,
+}
+
+const CODEX_SUBAGENT: ProductSubagent = ProductSubagent {
+    package: "@deepseek-ai/dsh-subagent-codex",
+    preset_id: "desktop-codex",
+    tool_id: "tool-subagent-codex",
+    preset_name: "Standard + Codex",
+    preset_description: "Standard coding agent with the optional Codex subagent enabled.",
+};
+const CLAUDE_CODE_SUBAGENT: ProductSubagent = ProductSubagent {
+    package: "@deepseek-ai/dsh-subagent-claude-code",
+    preset_id: "desktop-claude-code",
+    tool_id: "tool-subagent-claude-code",
+    preset_name: "Standard + Claude Code",
+    preset_description: "Standard coding agent with the optional Claude Code subagent enabled.",
+};
 
 /// Update-checker client script, embedded at compile time and injected into
 /// the harness webview. The `__DSH_CURRENT_VERSION__` placeholder is replaced with the shell's
@@ -53,6 +81,9 @@ const USAGE_METER_SCRIPT: &str = include_str!("../../src/usage-meter.js");
 
 /// Built-in, profile-independent streaming polish and its General Settings row.
 const SMOOTH_STREAM_SCRIPT: &str = include_str!("../../src/smooth-stream.js");
+
+/// Desktop-only text-selection boundary for app chrome and copyable content.
+const SELECTION_GUARD_SCRIPT: &str = include_str!("../../src/selection-guard.js");
 
 /// Current shell version, kept in sync with package.json / tauri.conf.json.
 const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -672,6 +703,162 @@ fn installed_plugins(manifest: &serde_json::Value) -> Vec<serde_json::Value> {
     plugins
 }
 
+fn product_subagent_marker(product: ProductSubagent) -> String {
+    format!(
+        "# Managed by DSH Desktop for {}. Delete this preset to recreate it from Standard.",
+        product.preset_id
+    )
+}
+
+fn product_subagent_tool_block<'a>(source: &'a str, tool_id: &str) -> Option<&'a str> {
+    let start_marker = format!("    - id: {tool_id}\n");
+    let start = source.find(&start_marker)?;
+    let tail = &source[start + start_marker.len()..];
+    let end = tail
+        .find("\n    - id: ")
+        .map(|offset| start + start_marker.len() + offset)
+        .unwrap_or(source.len());
+    Some(&source[start..end])
+}
+
+fn enable_product_subagent_tool(source: &str, product: ProductSubagent) -> Result<String, String> {
+    const DISABLED: &str = "      disabled: true\n";
+    let block = product_subagent_tool_block(source, product.tool_id).ok_or_else(|| {
+        format!(
+            "the bundled Standard preset does not declare {}",
+            product.tool_id
+        )
+    })?;
+    let relative = block.find(DISABLED).ok_or_else(|| {
+        format!(
+            "the bundled Standard preset no longer keeps {} disabled",
+            product.tool_id
+        )
+    })?;
+    let absolute = source
+        .find(block)
+        .ok_or_else(|| format!("failed to locate the {} row", product.tool_id))?
+        + relative;
+    let mut enabled = source.to_string();
+    enabled.replace_range(absolute..absolute + DISABLED.len(), "");
+    Ok(format!("{}\n{enabled}", product_subagent_marker(product)))
+}
+
+fn product_subagent_preset_directory(dsh_home: &Path, product: ProductSubagent) -> PathBuf {
+    dsh_home.join(".agent-presets").join(product.preset_id)
+}
+
+fn product_subagent_preset_ready(dsh_home: &Path, product: ProductSubagent) -> bool {
+    let path = product_subagent_preset_directory(dsh_home, product).join("agent.cordis.yml");
+    let Ok(source) = fs::read_to_string(path) else {
+        return false;
+    };
+    source.starts_with(&product_subagent_marker(product))
+        && product_subagent_tool_block(&source, product.tool_id)
+            .map(|block| !block.contains("      disabled: true\n"))
+            .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn make_private(path: &Path, directory: bool) -> Result<(), String> {
+    let mode = if directory { 0o700 } else { 0o600 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|error| format!("failed to secure {}: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_private(_path: &Path, _directory: bool) -> Result<(), String> {
+    Ok(())
+}
+
+fn create_product_subagent_preset(dsh_home: &Path, product: ProductSubagent) -> Result<(), String> {
+    let target = product_subagent_preset_directory(dsh_home, product);
+    if target.exists() {
+        return if product_subagent_preset_ready(dsh_home, product) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Agent preset {:?} already exists and is not managed by DSH Desktop. Rename or remove it before retrying.",
+                product.preset_id
+            ))
+        };
+    }
+
+    let source = resolve_modules_directory()
+        .join("@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml");
+    let standard = fs::read_to_string(&source)
+        .map_err(|error| format!("failed to read {}: {error}", source.display()))?;
+    let enabled = enable_product_subagent_tool(&standard, product)?;
+    let root = target.parent().ok_or("invalid Desktop Codex preset path")?;
+    fs::create_dir_all(root)
+        .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    make_private(root, true)?;
+
+    let next = root.join(format!(
+        ".{}-next-{}",
+        product.preset_id,
+        std::process::id()
+    ));
+    if next.exists() {
+        fs::remove_dir_all(&next)
+            .map_err(|error| format!("failed to clear {}: {error}", next.display()))?;
+    }
+    fs::create_dir(&next)
+        .map_err(|error| format!("failed to create {}: {error}", next.display()))?;
+    make_private(&next, true)?;
+
+    let write_result = (|| {
+        let composition = next.join("agent.cordis.yml");
+        fs::write(&composition, enabled)
+            .map_err(|error| format!("failed to write {}: {error}", composition.display()))?;
+        make_private(&composition, false)?;
+        let metadata = next.join("preset.yml");
+        fs::write(
+            &metadata,
+            format!(
+                "name: {}\ndescription: {}\n",
+                product.preset_name, product.preset_description
+            ),
+        )
+        .map_err(|error| format!("failed to write {}: {error}", metadata.display()))?;
+        make_private(&metadata, false)?;
+        fs::rename(&next, &target)
+            .map_err(|error| format!("failed to publish {}: {error}", target.display()))?;
+        Ok::<(), String>(())
+    })();
+    if write_result.is_err() && next.exists() {
+        let _ = fs::remove_dir_all(&next);
+    }
+    write_result
+}
+
+fn product_subagent_status_value(
+    dsh_home: &Path,
+    manifest: &serde_json::Value,
+    product: ProductSubagent,
+) -> serde_json::Value {
+    let installed = manifest["dependencies"].get(product.package).is_some();
+    let active = manifest["dsh"]["profile"]["bundles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|bundle| bundle.as_str() == Some(product.package));
+    let harness_version = bundled_harness_version();
+    let bundle_spec = if harness_version == "unknown" {
+        product.package.to_string()
+    } else {
+        format!("{}@{harness_version}", product.package)
+    };
+    serde_json::json!({
+        "package": product.package,
+        "bundleSpec": bundle_spec,
+        "installed": installed,
+        "active": active,
+        "presetId": product.preset_id,
+        "presetReady": product_subagent_preset_ready(dsh_home, product),
+    })
+}
+
 fn plugin_profile_state(manifest: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "plugins": installed_plugins(manifest) })
 }
@@ -961,6 +1148,15 @@ fn resolve_modules_directory() -> PathBuf {
     PathBuf::from("node_modules")
 }
 
+fn bundled_harness_version() -> String {
+    let manifest = resolve_modules_directory().join("@deepseek-ai/dsh/package.json");
+    fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+        .and_then(|value| value.get("version")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".into())
+}
+
 fn resolve_onboarding_helper() -> PathBuf {
     for root in resource_roots() {
         for relative in [
@@ -1072,21 +1268,30 @@ fn shell_profile_path() -> Option<PathBuf> {
     }
 }
 
-const CLI_PATH_BLOCK: &str =
+const CLI_PATH_MARKER: &str = "# DSH Desktop CLI";
+const LEGACY_CLI_PATH_MARKER: &str = "# DeepSeek Harness Desktop CLI";
+const CLI_PATH_BLOCK: &str = "# DSH Desktop CLI\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
+const LEGACY_CLI_PATH_BLOCK: &str =
     "# DeepSeek Harness Desktop CLI\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
 
 fn shell_profile_has_cli_path() -> bool {
     shell_profile_path()
         .and_then(|path| fs::read_to_string(path).ok())
-        .map(|contents| contents.contains("# DeepSeek Harness Desktop CLI"))
+        .map(|contents| {
+            contents.contains(CLI_PATH_MARKER) || contents.contains(LEGACY_CLI_PATH_MARKER)
+        })
         .unwrap_or(false)
 }
 
 fn without_cli_path_block(contents: &str) -> String {
-    let with_prefix = format!("\n{CLI_PATH_BLOCK}");
-    contents
-        .replace(&with_prefix, "\n")
-        .replace(CLI_PATH_BLOCK, "")
+    [CLI_PATH_BLOCK, LEGACY_CLI_PATH_BLOCK].into_iter().fold(
+        contents.to_string(),
+        |current, block| {
+            current
+                .replace(&format!("\n{block}"), "\n")
+                .replace(block, "")
+        },
+    )
 }
 
 fn ensure_shell_cli_path(force_prepend: bool) -> Result<bool, String> {
@@ -1390,7 +1595,7 @@ fn spawn_harness(mode: LaunchMode) -> Result<Child, String> {
     command.arg("--expose-internals").arg(&script);
     match mode {
         LaunchMode::Normal => {
-            command.arg("web");
+            command.args(["--profile", "web"]);
         }
         LaunchMode::Safe => {
             command.args(["--profile", SAFE_PROFILE_NAME]);
@@ -1398,7 +1603,7 @@ fn spawn_harness(mode: LaunchMode) -> Result<Child, String> {
     }
     command.arg("--patch").arg(&desktop_patch);
     command
-        .args(["--host", "127.0.0.1", "--port", "0"])
+        .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
         .current_dir(&paths.home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1826,6 +2031,32 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
                 Err(error) => emit_action_error(&handle, error),
             });
         }
+        "configure-codex-preset" => {
+            emit_bridge_event(
+                &handle,
+                "operation-started",
+                serde_json::json!({ "operation": "configure-codex-preset" }),
+            );
+            thread::spawn(move || {
+                match perform_product_subagent_preset_configuration(CODEX_SUBAGENT) {
+                    Ok(status) => emit_bridge_event(&handle, "codex-configured", status),
+                    Err(error) => emit_action_error(&handle, error),
+                }
+            });
+        }
+        "configure-claude-code-preset" => {
+            emit_bridge_event(
+                &handle,
+                "operation-started",
+                serde_json::json!({ "operation": "configure-claude-code-preset" }),
+            );
+            thread::spawn(move || {
+                match perform_product_subagent_preset_configuration(CLAUDE_CODE_SUBAGENT) {
+                    Ok(status) => emit_bridge_event(&handle, "claude-code-configured", status),
+                    Err(error) => emit_action_error(&handle, error),
+                }
+            });
+        }
         "restart-harness" => {
             emit_bridge_event(
                 &handle,
@@ -1871,7 +2102,9 @@ fn build_main_window(
     recovery: bool,
 ) -> Result<(), String> {
     let navigation_handle = handle.clone();
-    let updater_script = UPDATER_SCRIPT.replace("__DSH_CURRENT_VERSION__", SHELL_VERSION);
+    let updater_script = UPDATER_SCRIPT
+        .replace("__DSH_CURRENT_VERSION__", SHELL_VERSION)
+        .replace("__DSH_HARNESS_VERSION__", &bundled_harness_version());
     let recovery_bridge_script = RECOVERY_BRIDGE_SCRIPT
         .replace("__DSH_RECOVERY_URL__", recovery_page_url()?.as_str())
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
@@ -1892,15 +2125,9 @@ fn build_main_window(
         )
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
     let (title, width, height, min_width, min_height) = if recovery {
-        (
-            "DeepSeek Harness Desktop — Recovery",
-            820.0,
-            680.0,
-            640.0,
-            520.0,
-        )
+        (RECOVERY_TITLE, 820.0, 680.0, 640.0, 520.0)
     } else {
-        ("DeepSeek Harness Desktop", 1440.0, 900.0, 960.0, 640.0)
+        (PRODUCT_NAME, 1440.0, 900.0, 960.0, 640.0)
     };
     let builder = WebviewWindowBuilder::new(handle, "main", url)
         .title(title)
@@ -1910,6 +2137,7 @@ fn build_main_window(
         .initialization_script(recovery_bridge_script)
         .initialization_script(theme_sync_script)
         .initialization_script(usage_meter_script)
+        .initialization_script(SELECTION_GUARD_SCRIPT)
         .initialization_script(smooth_stream_script)
         .on_navigation(move |destination| {
             if destination.scheme() == "dsh-desktop" {
@@ -1919,7 +2147,7 @@ fn build_main_window(
             if is_recovery_asset_url(destination) {
                 if destination.path().ends_with("index.html") {
                     if let Some(window) = navigation_handle.get_webview_window("main") {
-                        let _ = window.set_title("DeepSeek Harness Desktop — Recovery");
+                        let _ = window.set_title(RECOVERY_TITLE);
                         let _ = window.set_min_size(Some(tauri::LogicalSize::new(640.0, 520.0)));
                         let _ = window.set_size(tauri::LogicalSize::new(820.0, 680.0));
                     }
@@ -1970,7 +2198,7 @@ fn show_recovery_window(handle: &tauri::AppHandle) -> Result<(), String> {
         window
             .navigate(recovery_page_url()?)
             .map_err(|error| format!("failed to open recovery page: {error}"))?;
-        let _ = window.set_title("DeepSeek Harness Desktop — Recovery");
+        let _ = window.set_title(RECOVERY_TITLE);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(640.0, 520.0)));
         let _ = window.set_size(tauri::LogicalSize::new(820.0, 680.0));
         let _ = window.show();
@@ -2009,7 +2237,7 @@ fn show_harness_window(
         window
             .navigate(url)
             .map_err(|error| format!("failed to open Harness: {error}"))?;
-        let _ = window.set_title("DeepSeek Harness Desktop");
+        let _ = window.set_title(PRODUCT_NAME);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
         let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
         let _ = window.show();
@@ -2501,7 +2729,33 @@ fn plugin_manager_status_value() -> Result<serde_json::Value, String> {
         "phase": phase,
         "safeMode": safe_mode,
         "installerReady": bundled_pnpm_path().is_file(),
+        "codex": product_subagent_status_value(&paths.dsh_home, &manifest, CODEX_SUBAGENT),
+        "claudeCode": product_subagent_status_value(&paths.dsh_home, &manifest, CLAUDE_CODE_SUBAGENT),
     }))
+}
+
+fn perform_product_subagent_preset_configuration(
+    product: ProductSubagent,
+) -> Result<serde_json::Value, String> {
+    let _operation = OperationGuard::acquire()?;
+    let paths = harness_paths();
+    if read_pending_install(&paths.dsh_home)?.is_some() {
+        return Err(format!(
+            "Restart DSH before creating the {} Agent preset.",
+            product.preset_name
+        ));
+    }
+    let manifest = read_web_manifest(&paths.dsh_home)?;
+    let status = product_subagent_status_value(&paths.dsh_home, &manifest, product);
+    if status["installed"].as_bool() != Some(true) || status["active"].as_bool() != Some(true) {
+        return Err(format!(
+            "Install and restart {} before creating its Agent preset.",
+            product.package
+        ));
+    }
+    create_product_subagent_preset(&paths.dsh_home, product)?;
+    drop(_operation);
+    plugin_manager_status_value()
 }
 
 fn perform_plugin_install(spec: String) -> Result<serde_json::Value, String> {
@@ -2733,13 +2987,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        desktop_preferences_path, detected_plugin, ensure_desktop_settings_module_link,
-        installed_plugins, parse_readiness, pending_change_outcome, plugin_profile_state,
-        plugin_state_changes, plugin_state_fingerprint, read_desktop_preferences,
-        redact_startup_line, resolve_modules_directory, restore_last_known_good,
-        safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
-        validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
-        write_smooth_stream_preference, CLI_PATH_BLOCK,
+        create_product_subagent_preset, desktop_preferences_path, detected_plugin,
+        enable_product_subagent_tool, ensure_desktop_settings_module_link, installed_plugins,
+        parse_readiness, pending_change_outcome, plugin_profile_state, plugin_state_changes,
+        plugin_state_fingerprint, product_subagent_marker, product_subagent_preset_ready,
+        product_subagent_status_value, read_desktop_preferences, redact_startup_line,
+        resolve_modules_directory, restore_last_known_good, safe_profile_manifest, same_file,
+        smooth_stream_enabled_from, usage_record_from_event, validate_plugin_spec,
+        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
+        CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -2870,6 +3126,65 @@ mod tests {
     }
 
     #[test]
+    fn creates_private_standard_presets_with_only_the_selected_product_enabled() {
+        let source = "- id: delegation\n  config:\n    - id: tool-subagent-codex\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n      config:\n        provider: codex\n    - id: tool-subagent-claude-code\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n";
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-codex-preset-test-{}-{unique}",
+            std::process::id()
+        ));
+
+        for (product, other) in [
+            (CODEX_SUBAGENT, CLAUDE_CODE_SUBAGENT),
+            (CLAUDE_CODE_SUBAGENT, CODEX_SUBAGENT),
+        ] {
+            let enabled = enable_product_subagent_tool(source, product).unwrap();
+            assert!(enabled.starts_with(&product_subagent_marker(product)));
+            let selected = super::product_subagent_tool_block(&enabled, product.tool_id).unwrap();
+            assert!(!selected.contains("disabled: true"));
+            let unselected = super::product_subagent_tool_block(&enabled, other.tool_id).unwrap();
+            assert!(unselected.contains("disabled: true"));
+
+            create_product_subagent_preset(&dsh_home, product).unwrap();
+            assert!(product_subagent_preset_ready(&dsh_home, product));
+            create_product_subagent_preset(&dsh_home, product).unwrap();
+            let preset = dsh_home.join(".agent-presets").join(product.preset_id);
+            let composition = fs::read_to_string(preset.join("agent.cordis.yml")).unwrap();
+            assert!(composition.starts_with(&product_subagent_marker(product)));
+            assert!(
+                !super::product_subagent_tool_block(&composition, product.tool_id)
+                    .unwrap()
+                    .contains("disabled: true")
+            );
+            assert!(
+                super::product_subagent_tool_block(&composition, other.tool_id)
+                    .unwrap()
+                    .contains("disabled: true")
+            );
+            assert!(fs::read_to_string(preset.join("preset.yml"))
+                .unwrap()
+                .contains(product.preset_name));
+
+            let manifest = serde_json::json!({
+                "dependencies": { (product.package): "0.1.0-rc.8" },
+                "dsh": { "profile": { "bundles": [product.package] } }
+            });
+            let status = product_subagent_status_value(&dsh_home, &manifest, product);
+            assert_eq!(status["installed"], true);
+            assert_eq!(status["active"], true);
+            assert_eq!(status["presetReady"], true);
+            assert!(status["bundleSpec"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("{}@", product.package)));
+        }
+        fs::remove_dir_all(dsh_home).unwrap();
+    }
+
+    #[test]
     fn extracts_plugin_spec_from_documented_install_command() {
         assert_eq!(
             validate_plugin_spec("dsh plugin --profile web add github:owner/example-plugin")
@@ -2969,10 +3284,12 @@ mod tests {
 
     #[test]
     fn rewrites_the_managed_cli_path_block_without_duplicates() {
-        let profile =
-            format!("export PATH=/custom/bin:$PATH\n\n{CLI_PATH_BLOCK}alias dsh=legacy\n");
+        let profile = format!(
+            "export PATH=/custom/bin:$PATH\n\n{LEGACY_CLI_PATH_BLOCK}{CLI_PATH_BLOCK}alias dsh=legacy\n"
+        );
         let cleaned = without_cli_path_block(&profile);
         assert_eq!(cleaned.matches("DeepSeek Harness Desktop CLI").count(), 0);
+        assert_eq!(cleaned.matches("DSH Desktop CLI").count(), 0);
         assert!(cleaned.contains("export PATH=/custom/bin:$PATH"));
         assert!(cleaned.contains("alias dsh=legacy"));
     }

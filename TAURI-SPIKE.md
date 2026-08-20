@@ -1,4 +1,4 @@
-# macOS Tauri release — DeepSeek Harness Desktop
+# macOS Tauri release — DSH Desktop
 
 A Tauri v2 shell that boots the `@deepseek-ai/dsh` harness and shows its
 Web UI in the system WebView (WKWebView), instead of bundling Chromium like Electron.
@@ -81,7 +81,7 @@ One-click macOS build: `scripts/build-tauri.sh [arm64|x86_64]`
 - prod-only `npm ci --omit=dev` -> prune -> Node 22 sidecar download -> `tauri build`
 - verifies the Node download checksum and builds the requested Rust target
 - signs Node with Hardened Runtime and the required JIT entitlements
-- outputs `release/DeepSeek Harness Desktop.app` + dmg/zip
+- outputs `release/DSH Desktop.app` + dmg/zip
 - restores dev deps on exit (trap); first run needs the rust toolchain (auto-bootstrapped)
 
 Smoke test: `scripts/verify-tauri.sh` exercises native PTY/Sharp modules, launches

@@ -5,6 +5,10 @@ release/
 /output/
 *.log
 .DS_Store
+# local credentials
+.env
+.env.*
+!.env.example
 # tauri spike (experiment toolchain + build dirs)
 /src-tauri/target/
 /src-tauri/gen/

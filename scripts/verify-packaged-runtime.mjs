@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PRODUCT_NAME = 'DeepSeek Harness Desktop'
+const PRODUCT_NAME = 'DSH Desktop'
 const READY_LINE = /dsh web:\s+(http:\/\/127\.0\.0\.1:\d+)/
 const STARTUP_TIMEOUT_MS = 60_000
 const STABILITY_WINDOW_MS = 3_000
@@ -128,7 +128,7 @@ async function smokeRuntime(runtimeExecutable, dshBin) {
   const dshHome = await mkdtemp(join(tmpdir(), 'dsh-desktop-smoke-'))
   const child = spawn(
     runtimeExecutable,
-    ['--expose-internals', dshBin, 'web', '--host', '127.0.0.1', '--port', '0'],
+    ['--expose-internals', dshBin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'],
     {
       env: {
         ...process.env,

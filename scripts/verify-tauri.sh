@@ -5,7 +5,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
-APP="${1:-release/DeepSeek Harness Desktop.app}"
+APP="${1:-release/DSH Desktop.app}"
 NODE="$APP/Contents/MacOS/node"
 DSH_CLI="$APP/Contents/MacOS/dsh"
 PNPM_CLI="$APP/Contents/MacOS/pnpm"

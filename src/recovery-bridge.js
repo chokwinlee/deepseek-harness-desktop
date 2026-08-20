@@ -16,6 +16,8 @@
     'status',
     'install-plugin',
     'remove-plugin',
+    'configure-codex-preset',
+    'configure-claude-code-preset',
     'restart-harness',
     'install-cli',
     'remove-cli',
@@ -186,9 +188,9 @@
       publish({ busyOperation: payload.operation || 'operation', error: '' })
       return
     }
-    if (detail.type === 'plugin-installed' || detail.type === 'plugin-removed') {
+    if (detail.type === 'plugin-installed' || detail.type === 'plugin-removed' || detail.type === 'codex-configured' || detail.type === 'claude-code-configured') {
       publish({ status: payload, busyOperation: '', error: '' })
-      showPendingNotice(payload.pending)
+      if (detail.type !== 'codex-configured' && detail.type !== 'claude-code-configured') showPendingNotice(payload.pending)
       return
     }
     if (detail.type === 'plugin-change-detected') {

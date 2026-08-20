@@ -6,9 +6,13 @@ import { runInNewContext } from 'node:vm'
 
 interface UpdaterTestApi {
   copyFor(locale: string): Record<string, string>
+  harnessVersionLabel(raw: string): string
   isNewer(latest: string, current: string): boolean
+  localizedReleaseSummary(body: string, locale: string, fallback?: string): string
+  markedReleaseSummary(body: string, locale: string): string
   parseVersion(raw: string): number[] | null
   resolveLocaleFromHints(hints: string[], languages: string[]): string
+  runtimeSummary(desktop?: string, harness?: string): string
   shouldShowForStatus(status: string): boolean
   statusForRelease(tag: string, current: string, ignored: string | null): string
   summarize(body: string, fallback?: string): string
@@ -61,6 +65,14 @@ test('shows the desktop control only for an available update', async () => {
   assert.equal(api.shouldShowForStatus('ignored'), false)
 })
 
+test('labels the bundled Harness release separately from the Desktop version', async () => {
+  const { api } = await loadUpdater()
+
+  assert.equal(api.harnessVersionLabel('0.1.0-rc.8'), 'rc.8')
+  assert.equal(api.harnessVersionLabel('0.2.0'), '0.2.0')
+  assert.equal(api.runtimeSummary('0.2.1', '0.1.0-rc.8'), 'DSH Desktop v0.2.1 · Harness rc.8')
+})
+
 test('normalizes release notes without exposing markdown chrome', async () => {
   const { api } = await loadUpdater()
 
@@ -72,10 +84,50 @@ test('normalizes release notes without exposing markdown chrome', async () => {
   assert.match(api.summarize('x'.repeat(500)), /…$/)
 })
 
+test('selects a concise localized release summary', async () => {
+  const { api } = await loadUpdater()
+  const body = `
+<!-- dsh-summary:zh -->
+## 中文
+- 支持图片输入。
+- 增加用量统计。
+- 支持按需安装子代理。
+<!-- /dsh-summary:zh -->
+
+<!-- dsh-summary:en -->
+## English
+- Add image input.
+- Add usage insights.
+- Install subagents on demand.
+<!-- /dsh-summary:en -->
+
+## What's Changed
+- Internal detail that should stay out of the update panel.
+`
+
+  assert.equal(api.markedReleaseSummary(body, 'zh').includes('支持图片输入'), true)
+  assert.equal(
+    api.localizedReleaseSummary(body, 'zh'),
+    '• 支持图片输入。\n• 增加用量统计。\n• 支持按需安装子代理。',
+  )
+  assert.equal(
+    api.localizedReleaseSummary(body, 'en'),
+    '• Add image input.\n• Add usage insights.\n• Install subagents on demand.',
+  )
+  assert.equal(
+    api.localizedReleaseSummary('- One\n- Two\n- Three\n- Four', 'en'),
+    '• One\n• Two\n• Three',
+  )
+  assert.match(api.localizedReleaseSummary('x'.repeat(500), 'en'), /…$/)
+})
+
 test('keeps the updater inside the sidebar design and accessibility contract', async () => {
   const { source } = await loadUpdater()
 
   assert.match(source, /insertBefore\(host, nextTrigger\)/)
+  assert.match(source, /__DSH_HARNESS_VERSION__/)
+  assert.match(source, /window\.__DSH_DESKTOP_RUNTIME__ = runtimeStatus/)
+  assert.match(source, /new CustomEvent\('dsh-desktop-runtime'/)
   assert.match(source, /var\(--dsw-alias-bg-layer-2/)
   assert.match(source, /aria-haspopup=\\?"dialog\\?"/)
   assert.match(source, /aria-expanded=\\?"false\\?"/)

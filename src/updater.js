@@ -1,5 +1,5 @@
 /**
- * DeepSeek Harness Desktop update checker.
+ * DSH Desktop update checker.
  *
  * Injected by the Tauri and Electron shells into the Harness Web UI. The
  * desktop-only version row is mounted immediately before Harness Settings so it
@@ -9,13 +9,15 @@
   'use strict'
 
   const CURRENT_VERSION = '__DSH_CURRENT_VERSION__'
+  const HARNESS_VERSION = '__DSH_HARNESS_VERSION__'
   const REPO = 'chokwinlee/deepseek-harness-desktop'
   const API_URL = 'https://api.github.com/repos/' + REPO + '/releases/latest'
   const RELEASE_PAGE = 'https://github.com/' + REPO + '/releases/latest'
   const IGNORE_KEY = 'dshDesktopIgnoredVersion'
   const CHECK_DELAY_MS = 4000
   const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
-  const MAX_NOTES_CHARS = 420
+  const MAX_NOTES_CHARS = 320
+  const MAX_SUMMARY_ITEMS = 3
 
   const COPY = Object.freeze({
     zh: Object.freeze({
@@ -87,6 +89,16 @@
     return version ? 'v' + version.join('.') : String(raw || '')
   }
 
+  function harnessVersionLabel(raw) {
+    const source = String(raw || '').trim()
+    const prerelease = /-(rc\.\d+(?:\.\d+)?)/i.exec(source)
+    return prerelease ? prerelease[1].toLowerCase() : source || 'unknown'
+  }
+
+  function runtimeSummary(desktop = CURRENT_VERSION, harness = HARNESS_VERSION) {
+    return 'DSH Desktop ' + versionLabel(desktop) + ' · Harness ' + harnessVersionLabel(harness)
+  }
+
   function statusForRelease(tag, current, ignored) {
     if (!isNewer(tag, current)) return 'current'
     return ignored && ignored === tag ? 'ignored' : 'update'
@@ -107,6 +119,44 @@
       .trim()
     if (text.length > MAX_NOTES_CHARS) text = text.slice(0, MAX_NOTES_CHARS) + '…'
     return text || fallback
+  }
+
+  function markedReleaseSummary(body, locale) {
+    const language = locale === 'en' ? 'en' : 'zh'
+    const pattern = new RegExp(
+      `<!--\\s*dsh-summary:${language}\\s*-->([\\s\\S]*?)<!--\\s*\\/dsh-summary:${language}\\s*-->`,
+      'i',
+    )
+    return pattern.exec(String(body || ''))?.[1]?.trim() || ''
+  }
+
+  function compactReleaseSummary(body, fallback = '') {
+    const source = String(body || '').trim()
+    if (!source) return fallback
+    const bullets = source
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => /^(?:[-*+] |\d+[.)] )/.test(line))
+      .slice(0, MAX_SUMMARY_ITEMS)
+      .map(line => summarize(line.replace(/^(?:[-*+] |\d+[.)] )/, '')).replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+    if (bullets.length > 0) {
+      const text = bullets.map(line => `• ${line}`).join('\n')
+      return text.length > MAX_NOTES_CHARS ? text.slice(0, MAX_NOTES_CHARS) + '…' : text
+    }
+
+    const paragraphs = summarize(source, fallback)
+      .split(/\n\s*\n/)
+      .map(line => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 2)
+    let text = paragraphs.join('\n') || fallback
+    if (text.length > MAX_NOTES_CHARS) text = text.slice(0, MAX_NOTES_CHARS) + '…'
+    return text
+  }
+
+  function localizedReleaseSummary(body, locale, fallback = '') {
+    return compactReleaseSummary(markedReleaseSummary(body, locale) || body, fallback)
   }
 
   function resolveLocaleFromHints(hints, languages) {
@@ -135,9 +185,13 @@
   if (testGlobal && testGlobal.__DSH_UPDATER_TEST__ === true) {
     testGlobal.__DSH_UPDATER_TEST_API__ = Object.freeze({
       copyFor,
+      harnessVersionLabel,
       isNewer,
+      localizedReleaseSummary,
+      markedReleaseSummary,
       parseVersion,
       resolveLocaleFromHints,
+      runtimeSummary,
       shouldShowForStatus,
       statusForRelease,
       summarize,
@@ -146,6 +200,13 @@
   }
 
   if (typeof window === 'undefined' || typeof document === 'undefined') return
+  const runtimeStatus = Object.freeze({
+    desktopVersion: versionLabel(CURRENT_VERSION),
+    harnessVersion: harnessVersionLabel(HARNESS_VERSION),
+    label: runtimeSummary(),
+  })
+  window.__DSH_DESKTOP_RUNTIME__ = runtimeStatus
+  window.dispatchEvent(new CustomEvent('dsh-desktop-runtime', { detail: runtimeStatus }))
   if (window.__dshUpdaterInstalled) return
   window.__dshUpdaterInstalled = true
 
@@ -567,7 +628,7 @@
 
     if (state.status === 'checking') {
       titleEl.textContent = copy.checking
-      bodyEl.textContent = copy.currentVersion + ' ' + versionLabel(CURRENT_VERSION)
+      bodyEl.textContent = runtimeSummary()
       return
     }
 
@@ -583,7 +644,7 @@
     if (state.status === 'current') {
       titleEl.textContent = copy.currentTitle
       appendBadge(copy.currentBadge)
-      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b>'
       notesEl.textContent = copy.currentBody
       notesEl.hidden = false
       return
@@ -591,7 +652,7 @@
 
     if (state.status === 'ignored') {
       titleEl.textContent = copy.ignoredTitle + ' ' + latestTag
-      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b>'
       notesEl.textContent = copy.ignoredBody
       notesEl.hidden = false
       actionsEl.hidden = false
@@ -604,9 +665,10 @@
     appendBadge(latestTag)
     bodyEl.innerHTML =
       copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · ' +
+      'Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b> · ' +
       copy.latestVersion + ' <b>' + latestTag + '</b>' +
       (latest.published_at ? ' · ' + copy.published + ' ' + new Date(latest.published_at).toLocaleDateString(state.locale) : '')
-    notesEl.textContent = summarize(latest.body, copy.releaseNotesFallback)
+    notesEl.textContent = localizedReleaseSummary(latest.body, state.locale, copy.releaseNotesFallback)
     notesEl.hidden = false
     actionsEl.hidden = false
     secondaryEl.textContent = copy.ignore
@@ -615,11 +677,12 @@
 
   function badgeLabel() {
     const copy = copyFor(state.locale)
-    if (state.status === 'update') return copy.updateTitle + ' ' + versionLabel(state.latest?.tag_name)
-    if (state.status === 'error') return copy.checkFailed
-    if (state.status === 'checking') return copy.checking
-    if (state.status === 'ignored') return copy.ignoredTitle + ' ' + versionLabel(state.latest?.tag_name)
-    return copy.currentTitle + ' ' + versionLabel(CURRENT_VERSION)
+    const runtime = runtimeSummary()
+    if (state.status === 'update') return runtime + ', ' + copy.updateTitle + ' ' + versionLabel(state.latest?.tag_name)
+    if (state.status === 'error') return runtime + ', ' + copy.checkFailed
+    if (state.status === 'checking') return runtime + ', ' + copy.checking
+    if (state.status === 'ignored') return runtime + ', ' + copy.ignoredTitle + ' ' + versionLabel(state.latest?.tag_name)
+    return runtime + ', ' + copy.currentTitle
   }
 
   function syncVisibility() {
