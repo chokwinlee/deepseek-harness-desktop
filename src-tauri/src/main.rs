@@ -6,6 +6,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, BufReader};
 #[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -34,6 +36,10 @@ const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+const CODEX_SUBAGENT_PACKAGE: &str = "@deepseek-ai/dsh-subagent-codex";
+const DESKTOP_CODEX_PRESET_ID: &str = "desktop-codex";
+const DESKTOP_CODEX_PRESET_MARKER: &str =
+    "# Managed by DSH Desktop. Delete this preset to recreate it from Standard.";
 const PRODUCT_NAME: &str = "DSH Desktop";
 const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
 
@@ -672,6 +678,143 @@ fn installed_plugins(manifest: &serde_json::Value) -> Vec<serde_json::Value> {
         .collect();
     plugins.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
     plugins
+}
+
+fn codex_tool_block(source: &str) -> Option<&str> {
+    const START: &str = "    - id: tool-subagent-codex\n";
+    let start = source.find(START)?;
+    let tail = &source[start + START.len()..];
+    let end = tail
+        .find("\n    - id: ")
+        .map(|offset| start + START.len() + offset)
+        .unwrap_or(source.len());
+    Some(&source[start..end])
+}
+
+fn enable_codex_tool_in_preset(source: &str) -> Result<String, String> {
+    const DISABLED: &str = "      disabled: true\n";
+    let block = codex_tool_block(source)
+        .ok_or("the bundled Standard preset does not declare tool-subagent-codex")?;
+    let relative = block
+        .find(DISABLED)
+        .ok_or("the bundled Standard preset no longer keeps Codex disabled")?;
+    let absolute = source
+        .find(block)
+        .ok_or("failed to locate the Codex tool row")?
+        + relative;
+    let mut enabled = source.to_string();
+    enabled.replace_range(absolute..absolute + DISABLED.len(), "");
+    Ok(format!("{DESKTOP_CODEX_PRESET_MARKER}\n{enabled}"))
+}
+
+fn codex_preset_directory(dsh_home: &Path) -> PathBuf {
+    dsh_home
+        .join(".agent-presets")
+        .join(DESKTOP_CODEX_PRESET_ID)
+}
+
+fn codex_preset_ready(dsh_home: &Path) -> bool {
+    let path = codex_preset_directory(dsh_home).join("agent.cordis.yml");
+    let Ok(source) = fs::read_to_string(path) else {
+        return false;
+    };
+    source.starts_with(DESKTOP_CODEX_PRESET_MARKER)
+        && codex_tool_block(&source)
+            .map(|block| !block.contains("      disabled: true\n"))
+            .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn make_private(path: &Path, directory: bool) -> Result<(), String> {
+    let mode = if directory { 0o700 } else { 0o600 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|error| format!("failed to secure {}: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_private(_path: &Path, _directory: bool) -> Result<(), String> {
+    Ok(())
+}
+
+fn create_codex_preset(dsh_home: &Path) -> Result<(), String> {
+    let target = codex_preset_directory(dsh_home);
+    if target.exists() {
+        return if codex_preset_ready(dsh_home) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Agent preset {DESKTOP_CODEX_PRESET_ID:?} already exists and is not managed by DSH Desktop. Rename or remove it before retrying."
+            ))
+        };
+    }
+
+    let source = resolve_modules_directory()
+        .join("@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml");
+    let standard = fs::read_to_string(&source)
+        .map_err(|error| format!("failed to read {}: {error}", source.display()))?;
+    let enabled = enable_codex_tool_in_preset(&standard)?;
+    let root = target.parent().ok_or("invalid Desktop Codex preset path")?;
+    fs::create_dir_all(root)
+        .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    make_private(root, true)?;
+
+    let next = root.join(format!(
+        ".{DESKTOP_CODEX_PRESET_ID}-next-{}",
+        std::process::id()
+    ));
+    if next.exists() {
+        fs::remove_dir_all(&next)
+            .map_err(|error| format!("failed to clear {}: {error}", next.display()))?;
+    }
+    fs::create_dir(&next)
+        .map_err(|error| format!("failed to create {}: {error}", next.display()))?;
+    make_private(&next, true)?;
+
+    let write_result = (|| {
+        let composition = next.join("agent.cordis.yml");
+        fs::write(&composition, enabled)
+            .map_err(|error| format!("failed to write {}: {error}", composition.display()))?;
+        make_private(&composition, false)?;
+        let metadata = next.join("preset.yml");
+        fs::write(
+            &metadata,
+            "name: Standard + Codex\ndescription: Standard coding agent with the optional Codex subagent enabled.\n",
+        )
+        .map_err(|error| format!("failed to write {}: {error}", metadata.display()))?;
+        make_private(&metadata, false)?;
+        fs::rename(&next, &target)
+            .map_err(|error| format!("failed to publish {}: {error}", target.display()))?;
+        Ok::<(), String>(())
+    })();
+    if write_result.is_err() && next.exists() {
+        let _ = fs::remove_dir_all(&next);
+    }
+    write_result
+}
+
+fn codex_subagent_status_value(dsh_home: &Path, manifest: &serde_json::Value) -> serde_json::Value {
+    let installed = manifest["dependencies"]
+        .get(CODEX_SUBAGENT_PACKAGE)
+        .is_some();
+    let active = manifest["dsh"]["profile"]["bundles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|bundle| bundle.as_str() == Some(CODEX_SUBAGENT_PACKAGE));
+    let harness_version = bundled_harness_version();
+    let bundle_spec = if harness_version == "unknown" {
+        CODEX_SUBAGENT_PACKAGE.to_string()
+    } else {
+        format!("{CODEX_SUBAGENT_PACKAGE}@{harness_version}")
+    };
+    serde_json::json!({
+        "package": CODEX_SUBAGENT_PACKAGE,
+        "bundleSpec": bundle_spec,
+        "installed": installed,
+        "active": active,
+        "presetId": DESKTOP_CODEX_PRESET_ID,
+        "presetReady": codex_preset_ready(dsh_home),
+    })
 }
 
 fn plugin_profile_state(manifest: &serde_json::Value) -> serde_json::Value {
@@ -1846,6 +1989,17 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
                 Err(error) => emit_action_error(&handle, error),
             });
         }
+        "configure-codex-preset" => {
+            emit_bridge_event(
+                &handle,
+                "operation-started",
+                serde_json::json!({ "operation": "configure-codex-preset" }),
+            );
+            thread::spawn(move || match perform_codex_preset_configuration() {
+                Ok(status) => emit_bridge_event(&handle, "codex-configured", status),
+                Err(error) => emit_action_error(&handle, error),
+            });
+        }
         "restart-harness" => {
             emit_bridge_event(
                 &handle,
@@ -2517,7 +2671,26 @@ fn plugin_manager_status_value() -> Result<serde_json::Value, String> {
         "phase": phase,
         "safeMode": safe_mode,
         "installerReady": bundled_pnpm_path().is_file(),
+        "codex": codex_subagent_status_value(&paths.dsh_home, &manifest),
     }))
+}
+
+fn perform_codex_preset_configuration() -> Result<serde_json::Value, String> {
+    let _operation = OperationGuard::acquire()?;
+    let paths = harness_paths();
+    if read_pending_install(&paths.dsh_home)?.is_some() {
+        return Err("Restart DSH before creating the Codex Agent preset.".into());
+    }
+    let manifest = read_web_manifest(&paths.dsh_home)?;
+    let codex = codex_subagent_status_value(&paths.dsh_home, &manifest);
+    if codex["installed"].as_bool() != Some(true) || codex["active"].as_bool() != Some(true) {
+        return Err(
+            "Install and restart the Codex Profile Bundle before creating its Agent preset.".into(),
+        );
+    }
+    create_codex_preset(&paths.dsh_home)?;
+    drop(_operation);
+    plugin_manager_status_value()
 }
 
 fn perform_plugin_install(spec: String) -> Result<serde_json::Value, String> {
@@ -2749,13 +2922,16 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        desktop_preferences_path, detected_plugin, ensure_desktop_settings_module_link,
-        installed_plugins, parse_readiness, pending_change_outcome, plugin_profile_state,
-        plugin_state_changes, plugin_state_fingerprint, read_desktop_preferences,
-        redact_startup_line, resolve_modules_directory, restore_last_known_good,
-        safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
-        validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
-        write_smooth_stream_preference, CLI_PATH_BLOCK, LEGACY_CLI_PATH_BLOCK,
+        codex_preset_ready, codex_subagent_status_value, create_codex_preset,
+        desktop_preferences_path, detected_plugin, enable_codex_tool_in_preset,
+        ensure_desktop_settings_module_link, installed_plugins, parse_readiness,
+        pending_change_outcome, plugin_profile_state, plugin_state_changes,
+        plugin_state_fingerprint, read_desktop_preferences, redact_startup_line,
+        resolve_modules_directory, restore_last_known_good, safe_profile_manifest, same_file,
+        smooth_stream_enabled_from, usage_record_from_event, validate_plugin_spec,
+        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
+        CLI_PATH_BLOCK, CODEX_SUBAGENT_PACKAGE, DESKTOP_CODEX_PRESET_ID,
+        DESKTOP_CODEX_PRESET_MARKER, LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -2883,6 +3059,58 @@ mod tests {
         ] {
             assert!(validate_plugin_spec(spec).is_err(), "accepted {spec}");
         }
+    }
+
+    #[test]
+    fn creates_a_private_standard_preset_with_only_codex_enabled() {
+        let source = "- id: delegation\n  config:\n    - id: tool-subagent-codex\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n      config:\n        provider: codex\n    - id: tool-subagent-claude-code\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n";
+        let enabled = enable_codex_tool_in_preset(source).unwrap();
+        assert!(enabled.starts_with(DESKTOP_CODEX_PRESET_MARKER));
+        let codex = super::codex_tool_block(&enabled).unwrap();
+        assert!(!codex.contains("disabled: true"));
+        assert!(enabled.contains(
+            "- id: tool-subagent-claude-code\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true"
+        ));
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-codex-preset-test-{}-{unique}",
+            std::process::id()
+        ));
+        create_codex_preset(&dsh_home).unwrap();
+        assert!(codex_preset_ready(&dsh_home));
+        create_codex_preset(&dsh_home).unwrap();
+        let preset = dsh_home
+            .join(".agent-presets")
+            .join(DESKTOP_CODEX_PRESET_ID);
+        let composition = fs::read_to_string(preset.join("agent.cordis.yml")).unwrap();
+        assert!(composition.starts_with(DESKTOP_CODEX_PRESET_MARKER));
+        assert!(!super::codex_tool_block(&composition)
+            .unwrap()
+            .contains("disabled: true"));
+        assert!(composition.contains(
+            "- id: tool-subagent-claude-code\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true"
+        ));
+        assert!(fs::read_to_string(preset.join("preset.yml"))
+            .unwrap()
+            .contains("name: Standard + Codex"));
+
+        let manifest = serde_json::json!({
+            "dependencies": { (CODEX_SUBAGENT_PACKAGE): "0.1.0-rc.8" },
+            "dsh": { "profile": { "bundles": [CODEX_SUBAGENT_PACKAGE] } }
+        });
+        let status = codex_subagent_status_value(&dsh_home, &manifest);
+        assert_eq!(status["installed"], true);
+        assert_eq!(status["active"], true);
+        assert_eq!(status["presetReady"], true);
+        assert!(status["bundleSpec"]
+            .as_str()
+            .unwrap()
+            .starts_with("@deepseek-ai/dsh-subagent-codex@"));
+        fs::remove_dir_all(dsh_home).unwrap();
     }
 
     #[test]
