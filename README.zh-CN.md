@@ -21,21 +21,27 @@
 
 ![DSH Desktop](docs/images/readme-hero-zh-CN.png)
 
-DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口，并自动管理本机 Harness 进程。用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
+*Harness rc.8 的真实图片输入会话，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
+
+DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。当前构建使用 `@deepseek-ai/dsh@0.1.0-rc.8`，侧边栏会同时显示桌面版与内置 Harness 版本。应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
 > [!IMPORTANT]
-> 这是独立社区项目，不是 DeepSeek AI 官方产品。DeepSeek Harness 仍处于开发者预览阶段，后续版本可能包含不兼容改动。
+> 这是独立社区项目，与 DeepSeek AI 官方产品无关。DeepSeek Harness 仍处于开发者预览阶段，后续版本可能包含不兼容改动。
 
 ## 核心能力
 
-- **开箱即用** —— 内置固定版本的 Node.js sidecar、官方 Harness 运行时、原生模块和发行时运行检查。
-- **原生桌面集成** —— macOS 使用 Tauri 与系统 WKWebView，Windows 使用 Electron；Harness 只绑定到随机的 `127.0.0.1` 端口。
-- **macOS 用量概览** —— 标题栏展示今日和近七天 Token、估算费用、运行任务数与所有运行任务的合计吞吐率。
-- **克制的界面增强** —— macOS 原生标题栏跟随 Harness 主题；两个平台都内置默认开启、可在通用设置关闭的平滑流式输出。
-- **更安全的 macOS 插件流程** —— 使用内置工具安装，重启后验证真实运行时；变更失败时恢复最近可用 profile。
-- **兼容官方 CLI** —— 与官方 CLI 共用 `~/.dsh`，并能安全解析文档中的完整安装命令，不会把粘贴内容交给 shell 执行。
+- **多模态会话**　所选服务商与模型声明支持图片输入后，可以直接粘贴或附加图片，并沿用 Harness 的标准会话流程。图片消息会保留在会话历史中。
+- **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
+- **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.2.1 · Harness rc.8`。
+- **开箱即用**　应用内置固定版本的 Node.js sidecar、官方 Harness 运行时、原生模块和发行检查。Harness 只绑定到随机的 `127.0.0.1` 端口。
 
 费用来自本地 Token 记录和可用的公开模型价格，只作为估算。无法匹配价格的模型会明确显示为未定价，不会被当作免费。
+
+## 用量统计
+
+![DSH Desktop 用量统计](docs/images/readme-usage-zh-CN.png)
+
+标题栏会持续显示精简摘要。展开后可以查看输入、输出、缓存、费用和实时吞吐率。用量记录来自本地 Harness 会话日志，价格信息可能从公开模型目录获取。
 
 ## 下载
 
@@ -56,12 +62,13 @@ Release 同时提供 ZIP 和 `SHA256SUMS.txt`。macOS 构建会启用 Hardened R
 2. 进入 **设置 → 模型**，配置模型服务商和 API Key。
 3. 添加或选择工作区。
 4. 新建 Harness 会话。
+5. 所选模型支持图片输入时，粘贴或附加一张图片。
 
 配置、工作区和会话与官方 CLI 使用相同的 `DSH_HOME`，默认位于 `~/.dsh`。
 
 ## 插件与恢复
 
-在 macOS 打开 **设置 → 插件 → 安装与管理**。安装器接受 npm 包、`github:owner/repo`、公开 GitHub HTTPS 地址，也可以直接粘贴：
+在 macOS 打开 **设置 → 插件 → 安装与管理**。安装器接受 npm 包、`github:owner/repo`、公开 GitHub HTTPS 地址，也可以直接粘贴下面的完整命令。
 
 ```bash
 dsh plugin --profile web add github:owner/repo

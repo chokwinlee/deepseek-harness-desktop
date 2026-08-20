@@ -21,21 +21,27 @@
 
 ![DSH Desktop](docs/images/readme-hero-en.png)
 
-DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. It manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
+*A real image-input session on Harness rc.8, using `google/gemini-2.5-flash-lite` through OpenRouter.*
+
+DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. This build is aligned with `@deepseek-ai/dsh@0.1.0-rc.8` and shows that bundled Harness version in the sidebar. The app manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
 
 > [!IMPORTANT]
 > This is an independent community project, not an official DeepSeek AI product. DeepSeek Harness is a developer preview and may introduce breaking changes.
 
 ## Highlights
 
-- **Ready to run** — bundles a pinned Node.js sidecar, the official Harness runtime, native modules, and release-time runtime checks.
-- **Native desktop integration** — uses Tauri and the system WKWebView on macOS, Electron on Windows, and binds Harness only to a random `127.0.0.1` port.
-- **Usage at a glance on macOS** — shows today and seven-day token totals, estimated cost, active task count, and aggregate running throughput in the title bar.
-- **Quiet UI polish** — the macOS title bar follows the active Harness theme, while both builds add default-on smooth streaming with a General Settings toggle.
-- **Safer plugin workflow on macOS** — installs with bundled tools, verifies the restarted runtime, and rolls back to the last healthy profile after a failed change.
-- **CLI-compatible** — shares `~/.dsh` with the official CLI and accepts documented install commands without executing pasted text through a shell.
+- **Multimodal sessions** — paste or attach images and send them through the normal Harness conversation flow when the selected provider and model declare image input support. Image messages remain visible in session history.
+- **Usage at a glance on macOS** — see today and seven-day token totals, estimated cost, active task count, and aggregate running throughput without leaving the current session.
+- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.2.1 · Harness rc.8`.
+- **Ready to run** — bundles a pinned Node.js sidecar, the official Harness runtime, native modules, and release-time runtime checks. Harness stays on a random `127.0.0.1` port.
 
 Cost figures are estimates derived from local token logs and available public model prices. Unmatched models stay visibly unpriced rather than being counted as free.
+
+## Usage insights
+
+![DSH Desktop usage insights](docs/images/readme-usage-en.png)
+
+The compact title-bar summary stays visible while you work. Open it for input, output, cache, cost, and live-throughput details. Usage records are read from local Harness session logs; pricing metadata may be fetched from public model catalogs.
 
 ## Download
 
@@ -56,6 +62,7 @@ Releases also include ZIP archives and `SHA256SUMS.txt`. macOS builds are harden
 2. Open **Settings → Models** and configure a provider and API key.
 3. Add or select a workspace.
 4. Start a Harness session.
+5. Paste or attach an image when the selected model supports image input.
 
 Configuration, workspaces, and sessions live in the same `DSH_HOME` used by the official CLI (`~/.dsh` by default).
 
