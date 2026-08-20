@@ -1,5 +1,5 @@
 /**
- * DeepSeek Harness Desktop update checker.
+ * DSH Desktop update checker.
  *
  * Injected by the Tauri and Electron shells into the Harness Web UI. The
  * desktop-only version row is mounted immediately before Harness Settings so it

@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="build/icon.png" width="96" height="96" alt="DeepSeek Harness Desktop icon">
-  <h1>DeepSeek Harness Desktop</h1>
+  <img src="build/icon.png" width="96" height="96" alt="DSH Desktop icon">
+  <h1>DSH Desktop</h1>
   <p><strong>A compact, self-contained desktop host for the official DeepSeek Harness experience.</strong></p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest">Download</a>
@@ -19,9 +19,9 @@
   </p>
 </div>
 
-![DeepSeek Harness Desktop](docs/images/readme-hero-en.png)
+![DSH Desktop](docs/images/readme-hero-en.png)
 
-DeepSeek Harness Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. It manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
+DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. It manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
 
 > [!IMPORTANT]
 > This is an independent community project, not an official DeepSeek AI product. DeepSeek Harness is a developer preview and may introduce breaking changes.
@@ -52,7 +52,7 @@ Releases also include ZIP archives and `SHA256SUMS.txt`. macOS builds are harden
 
 ## Quick start
 
-1. Install and open DeepSeek Harness Desktop.
+1. Install and open DSH Desktop.
 2. Open **Settings → Models** and configure a provider and API key.
 3. Add or select a workspace.
 4. Start a Harness session.

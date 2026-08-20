@@ -34,6 +34,8 @@ const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+const PRODUCT_NAME: &str = "DSH Desktop";
+const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
 
 /// Update-checker client script, embedded at compile time and injected into
 /// the harness webview. The `__DSH_CURRENT_VERSION__` placeholder is replaced with the shell's
@@ -1072,21 +1074,30 @@ fn shell_profile_path() -> Option<PathBuf> {
     }
 }
 
-const CLI_PATH_BLOCK: &str =
+const CLI_PATH_MARKER: &str = "# DSH Desktop CLI";
+const LEGACY_CLI_PATH_MARKER: &str = "# DeepSeek Harness Desktop CLI";
+const CLI_PATH_BLOCK: &str = "# DSH Desktop CLI\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
+const LEGACY_CLI_PATH_BLOCK: &str =
     "# DeepSeek Harness Desktop CLI\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
 
 fn shell_profile_has_cli_path() -> bool {
     shell_profile_path()
         .and_then(|path| fs::read_to_string(path).ok())
-        .map(|contents| contents.contains("# DeepSeek Harness Desktop CLI"))
+        .map(|contents| {
+            contents.contains(CLI_PATH_MARKER) || contents.contains(LEGACY_CLI_PATH_MARKER)
+        })
         .unwrap_or(false)
 }
 
 fn without_cli_path_block(contents: &str) -> String {
-    let with_prefix = format!("\n{CLI_PATH_BLOCK}");
-    contents
-        .replace(&with_prefix, "\n")
-        .replace(CLI_PATH_BLOCK, "")
+    [CLI_PATH_BLOCK, LEGACY_CLI_PATH_BLOCK].into_iter().fold(
+        contents.to_string(),
+        |current, block| {
+            current
+                .replace(&format!("\n{block}"), "\n")
+                .replace(block, "")
+        },
+    )
 }
 
 fn ensure_shell_cli_path(force_prepend: bool) -> Result<bool, String> {
@@ -1390,7 +1401,7 @@ fn spawn_harness(mode: LaunchMode) -> Result<Child, String> {
     command.arg("--expose-internals").arg(&script);
     match mode {
         LaunchMode::Normal => {
-            command.arg("web");
+            command.args(["--profile", "web"]);
         }
         LaunchMode::Safe => {
             command.args(["--profile", SAFE_PROFILE_NAME]);
@@ -1398,7 +1409,7 @@ fn spawn_harness(mode: LaunchMode) -> Result<Child, String> {
     }
     command.arg("--patch").arg(&desktop_patch);
     command
-        .args(["--host", "127.0.0.1", "--port", "0"])
+        .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
         .current_dir(&paths.home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1892,15 +1903,9 @@ fn build_main_window(
         )
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
     let (title, width, height, min_width, min_height) = if recovery {
-        (
-            "DeepSeek Harness Desktop — Recovery",
-            820.0,
-            680.0,
-            640.0,
-            520.0,
-        )
+        (RECOVERY_TITLE, 820.0, 680.0, 640.0, 520.0)
     } else {
-        ("DeepSeek Harness Desktop", 1440.0, 900.0, 960.0, 640.0)
+        (PRODUCT_NAME, 1440.0, 900.0, 960.0, 640.0)
     };
     let builder = WebviewWindowBuilder::new(handle, "main", url)
         .title(title)
@@ -1919,7 +1924,7 @@ fn build_main_window(
             if is_recovery_asset_url(destination) {
                 if destination.path().ends_with("index.html") {
                     if let Some(window) = navigation_handle.get_webview_window("main") {
-                        let _ = window.set_title("DeepSeek Harness Desktop — Recovery");
+                        let _ = window.set_title(RECOVERY_TITLE);
                         let _ = window.set_min_size(Some(tauri::LogicalSize::new(640.0, 520.0)));
                         let _ = window.set_size(tauri::LogicalSize::new(820.0, 680.0));
                     }
@@ -1970,7 +1975,7 @@ fn show_recovery_window(handle: &tauri::AppHandle) -> Result<(), String> {
         window
             .navigate(recovery_page_url()?)
             .map_err(|error| format!("failed to open recovery page: {error}"))?;
-        let _ = window.set_title("DeepSeek Harness Desktop — Recovery");
+        let _ = window.set_title(RECOVERY_TITLE);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(640.0, 520.0)));
         let _ = window.set_size(tauri::LogicalSize::new(820.0, 680.0));
         let _ = window.show();
@@ -2009,7 +2014,7 @@ fn show_harness_window(
         window
             .navigate(url)
             .map_err(|error| format!("failed to open Harness: {error}"))?;
-        let _ = window.set_title("DeepSeek Harness Desktop");
+        let _ = window.set_title(PRODUCT_NAME);
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
         let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
         let _ = window.show();
@@ -2739,7 +2744,7 @@ mod tests {
         redact_startup_line, resolve_modules_directory, restore_last_known_good,
         safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
         validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
-        write_smooth_stream_preference, CLI_PATH_BLOCK,
+        write_smooth_stream_preference, CLI_PATH_BLOCK, LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -2969,10 +2974,12 @@ mod tests {
 
     #[test]
     fn rewrites_the_managed_cli_path_block_without_duplicates() {
-        let profile =
-            format!("export PATH=/custom/bin:$PATH\n\n{CLI_PATH_BLOCK}alias dsh=legacy\n");
+        let profile = format!(
+            "export PATH=/custom/bin:$PATH\n\n{LEGACY_CLI_PATH_BLOCK}{CLI_PATH_BLOCK}alias dsh=legacy\n"
+        );
         let cleaned = without_cli_path_block(&profile);
         assert_eq!(cleaned.matches("DeepSeek Harness Desktop CLI").count(), 0);
+        assert_eq!(cleaned.matches("DSH Desktop CLI").count(), 0);
         assert!(cleaned.contains("export PATH=/custom/bin:$PATH"));
         assert!(cleaned.contains("alias dsh=legacy"));
     }

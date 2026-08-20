@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="build/icon.png" width="96" height="96" alt="DeepSeek Harness Desktop 图标">
-  <h1>DeepSeek Harness Desktop</h1>
+  <img src="build/icon.png" width="96" height="96" alt="DSH Desktop 图标">
+  <h1>DSH Desktop</h1>
   <p><strong>官方 DeepSeek Harness 体验的轻量、自包含桌面宿主。</strong></p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest">下载</a>
@@ -19,9 +19,9 @@
   </p>
 </div>
 
-![DeepSeek Harness Desktop](docs/images/readme-hero-zh-CN.png)
+![DSH Desktop](docs/images/readme-hero-zh-CN.png)
 
-DeepSeek Harness Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口，并自动管理本机 Harness 进程。用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
+DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口，并自动管理本机 Harness 进程。用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
 > [!IMPORTANT]
 > 这是独立社区项目，不是 DeepSeek AI 官方产品。DeepSeek Harness 仍处于开发者预览阶段，后续版本可能包含不兼容改动。
@@ -52,7 +52,7 @@ Release 同时提供 ZIP 和 `SHA256SUMS.txt`。macOS 构建会启用 Hardened R
 
 ## 快速开始
 
-1. 安装并打开 DeepSeek Harness Desktop。
+1. 安装并打开 DSH Desktop。
 2. 进入 **设置 → 模型**，配置模型服务商和 API Key。
 3. 添加或选择工作区。
 4. 新建 Harness 会话。

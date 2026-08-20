@@ -11,7 +11,7 @@ import {
 import { HarnessSupervisor } from './harness-supervisor.js'
 import { suppressUpstreamWelcomeNotice } from './upstream-onboarding.js'
 
-const APP_NAME = 'DeepSeek Harness Desktop'
+const APP_NAME = 'DSH Desktop'
 // Shared update-checker client script (also injected by the Tauri shell on
 // macOS). The placeholder is replaced with the app's own version before
 // injection; see src/updater.js for what the script does.

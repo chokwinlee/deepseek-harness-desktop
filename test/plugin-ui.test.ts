@@ -37,6 +37,7 @@ test('registers Desktop plugin management inside native Settings', async () => {
   assert.match(patch, /ui-settings-desktop-plugin-manager/)
   assert.match(native, /desktop_settings_patch_path/)
   assert.match(native, /command\.arg\("--patch"\)/)
+  assert.match(native, /LaunchMode::Normal => \{\s*command\.args\(\["--profile", "web"\]\);\s*\}[\s\S]*?command\.arg\("--patch"\)/)
 })
 
 test('asks for restart in place and links external CLI changes', async () => {
@@ -125,6 +126,37 @@ test('ships a dedicated CLI launcher instead of the relocated npm bin file', asy
   const replace = build.indexOf('install -m 755 "$CLI_BINARY" "src-tauri/binaries/dsh-${TRIPLE}"')
   assert.ok(bootstrap >= 0 && bootstrap < compile)
   assert.ok(compile < replace)
+})
+
+test('keeps supervised Harness launches inside the Desktop window', async () => {
+  const electron = await source('src/harness-supervisor.ts')
+  const native = await source('src-tauri/src/main.rs')
+  const packaged = await source('scripts/verify-packaged-runtime.mjs')
+
+  assert.match(electron, /'--port', '0', '--no-open'/)
+  assert.match(native, /"--port", "0", "--no-open"/)
+  assert.match(packaged, /'--port', '0', '--no-open'/)
+})
+
+test('uses DSH Desktop as the product name without changing the installed app identity', async () => {
+  const manifest = JSON.parse(await source('package.json'))
+  const tauri = JSON.parse(await source('src-tauri/tauri.conf.json'))
+  const native = await source('src-tauri/src/main.rs')
+  const electron = await source('src/main.ts')
+  const build = await source('scripts/build-tauri.sh')
+  const release = await source('.github/workflows/release.yml')
+
+  assert.equal(manifest.name, 'dsh-desktop')
+  assert.equal(manifest.build.productName, 'DSH Desktop')
+  assert.equal(manifest.build.artifactName, 'DSH-Desktop-${version}-${os}-${arch}.${ext}')
+  assert.equal(manifest.build.appId, 'com.chokwinlee.deepseek-harness-desktop')
+  assert.equal(tauri.productName, 'DSH Desktop')
+  assert.equal(tauri.identifier, 'com.chokwinlee.deepseek-harness-desktop')
+  assert.match(native, /const PRODUCT_NAME: &str = "DSH Desktop"/)
+  assert.match(electron, /const APP_NAME = 'DSH Desktop'/)
+  assert.match(build, /release\/DSH Desktop\.app/)
+  assert.match(release, /release\/DSH-Desktop-\*-mac-/)
+  assert.doesNotMatch(build, /DeepSeek-Harness-Desktop/)
 })
 
 test('runs desktop pnpm operations without an interactive terminal', async () => {

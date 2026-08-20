@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving DeepSeek Harness Desktop. This project intentionally stays small: it hosts the official DeepSeek Harness Web UI, manages its local process, and produces desktop installers.
+Thank you for improving DSH Desktop. This project intentionally stays small: it hosts the official DeepSeek Harness Web UI, manages its local process, and produces desktop installers.
 
 ## Before opening an issue
 

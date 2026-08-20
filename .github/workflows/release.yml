@@ -80,7 +80,7 @@ jobs:
       - name: Verify macOS signature
         shell: bash
         run: |
-          app='release/DeepSeek Harness Desktop.app'
+          app='release/DSH Desktop.app'
           cmp build/icon.icns "$app/Contents/Resources/icon.icns"
           codesign --verify --deep --strict --verbose=4 "$app"
           codesign -dvv "$app" 2>&1 | grep -E 'flags=.*runtime'
@@ -98,8 +98,8 @@ jobs:
         with:
           name: installers-mac-${{ matrix.artifact_arch }}
           path: |
-            release/DeepSeek-Harness-Desktop-*-mac-${{ matrix.artifact_arch }}.dmg
-            release/DeepSeek-Harness-Desktop-*-mac-${{ matrix.artifact_arch }}.zip
+            release/DSH-Desktop-*-mac-${{ matrix.artifact_arch }}.dmg
+            release/DSH-Desktop-*-mac-${{ matrix.artifact_arch }}.zip
           if-no-files-found: error
 
   windows:
@@ -151,4 +151,4 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --generate-notes \
-            --title "DeepSeek Harness Desktop ${GITHUB_REF_NAME}"
+            --title "DSH Desktop ${GITHUB_REF_NAME}"
