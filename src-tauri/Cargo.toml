@@ -19,7 +19,7 @@ uuid = { version = "1", features = ["v4"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
-signal-hook = "0.3"
+signal-hook = "0.4"
 
 [profile.release]
 strip = true
