@@ -62,6 +62,9 @@ const USAGE_METER_SCRIPT: &str = include_str!("../../src/usage-meter.js");
 /// Built-in, profile-independent streaming polish and its General Settings row.
 const SMOOTH_STREAM_SCRIPT: &str = include_str!("../../src/smooth-stream.js");
 
+/// Desktop-only text-selection boundary for app chrome and copyable content.
+const SELECTION_GUARD_SCRIPT: &str = include_str!("../../src/selection-guard.js");
+
 /// Current shell version, kept in sync with package.json / tauri.conf.json.
 const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -2080,6 +2083,7 @@ fn build_main_window(
         .initialization_script(recovery_bridge_script)
         .initialization_script(theme_sync_script)
         .initialization_script(usage_meter_script)
+        .initialization_script(SELECTION_GUARD_SCRIPT)
         .initialization_script(smooth_stream_script)
         .on_navigation(move |destination| {
             if destination.scheme() == "dsh-desktop" {

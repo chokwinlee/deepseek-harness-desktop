@@ -17,6 +17,7 @@ const APP_NAME = 'DSH Desktop'
 // injection; see src/updater.js for what the script does.
 const UPDATER_SCRIPT_RELATIVE = join('src', 'updater.js')
 const SMOOTH_STREAM_SCRIPT_RELATIVE = join('src', 'smooth-stream.js')
+const SELECTION_GUARD_SCRIPT_RELATIVE = join('src', 'selection-guard.js')
 const DESKTOP_PREFERENCES_FILE = 'desktop-preferences.json'
 const DESKTOP_ACTION_TOKEN = randomBytes(16).toString('hex')
 const LOADING_PAGE = `<!doctype html>
@@ -245,6 +246,17 @@ async function injectSmoothStream(): Promise<void> {
   }
 }
 
+/** Keep desktop chrome inert while preserving selection in authored content. */
+async function injectSelectionGuard(): Promise<void> {
+  if (mainWindow === undefined) return
+  try {
+    const script = await readFile(join(app.getAppPath(), SELECTION_GUARD_SCRIPT_RELATIVE), 'utf8')
+    await mainWindow.webContents.executeJavaScript(script, true)
+  } catch (error) {
+    console.error('[dsh] failed to inject selection guard:', error)
+  }
+}
+
 async function showHarness(): Promise<void> {
   mainWindow ??= createWindow()
   if (harnessUrl === undefined) {
@@ -253,6 +265,7 @@ async function showHarness(): Promise<void> {
   }
   await mainWindow.loadURL(harnessUrl)
   await injectUpdater()
+  await injectSelectionGuard()
   await injectSmoothStream()
   mainWindow.show()
   mainWindow.focus()

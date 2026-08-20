@@ -128,6 +128,27 @@ test('ships smooth streaming as a default-on Desktop capability, not a DSH plugi
   assert.match(electron, /writeSmoothStreamPreference/)
 })
 
+test('keeps desktop chrome unselectable without blocking message and editor copy', async () => {
+  const guard = await source('src/selection-guard.js')
+  const manager = await source('src/dsh-desktop-settings-plugin/lib/client.js')
+  const native = await source('src-tauri/src/main.rs')
+  const electron = await source('src/main.ts')
+
+  assert.match(guard, /html body, html body \*/)
+  assert.match(guard, /-webkit-user-select: none !important/)
+  assert.match(guard, /\[data-chat-flow-kind\] \*/)
+  assert.match(guard, /\[contenteditable="true"\]/)
+  assert.match(guard, /-webkit-user-select: text !important/)
+  assert.match(guard, /\[role="treeitem"\]/)
+  assert.doesNotMatch(guard, /pointer-events/)
+  assert.match(manager, /className: 'dpm-runtime'/)
+  assert.match(manager, /user-select:none/)
+  assert.match(native, /SELECTION_GUARD_SCRIPT/)
+  assert.match(native, /initialization_script\(SELECTION_GUARD_SCRIPT\)/)
+  assert.match(electron, /injectSelectionGuard/)
+  assert.match(electron, /await injectSelectionGuard\(\)/)
+})
+
 test('ships a dedicated CLI launcher instead of the relocated npm bin file', async () => {
   const launcher = await source('src-tauri/src/bin/dsh.rs')
   const build = await source('scripts/build-tauri.sh')
