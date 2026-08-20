@@ -50,7 +50,7 @@ let harnessUrl: string | undefined
 let supervisor: HarnessSupervisor | undefined
 let shutdownStarted = false
 
-function resolveDshBin(): string {
+function resolveDshManifest(): string {
   if (app.isPackaged) {
     return join(
       process.resourcesPath,
@@ -58,13 +58,15 @@ function resolveDshBin(): string {
       'node_modules',
       '@deepseek-ai',
       'dsh',
-      'lib',
-      'bin.js',
+      'package.json',
     )
   }
   const require = createRequire(import.meta.url)
-  const manifest = require.resolve('@deepseek-ai/dsh/package.json')
-  return join(dirname(manifest), 'lib', 'bin.js')
+  return require.resolve('@deepseek-ai/dsh/package.json')
+}
+
+function resolveDshBin(): string {
+  return join(dirname(resolveDshManifest()), 'lib', 'bin.js')
 }
 
 function isExternalUrl(rawUrl: string): boolean {
@@ -201,15 +203,23 @@ async function readAppVersion(): Promise<string> {
   return manifest.version ?? '0.0.0'
 }
 
+async function readHarnessVersion(): Promise<string> {
+  const manifest = JSON.parse(await readFile(resolveDshManifest(), 'utf8')) as { version?: string }
+  return manifest.version ?? 'unknown'
+}
+
 /** Inject the update-checker widget into the harness page after it loads. */
 async function injectUpdater(): Promise<void> {
   if (mainWindow === undefined) return
   try {
-    const [rawScript, version] = await Promise.all([
+    const [rawScript, version, harnessVersion] = await Promise.all([
       readFile(join(app.getAppPath(), UPDATER_SCRIPT_RELATIVE), 'utf8'),
       readAppVersion(),
+      readHarnessVersion(),
     ])
-    const script = rawScript.split('__DSH_CURRENT_VERSION__').join(version)
+    const script = rawScript
+      .split('__DSH_CURRENT_VERSION__').join(version)
+      .split('__DSH_HARNESS_VERSION__').join(harnessVersion)
     await mainWindow.webContents.executeJavaScript(script, true)
   } catch (error) {
     console.error('[dsh] failed to inject updater:', error)

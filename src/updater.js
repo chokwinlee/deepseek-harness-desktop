@@ -9,6 +9,7 @@
   'use strict'
 
   const CURRENT_VERSION = '__DSH_CURRENT_VERSION__'
+  const HARNESS_VERSION = '__DSH_HARNESS_VERSION__'
   const REPO = 'chokwinlee/deepseek-harness-desktop'
   const API_URL = 'https://api.github.com/repos/' + REPO + '/releases/latest'
   const RELEASE_PAGE = 'https://github.com/' + REPO + '/releases/latest'
@@ -87,6 +88,16 @@
     return version ? 'v' + version.join('.') : String(raw || '')
   }
 
+  function harnessVersionLabel(raw) {
+    const source = String(raw || '').trim()
+    const prerelease = /-(rc\.\d+(?:\.\d+)?)/i.exec(source)
+    return prerelease ? prerelease[1].toLowerCase() : source || 'unknown'
+  }
+
+  function runtimeSummary(desktop = CURRENT_VERSION, harness = HARNESS_VERSION) {
+    return 'DSH Desktop ' + versionLabel(desktop) + ' · Harness ' + harnessVersionLabel(harness)
+  }
+
   function statusForRelease(tag, current, ignored) {
     if (!isNewer(tag, current)) return 'current'
     return ignored && ignored === tag ? 'ignored' : 'update'
@@ -135,9 +146,11 @@
   if (testGlobal && testGlobal.__DSH_UPDATER_TEST__ === true) {
     testGlobal.__DSH_UPDATER_TEST_API__ = Object.freeze({
       copyFor,
+      harnessVersionLabel,
       isNewer,
       parseVersion,
       resolveLocaleFromHints,
+      runtimeSummary,
       shouldShowForStatus,
       statusForRelease,
       summarize,
@@ -146,6 +159,13 @@
   }
 
   if (typeof window === 'undefined' || typeof document === 'undefined') return
+  const runtimeStatus = Object.freeze({
+    desktopVersion: versionLabel(CURRENT_VERSION),
+    harnessVersion: harnessVersionLabel(HARNESS_VERSION),
+    label: runtimeSummary(),
+  })
+  window.__DSH_DESKTOP_RUNTIME__ = runtimeStatus
+  window.dispatchEvent(new CustomEvent('dsh-desktop-runtime', { detail: runtimeStatus }))
   if (window.__dshUpdaterInstalled) return
   window.__dshUpdaterInstalled = true
 
@@ -567,7 +587,7 @@
 
     if (state.status === 'checking') {
       titleEl.textContent = copy.checking
-      bodyEl.textContent = copy.currentVersion + ' ' + versionLabel(CURRENT_VERSION)
+      bodyEl.textContent = runtimeSummary()
       return
     }
 
@@ -583,7 +603,7 @@
     if (state.status === 'current') {
       titleEl.textContent = copy.currentTitle
       appendBadge(copy.currentBadge)
-      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b>'
       notesEl.textContent = copy.currentBody
       notesEl.hidden = false
       return
@@ -591,7 +611,7 @@
 
     if (state.status === 'ignored') {
       titleEl.textContent = copy.ignoredTitle + ' ' + latestTag
-      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b>'
+      bodyEl.innerHTML = copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b>'
       notesEl.textContent = copy.ignoredBody
       notesEl.hidden = false
       actionsEl.hidden = false
@@ -604,6 +624,7 @@
     appendBadge(latestTag)
     bodyEl.innerHTML =
       copy.currentVersion + ' <b>' + versionLabel(CURRENT_VERSION) + '</b> · ' +
+      'Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b> · ' +
       copy.latestVersion + ' <b>' + latestTag + '</b>' +
       (latest.published_at ? ' · ' + copy.published + ' ' + new Date(latest.published_at).toLocaleDateString(state.locale) : '')
     notesEl.textContent = summarize(latest.body, copy.releaseNotesFallback)
@@ -615,11 +636,12 @@
 
   function badgeLabel() {
     const copy = copyFor(state.locale)
-    if (state.status === 'update') return copy.updateTitle + ' ' + versionLabel(state.latest?.tag_name)
-    if (state.status === 'error') return copy.checkFailed
-    if (state.status === 'checking') return copy.checking
-    if (state.status === 'ignored') return copy.ignoredTitle + ' ' + versionLabel(state.latest?.tag_name)
-    return copy.currentTitle + ' ' + versionLabel(CURRENT_VERSION)
+    const runtime = runtimeSummary()
+    if (state.status === 'update') return runtime + ', ' + copy.updateTitle + ' ' + versionLabel(state.latest?.tag_name)
+    if (state.status === 'error') return runtime + ', ' + copy.checkFailed
+    if (state.status === 'checking') return runtime + ', ' + copy.checking
+    if (state.status === 'ignored') return runtime + ', ' + copy.ignoredTitle + ' ' + versionLabel(state.latest?.tag_name)
+    return runtime + ', ' + copy.currentTitle
   }
 
   function syncVisibility() {

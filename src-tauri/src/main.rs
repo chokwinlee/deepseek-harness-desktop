@@ -963,6 +963,15 @@ fn resolve_modules_directory() -> PathBuf {
     PathBuf::from("node_modules")
 }
 
+fn bundled_harness_version() -> String {
+    let manifest = resolve_modules_directory().join("@deepseek-ai/dsh/package.json");
+    fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+        .and_then(|value| value.get("version")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".into())
+}
+
 fn resolve_onboarding_helper() -> PathBuf {
     for root in resource_roots() {
         for relative in [
@@ -1882,7 +1891,9 @@ fn build_main_window(
     recovery: bool,
 ) -> Result<(), String> {
     let navigation_handle = handle.clone();
-    let updater_script = UPDATER_SCRIPT.replace("__DSH_CURRENT_VERSION__", SHELL_VERSION);
+    let updater_script = UPDATER_SCRIPT
+        .replace("__DSH_CURRENT_VERSION__", SHELL_VERSION)
+        .replace("__DSH_HARNESS_VERSION__", &bundled_harness_version());
     let recovery_bridge_script = RECOVERY_BRIDGE_SCRIPT
         .replace("__DSH_RECOVERY_URL__", recovery_page_url()?.as_str())
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);

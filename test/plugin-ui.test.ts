@@ -30,6 +30,10 @@ test('registers Desktop plugin management inside native Settings', async () => {
   assert.match(native, /"plugin-verified"[\s\S]*?"outcome": outcome/)
 
   assert.match(manager, /settings\.plugins\.tab/)
+  assert.match(manager, /sidebar\.footer\.action/)
+  assert.match(manager, /__DSH_DESKTOP_RUNTIME__/)
+  assert.match(manager, /dsh-desktop-runtime/)
+  assert.match(manager, /className: 'dpm-runtime'/)
   assert.match(manager, /id: 'desktop-manager'/)
   assert.match(manager, /安装与管理/)
   assert.match(manager, /可直接粘贴 dsh plugin --profile web add 完整命令/)
@@ -37,6 +41,8 @@ test('registers Desktop plugin management inside native Settings', async () => {
   assert.match(patch, /ui-settings-desktop-plugin-manager/)
   assert.match(native, /desktop_settings_patch_path/)
   assert.match(native, /command\.arg\("--patch"\)/)
+  assert.match(native, /fn bundled_harness_version\(\)/)
+  assert.match(native, /\.replace\("__DSH_HARNESS_VERSION__", &bundled_harness_version\(\)\)/)
   assert.match(native, /LaunchMode::Normal => \{\s*command\.args\(\["--profile", "web"\]\);\s*\}[\s\S]*?command\.arg\("--patch"\)/)
 })
 

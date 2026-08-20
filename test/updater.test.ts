@@ -6,9 +6,11 @@ import { runInNewContext } from 'node:vm'
 
 interface UpdaterTestApi {
   copyFor(locale: string): Record<string, string>
+  harnessVersionLabel(raw: string): string
   isNewer(latest: string, current: string): boolean
   parseVersion(raw: string): number[] | null
   resolveLocaleFromHints(hints: string[], languages: string[]): string
+  runtimeSummary(desktop?: string, harness?: string): string
   shouldShowForStatus(status: string): boolean
   statusForRelease(tag: string, current: string, ignored: string | null): string
   summarize(body: string, fallback?: string): string
@@ -61,6 +63,14 @@ test('shows the desktop control only for an available update', async () => {
   assert.equal(api.shouldShowForStatus('ignored'), false)
 })
 
+test('labels the bundled Harness release separately from the Desktop version', async () => {
+  const { api } = await loadUpdater()
+
+  assert.equal(api.harnessVersionLabel('0.1.0-rc.8'), 'rc.8')
+  assert.equal(api.harnessVersionLabel('0.2.0'), '0.2.0')
+  assert.equal(api.runtimeSummary('0.2.1', '0.1.0-rc.8'), 'DSH Desktop v0.2.1 · Harness rc.8')
+})
+
 test('normalizes release notes without exposing markdown chrome', async () => {
   const { api } = await loadUpdater()
 
@@ -76,6 +86,9 @@ test('keeps the updater inside the sidebar design and accessibility contract', a
   const { source } = await loadUpdater()
 
   assert.match(source, /insertBefore\(host, nextTrigger\)/)
+  assert.match(source, /__DSH_HARNESS_VERSION__/)
+  assert.match(source, /window\.__DSH_DESKTOP_RUNTIME__ = runtimeStatus/)
+  assert.match(source, /new CustomEvent\('dsh-desktop-runtime'/)
   assert.match(source, /var\(--dsw-alias-bg-layer-2/)
   assert.match(source, /aria-haspopup=\\?"dialog\\?"/)
   assert.match(source, /aria-expanded=\\?"false\\?"/)

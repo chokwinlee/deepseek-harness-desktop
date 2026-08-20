@@ -8,6 +8,8 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const NS = 'settings.desktopPlugins'
     const BRIDGE_KEY = '__DSH_DESKTOP_PLUGIN_MANAGER__'
+    const RUNTIME_KEY = '__DSH_DESKTOP_RUNTIME__'
+    const RUNTIME_EVENT = 'dsh-desktop-runtime'
     const inject = ['slots', 'locale']
 
     const en = {
@@ -104,6 +106,8 @@ window.__ModuleLoader__.load({
       .dpm-spec{margin-top:3px!important;color:var(--dsw-alias-label-tertiary);font-family:var(--ds-font-family-code);font-size:11px;line-height:17px;overflow-wrap:anywhere}
       .dpm-actions{display:flex;align-items:center;gap:6px}.dpm-cli{display:flex;align-items:center;gap:14px}.dpm-cli-copy{min-width:0;flex:1}.dpm-cli-copy h3{margin-bottom:3px}
       .dpm-profile{margin-top:7px!important;color:var(--dsw-alias-label-tertiary);font-family:var(--ds-font-family-code);font-size:10px;line-height:16px;overflow-wrap:anywhere}
+      .dpm-runtime{box-sizing:border-box;width:100%;min-width:0;height:28px;padding:0 8px;color:var(--dsw-alias-label-tertiary);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:11.5px;font-weight:400;line-height:28px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text}
+      .dpm-runtime[data-wide=false]{width:36px;height:30px;padding:0;text-align:center;font-size:10px;font-weight:600;line-height:30px;user-select:none}
       @media(max-width:620px){.dpm-input-row,.dpm-cli,.dpm-pending{align-items:stretch;flex-direction:column}.dpm-input-row .dpm-button{width:100%}.dpm-plugin{flex-direction:column}.dpm-actions{width:100%;justify-content:flex-end}}
     `
 
@@ -264,6 +268,23 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function DesktopRuntimeStatus({ wide }) {
+      const [runtime, setRuntime] = React.useState(() => window[RUNTIME_KEY] || null)
+      React.useEffect(() => {
+        const sync = event => setRuntime(event.detail || window[RUNTIME_KEY] || null)
+        window.addEventListener(RUNTIME_EVENT, sync)
+        return () => window.removeEventListener(RUNTIME_EVENT, sync)
+      }, [])
+      if (!runtime) return null
+      return React.createElement('div', {
+        className: 'dpm-runtime',
+        'data-wide': String(Boolean(wide)),
+        role: 'status',
+        'aria-label': runtime.label,
+        title: runtime.label
+      }, wide ? runtime.label : runtime.harnessVersion)
+    }
+
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'desktop plugin manager dictionaries')
       const t = ctx.locale.bind(NS)
@@ -274,6 +295,11 @@ window.__ModuleLoader__.load({
         label: () => t('tab'),
         locale: NS
       }, DesktopPluginManagerTab))
+      ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+        name: 'sidebar.footer.action',
+        id: 'desktop-runtime',
+        order: 10
+      }, DesktopRuntimeStatus))
     }
 
     exports.NS = NS
