@@ -8,6 +8,8 @@ interface UpdaterTestApi {
   copyFor(locale: string): Record<string, string>
   harnessVersionLabel(raw: string): string
   isNewer(latest: string, current: string): boolean
+  localizedReleaseSummary(body: string, locale: string, fallback?: string): string
+  markedReleaseSummary(body: string, locale: string): string
   parseVersion(raw: string): number[] | null
   resolveLocaleFromHints(hints: string[], languages: string[]): string
   runtimeSummary(desktop?: string, harness?: string): string
@@ -80,6 +82,43 @@ test('normalizes release notes without exposing markdown chrome', async () => {
   )
   assert.equal(api.summarize('', 'No release notes.'), 'No release notes.')
   assert.match(api.summarize('x'.repeat(500)), /…$/)
+})
+
+test('selects a concise localized release summary', async () => {
+  const { api } = await loadUpdater()
+  const body = `
+<!-- dsh-summary:zh -->
+## 中文
+- 支持图片输入。
+- 增加用量统计。
+- 支持按需安装子代理。
+<!-- /dsh-summary:zh -->
+
+<!-- dsh-summary:en -->
+## English
+- Add image input.
+- Add usage insights.
+- Install subagents on demand.
+<!-- /dsh-summary:en -->
+
+## What's Changed
+- Internal detail that should stay out of the update panel.
+`
+
+  assert.equal(api.markedReleaseSummary(body, 'zh').includes('支持图片输入'), true)
+  assert.equal(
+    api.localizedReleaseSummary(body, 'zh'),
+    '• 支持图片输入。\n• 增加用量统计。\n• 支持按需安装子代理。',
+  )
+  assert.equal(
+    api.localizedReleaseSummary(body, 'en'),
+    '• Add image input.\n• Add usage insights.\n• Install subagents on demand.',
+  )
+  assert.equal(
+    api.localizedReleaseSummary('- One\n- Two\n- Three\n- Four', 'en'),
+    '• One\n• Two\n• Three',
+  )
+  assert.match(api.localizedReleaseSummary('x'.repeat(500), 'en'), /…$/)
 })
 
 test('keeps the updater inside the sidebar design and accessibility contract', async () => {

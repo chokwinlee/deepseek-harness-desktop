@@ -16,7 +16,8 @@
   const IGNORE_KEY = 'dshDesktopIgnoredVersion'
   const CHECK_DELAY_MS = 4000
   const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
-  const MAX_NOTES_CHARS = 420
+  const MAX_NOTES_CHARS = 320
+  const MAX_SUMMARY_ITEMS = 3
 
   const COPY = Object.freeze({
     zh: Object.freeze({
@@ -120,6 +121,44 @@
     return text || fallback
   }
 
+  function markedReleaseSummary(body, locale) {
+    const language = locale === 'en' ? 'en' : 'zh'
+    const pattern = new RegExp(
+      `<!--\\s*dsh-summary:${language}\\s*-->([\\s\\S]*?)<!--\\s*\\/dsh-summary:${language}\\s*-->`,
+      'i',
+    )
+    return pattern.exec(String(body || ''))?.[1]?.trim() || ''
+  }
+
+  function compactReleaseSummary(body, fallback = '') {
+    const source = String(body || '').trim()
+    if (!source) return fallback
+    const bullets = source
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => /^(?:[-*+] |\d+[.)] )/.test(line))
+      .slice(0, MAX_SUMMARY_ITEMS)
+      .map(line => summarize(line.replace(/^(?:[-*+] |\d+[.)] )/, '')).replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+    if (bullets.length > 0) {
+      const text = bullets.map(line => `• ${line}`).join('\n')
+      return text.length > MAX_NOTES_CHARS ? text.slice(0, MAX_NOTES_CHARS) + '…' : text
+    }
+
+    const paragraphs = summarize(source, fallback)
+      .split(/\n\s*\n/)
+      .map(line => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 2)
+    let text = paragraphs.join('\n') || fallback
+    if (text.length > MAX_NOTES_CHARS) text = text.slice(0, MAX_NOTES_CHARS) + '…'
+    return text
+  }
+
+  function localizedReleaseSummary(body, locale, fallback = '') {
+    return compactReleaseSummary(markedReleaseSummary(body, locale) || body, fallback)
+  }
+
   function resolveLocaleFromHints(hints, languages) {
     const text = (hints || []).filter(Boolean).join(' ')
     if (/\b(settings|new session|workspaces)\b/i.test(text)) return 'en'
@@ -148,6 +187,8 @@
       copyFor,
       harnessVersionLabel,
       isNewer,
+      localizedReleaseSummary,
+      markedReleaseSummary,
       parseVersion,
       resolveLocaleFromHints,
       runtimeSummary,
@@ -627,7 +668,7 @@
       'Harness <b>' + harnessVersionLabel(HARNESS_VERSION) + '</b> · ' +
       copy.latestVersion + ' <b>' + latestTag + '</b>' +
       (latest.published_at ? ' · ' + copy.published + ' ' + new Date(latest.published_at).toLocaleDateString(state.locale) : '')
-    notesEl.textContent = summarize(latest.body, copy.releaseNotesFallback)
+    notesEl.textContent = localizedReleaseSummary(latest.body, state.locale, copy.releaseNotesFallback)
     notesEl.hidden = false
     actionsEl.hidden = false
     secondaryEl.textContent = copy.ignore

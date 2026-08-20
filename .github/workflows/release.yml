@@ -135,6 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: installers-*
@@ -145,10 +146,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          grep -Fqx "# DSH Desktop ${GITHUB_REF_NAME}" RELEASE_NOTES.md
+          grep -Fq '<!-- dsh-summary:zh -->' RELEASE_NOTES.md
+          grep -Fq '<!-- dsh-summary:en -->' RELEASE_NOTES.md
+          release_intro="$(cat RELEASE_NOTES.md)"
           cd installers
           sha256sum * > SHA256SUMS.txt
           gh release create "${GITHUB_REF_NAME}" * \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --generate-notes \
+            --notes "$release_intro" \
             --title "DSH Desktop ${GITHUB_REF_NAME}"
