@@ -34,7 +34,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 - **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
 - **轻巧的 macOS 安装包**　低于 90 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
 - **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.3.0 · Harness rc.8`。
-- **开箱即用**　应用内置固定版本的 Node.js sidecar、官方 Harness 运行时、原生模块和发行检查。Harness 只绑定到随机的 `127.0.0.1` 端口。
+- **开箱即用**　启动 Harness 所需的内容已经完整内置，无需另装 Node.js，也不用执行终端命令。应用会自动启动和关闭本地运行时。
 
 费用来自本地 Token 记录和可用的公开模型价格，只作为估算。无法匹配价格的模型会明确显示为未定价，不会被当作免费。
 
@@ -44,7 +44,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 
 *Harness rc.8 的真实图片输入会话，同时展开 Token 与费用统计，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
 
-标题栏会持续显示精简摘要。展开后可以查看输入、输出、缓存、费用和实时吞吐率。用量记录来自本地 Harness 会话日志，价格信息可能从公开模型目录获取。
+标题栏会持续显示精简摘要。展开后可以查看输入、输出、缓存、费用和实时吞吐率。用量根据本地 Harness 会话记录计算，估算费用采用可用的公开模型价格。
 
 ## 下载
 
@@ -57,7 +57,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 | Windows 10/11 | x64 安装版 | `win-x64.exe` |
 | Windows 10/11 | x64 便携版 | `win-x64.zip` |
 
-Release 同时提供 ZIP 和 `SHA256SUMS.txt`。macOS 构建会启用 Hardened Runtime；没有配置 Developer ID 时使用 ad-hoc 签名。Windows 构建目前没有代码签名，因此系统可能显示安全确认。继续前请确认文件来自本仓库。
+Release 同时提供 ZIP 和用于完整性校验的 `SHA256SUMS.txt`。请从本仓库的 GitHub Releases 页面下载安装包。
 
 ## 快速开始
 
@@ -77,7 +77,7 @@ Release 同时提供 ZIP 和 `SHA256SUMS.txt`。macOS 构建会启用 Hardened R
 dsh plugin --profile web add github:owner/repo
 ```
 
-桌面端只解析受支持的命令结构，不会执行粘贴的 shell 文本。它使用内置 DSH 和 pnpm，只重启受监护的 Harness 进程，并验证新 profile 是否能稳定运行五秒；启动失败时会恢复变更前的插件事务文件。第三方插件会在本机运行代码，安装前请检查来源与发布者。
+桌面端只解析受支持的安装命令，不会通过 shell 执行粘贴的文本，并会确认 Harness 能否正常重启。启动失败时，应用会恢复之前的插件配置。第三方插件会在本机运行代码，安装前请检查来源与发布者。
 
 ## 架构
 

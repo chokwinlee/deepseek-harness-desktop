@@ -34,7 +34,7 @@ DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/
 - **Usage at a glance on macOS** — see today and seven-day token totals, estimated cost, active task count, and aggregate running throughput without leaving the current session.
 - **Compact macOS package** — stays under 90 MB while bundling the complete Harness runtime, using Tauri and the system WKWebView instead of shipping Chromium.
 - **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.3.0 · Harness rc.8`.
-- **Ready to run** — bundles a pinned Node.js sidecar, the official Harness runtime, native modules, and release-time runtime checks. Harness stays on a random `127.0.0.1` port.
+- **Ready to run** — includes everything needed to start Harness, with no separate Node.js installation or terminal command. The app starts and stops the local runtime automatically.
 
 Cost figures are estimates derived from local token logs and available public model prices. Unmatched models stay visibly unpriced rather than being counted as free.
 
@@ -44,7 +44,7 @@ Cost figures are estimates derived from local token logs and available public mo
 
 *A real Harness rc.8 image-input session with live token and cost insights, using `google/gemini-2.5-flash-lite` through OpenRouter.*
 
-The compact title-bar summary stays visible while you work. Open it for input, output, cache, cost, and live-throughput details. Usage records are read from local Harness session logs; pricing metadata may be fetched from public model catalogs.
+The compact title-bar summary stays visible while you work. Open it for input, output, cache, cost, and live-throughput details. Usage is calculated locally from Harness session history, with estimated costs based on available public model prices.
 
 ## Download
 
@@ -57,7 +57,7 @@ Installers are published on the [latest GitHub Release](https://github.com/chokw
 | Windows 10/11 | x64 installer | `win-x64.exe` |
 | Windows 10/11 | x64 portable | `win-x64.zip` |
 
-Releases also include ZIP archives and `SHA256SUMS.txt`. macOS builds are hardened and ad-hoc signed unless Developer ID credentials are configured; Windows builds are currently unsigned. Your operating system may therefore show a security confirmation—verify that the download came from this repository before continuing.
+Releases also include ZIP archives and `SHA256SUMS.txt` for integrity verification. Download installers from this repository's GitHub Releases page.
 
 ## Quick start
 
@@ -77,7 +77,7 @@ On macOS, open **Settings → Plugins → Install & manage**. The installer acce
 dsh plugin --profile web add github:owner/repo
 ```
 
-The command is parsed narrowly and never shell-executed. Desktop uses its bundled DSH and pnpm, restarts only the supervised Harness process, verifies the new profile for five seconds, and restores the previous plugin transaction files if startup fails. Third-party plugins run code on the local machine; inspect their source and publisher before installation.
+Desktop parses supported install commands without running pasted text through a shell, then checks that Harness restarts successfully. If startup fails, it restores the previous plugin configuration. Third-party plugins run code on the local machine, so review their source and publisher before installation.
 
 ## Architecture
 
