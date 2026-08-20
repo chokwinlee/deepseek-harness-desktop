@@ -21,7 +21,7 @@
 
 ![DSH Desktop](docs/images/readme-hero-zh-CN.png)
 
-*Harness rc.8 的真实图片输入会话，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
+*Harness rc.8 的真实图片输入会话，同时展开 Token 与费用统计，模型通过 OpenRouter 使用 `google/gemini-2.5-flash-lite`。*
 
 DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。当前构建使用 `@deepseek-ai/dsh@0.1.0-rc.8`，侧边栏会同时显示桌面版与内置 Harness 版本。应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
@@ -38,8 +38,6 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 费用来自本地 Token 记录和可用的公开模型价格，只作为估算。无法匹配价格的模型会明确显示为未定价，不会被当作免费。
 
 ## 用量统计
-
-![DSH Desktop 用量统计](docs/images/readme-usage-zh-CN.png)
 
 标题栏会持续显示精简摘要。展开后可以查看输入、输出、缓存、费用和实时吞吐率。用量记录来自本地 Harness 会话日志，价格信息可能从公开模型目录获取。
 

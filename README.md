@@ -21,7 +21,7 @@
 
 ![DSH Desktop](docs/images/readme-hero-en.png)
 
-*A real image-input session on Harness rc.8, using `google/gemini-2.5-flash-lite` through OpenRouter.*
+*A real Harness rc.8 image-input session with live token and cost insights, using `google/gemini-2.5-flash-lite` through OpenRouter.*
 
 DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. This build is aligned with `@deepseek-ai/dsh@0.1.0-rc.8` and shows that bundled Harness version in the sidebar. The app manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
 
@@ -38,8 +38,6 @@ DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/
 Cost figures are estimates derived from local token logs and available public model prices. Unmatched models stay visibly unpriced rather than being counted as free.
 
 ## Usage insights
-
-![DSH Desktop usage insights](docs/images/readme-usage-en.png)
 
 The compact title-bar summary stays visible while you work. Open it for input, output, cache, cost, and live-throughput details. Usage records are read from local Harness session logs; pricing metadata may be fetched from public model catalogs.
 
