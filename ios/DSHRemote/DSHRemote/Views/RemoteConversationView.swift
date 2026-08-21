@@ -1715,6 +1715,8 @@ private struct RemoteComposerTextView: UIViewRepresentable {
 
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
+        let wasFocusRequested = context.coordinator.lastRequestedFocus
+        context.coordinator.lastRequestedFocus = isFocused
         view.isEditable = isEnabled
         view.isSelectable = isEnabled
         view.alpha = isEnabled ? 1 : 0.62
@@ -1744,12 +1746,26 @@ private struct RemoteComposerTextView: UIViewRepresentable {
                       !view.isFirstResponder else { return }
                 view.becomeFirstResponder()
             }
-        } else if !isEnabled, view.isFirstResponder {
-            DispatchQueue.main.async { [weak view] in
-                guard let view, !view.isEditable, view.isFirstResponder else { return }
+        } else if (!isEnabled || (wasFocusRequested && !isFocused)), view.isFirstResponder {
+            DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+                guard let view,
+                      let coordinator,
+                      view.isFirstResponder else {
+                    return
+                }
+                let shouldResign = !coordinator.parent.isEnabled
+                    || (!coordinator.parent.isFocused && !coordinator.lastRequestedFocus)
+                guard shouldResign else { return }
                 view.resignFirstResponder()
             }
         }
+    }
+
+    static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
+        if view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+        view.delegate = nil
     }
 
     func sizeThatFits(
@@ -1767,6 +1783,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: RemoteComposerTextView
         var isApplyingChange = false
+        var lastRequestedFocus = false
         private var pendingEdit: (range: NSRange, replacementLength: Int)?
         private var renderedText = ""
         private var renderedReferences: [RemoteDraftReference] = []
@@ -1932,7 +1949,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
             let fitting = view.sizeThatFits(
                 CGSize(width: width, height: .greatestFiniteMagnitude)
             ).height
-            let next = min(max(ceil(fitting), 38), parent.maxHeight)
+            let next = min(max(ceil(fitting), 44), parent.maxHeight)
             view.isScrollEnabled = fitting > parent.maxHeight
             guard abs(parent.measuredHeight - next) > 0.5 else { return }
             DispatchQueue.main.async {
