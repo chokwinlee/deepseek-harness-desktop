@@ -100,6 +100,7 @@ static LAN_REMOTE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static CHILD_GENERATION: AtomicU64 = AtomicU64::new(0);
 static REMOTE_SERVE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static LAN_REMOTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static REMOTE_OPERATION_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
 static LAN_REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
@@ -171,6 +172,18 @@ struct RemoteRuntimeState {
     lan_pairing_url: String,
     lan_qr_svg: String,
     lan_error: String,
+    operation: Option<RemoteOperationState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteOperationState {
+    id: u64,
+    transport: String,
+    action: String,
+    stage: String,
+    active: bool,
+    error: String,
+    presentation_handoff_ready: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -191,6 +204,20 @@ impl RemoteRuntimeState {
             self.endpoint.clear();
             self.error.clear();
             self.clear_error_when_tailscale_ready = false;
+        }
+    }
+}
+
+impl RemoteOperationState {
+    fn new(id: u64, action: &str, stage: &str) -> Self {
+        Self {
+            id,
+            transport: "tailscale".into(),
+            action: action.into(),
+            stage: stage.into(),
+            active: true,
+            error: String::new(),
+            presentation_handoff_ready: false,
         }
     }
 }
@@ -1854,6 +1881,121 @@ fn inspect_tailscale_and_cache() -> Result<remote::TailscaleInfo, String> {
     inspected
 }
 
+fn remote_operation_value(operation: Option<&RemoteOperationState>) -> serde_json::Value {
+    operation.map_or(serde_json::Value::Null, |operation| {
+        serde_json::json!({
+            "id": operation.id,
+            "transport": operation.transport,
+            "action": operation.action,
+            "stage": operation.stage,
+            "active": operation.active,
+            "error": operation.error,
+            "presentationHandoffReady": operation.presentation_handoff_ready,
+        })
+    })
+}
+
+fn update_remote_operation_state(
+    state: &mut RemoteRuntimeState,
+    operation_id: u64,
+    stage: &str,
+    active: bool,
+    error: &str,
+) -> bool {
+    let Some(operation) = state
+        .operation
+        .as_mut()
+        .filter(|operation| operation.id == operation_id)
+    else {
+        return false;
+    };
+    operation.stage = stage.into();
+    operation.active = active;
+    operation.error = error.into();
+    true
+}
+
+fn publish_remote_operation_stage(
+    handle: &tauri::AppHandle,
+    operation_id: u64,
+    stage: &str,
+    active: bool,
+    error: &str,
+) {
+    let updated = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            update_remote_operation_state(&mut state, operation_id, stage, active, error)
+        })
+        .unwrap_or(false);
+    if updated {
+        emit_remote_status(handle);
+    }
+}
+
+fn active_tailscale_operation_id(action: &str) -> Option<u64> {
+    REMOTE_STATE.lock().ok().and_then(|state| {
+        state.operation.as_ref().and_then(|operation| {
+            (operation.active && operation.transport == "tailscale" && operation.action == action)
+                .then_some(operation.id)
+        })
+    })
+}
+
+fn clear_presented_remote_operation(state: &mut RemoteRuntimeState, operation_id: u64) -> bool {
+    let matches_presented = state
+        .operation
+        .as_ref()
+        .is_some_and(|operation| operation.id == operation_id && !operation.active);
+    if matches_presented {
+        state.operation = None;
+    }
+    matches_presented
+}
+
+fn remote_transition_in_progress(
+    state: &RemoteRuntimeState,
+    guarded_operation_active: bool,
+) -> bool {
+    state.busy
+        || state.lan_busy
+        || state
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.active)
+        || guarded_operation_active
+}
+
+fn mark_remote_operation_presentation_handoff(
+    state: &mut RemoteRuntimeState,
+    operation_id: u64,
+) -> bool {
+    let Some(operation) = state
+        .operation
+        .as_mut()
+        .filter(|operation| operation.id == operation_id)
+    else {
+        return false;
+    };
+    operation.presentation_handoff_ready = true;
+    true
+}
+
+fn append_remote_operation_resume_parameter(
+    url: &mut tauri::Url,
+    operation: Option<&RemoteOperationState>,
+) -> bool {
+    let Some(operation) = operation.filter(|operation| {
+        operation.transport == "tailscale"
+            && matches!(operation.action.as_str(), "enable" | "disable")
+    }) else {
+        return false;
+    };
+    url.query_pairs_mut()
+        .append_pair("dsh-desktop-remote-operation", &operation.id.to_string());
+    true
+}
+
 fn remote_status_value() -> serde_json::Value {
     let cached = TAILSCALE_STATUS_CACHE
         .lock()
@@ -1900,7 +2042,10 @@ fn remote_status_value() -> serde_json::Value {
             .lock()
             .map(|state| state.safe_mode)
             .unwrap_or(true);
+    let operation = remote_operation_value(state.operation.as_ref());
     serde_json::json!({
+        "statusReady": true,
+        "tailscaleStatusReady": cached.refreshed_at.is_some(),
         "phase": if state.phase.is_empty() { "off" } else { &state.phase },
         "installed": installed,
         "backendState": cached.backend_state,
@@ -1922,6 +2067,7 @@ fn remote_status_value() -> serde_json::Value {
         "lanQrSvg": state.lan_qr_svg,
         "lanError": state.lan_error,
         "lanPort": remote::LAN_REMOTE_PORT,
+        "operation": operation,
     })
 }
 
@@ -2245,6 +2391,9 @@ fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Res
         remote::terminate_serve(&mut child);
         return Err(error);
     }
+    if let Some(operation_id) = active_tailscale_operation_id("enable") {
+        publish_remote_operation_stage(handle, operation_id, "generating-pairing", true, "");
+    }
     let endpoint = remote::endpoint_url(&info);
     let pairing_url = remote::pairing_url(&endpoint)?;
     let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
@@ -2274,10 +2423,21 @@ fn relaunch_normal_harness(handle: &tauri::AppHandle) -> Result<(), String> {
     show_harness_window(handle, url, LaunchMode::Normal, None)
 }
 
-fn rollback_remote_enable(handle: &tauri::AppHandle, reason: &str) -> Result<(), String> {
+fn rollback_remote_enable(
+    handle: &tauri::AppHandle,
+    operation_id: u64,
+    reason: &str,
+) -> Result<(), String> {
+    publish_remote_operation_stage(handle, operation_id, "restoring-harness", true, "");
     stop_remote_serve_process();
     REMOTE_DESIRED.store(false, Ordering::SeqCst);
     set_remote_trusted_host(None);
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.enabled = false;
+        state.endpoint.clear();
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+    }
     stop_managed_child();
     relaunch_normal_harness(handle).map_err(|fallback_error| {
         format!(
@@ -2286,7 +2446,7 @@ fn rollback_remote_enable(handle: &tauri::AppHandle, reason: &str) -> Result<(),
     })
 }
 
-fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
+fn perform_remote_enable(handle: tauri::AppHandle, operation_id: u64) -> Result<(), String> {
     let _operation = OperationGuard::acquire()?;
     let paths = harness_paths();
     if read_pending_install(&paths.dsh_home)?.is_some() {
@@ -2313,6 +2473,8 @@ fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
         ));
     }
 
+    publish_remote_operation_stage(&handle, operation_id, "restarting-harness", true, "");
+
     if let Ok(mut state) = REMOTE_STATE.lock() {
         state.phase = "starting".into();
         state.busy = true;
@@ -2332,7 +2494,7 @@ fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
         .map(|state| state.enabled)
         .unwrap_or(false);
     if let Err(error) = launch {
-        rollback_remote_enable(&handle, &error)?;
+        rollback_remote_enable(&handle, operation_id, &error)?;
         return Err(error);
     }
     if !enabled {
@@ -2342,13 +2504,13 @@ fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
             .map(|state| state.error.clone())
             .filter(|error| !error.is_empty())
             .unwrap_or_else(|| "Tailscale Serve 未能进入可用状态。".into());
-        rollback_remote_enable(&handle, &error)?;
+        rollback_remote_enable(&handle, operation_id, &error)?;
         return Err(error);
     }
     Ok(())
 }
 
-fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
+fn perform_remote_disable(handle: tauri::AppHandle, operation_id: u64) -> Result<(), String> {
     let _operation = OperationGuard::acquire()?;
     if let Ok(mut state) = REMOTE_STATE.lock() {
         state.phase = "stopping".into();
@@ -2357,9 +2519,16 @@ fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
         state.clear_error_when_tailscale_ready = false;
     }
     stop_remote_serve_process();
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.enabled = false;
+        state.endpoint.clear();
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+    }
     let serve_stop_error = inspect_tailscale_and_cache()
         .ok()
         .and_then(|info| remote::wait_until_port_clear(&info).err());
+    publish_remote_operation_stage(&handle, operation_id, "restoring-harness", true, "");
     REMOTE_DESIRED.store(false, Ordering::SeqCst);
     set_remote_trusted_host(None);
     stop_managed_child();
@@ -2382,16 +2551,28 @@ fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
+    let mut operation_id = None;
     let already_busy = REMOTE_STATE
         .lock()
         .map(|mut state| {
-            if state.busy {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
                 true
             } else {
+                let id = REMOTE_OPERATION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+                operation_id = Some(id);
                 state.busy = true;
                 state.phase = if enable { "starting" } else { "stopping" }.into();
                 state.error.clear();
                 state.clear_error_when_tailscale_ready = false;
+                state.operation = Some(RemoteOperationState::new(
+                    id,
+                    if enable { "enable" } else { "disable" },
+                    if enable {
+                        "checking-tailscale"
+                    } else {
+                        "stopping-serve"
+                    },
+                ));
                 false
             }
         })
@@ -2400,16 +2581,22 @@ fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
         emit_bridge_event(
             &handle,
             "remote-error",
-            serde_json::json!({ "message": "另一项 Remote 操作正在进行。" }),
+            serde_json::json!({
+                "message": "另一项 Remote 操作正在进行。",
+                "transport": "tailscale",
+            }),
         );
         return;
     }
+    let Some(operation_id) = operation_id else {
+        return;
+    };
     emit_remote_status(&handle);
     thread::spawn(move || {
         let result = if enable {
-            perform_remote_enable(handle.clone())
+            perform_remote_enable(handle.clone(), operation_id)
         } else {
-            perform_remote_disable(handle.clone())
+            perform_remote_disable(handle.clone(), operation_id)
         };
         if let Err(error) = result {
             if let Ok(mut state) = REMOTE_STATE.lock() {
@@ -2417,15 +2604,20 @@ fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
                 state.busy = false;
                 state.error = error.clone();
                 state.clear_error_when_tailscale_ready = false;
+                update_remote_operation_state(&mut state, operation_id, "failed", false, &error);
             }
             emit_bridge_event(
                 &handle,
                 "remote-error",
-                serde_json::json!({ "message": error }),
+                serde_json::json!({
+                    "message": error,
+                    "transport": "tailscale",
+                    "operationId": operation_id,
+                }),
             );
             emit_remote_status(&handle);
         } else {
-            emit_remote_status(&handle);
+            publish_remote_operation_stage(&handle, operation_id, "ready", false, "");
         }
     });
 }
@@ -2493,7 +2685,7 @@ fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
     let already_busy = REMOTE_STATE
         .lock()
         .map(|mut state| {
-            if state.lan_busy {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
                 true
             } else {
                 state.lan_busy = true;
@@ -2506,7 +2698,10 @@ fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
         emit_bridge_event(
             &handle,
             "remote-error",
-            serde_json::json!({ "message": "另一项局域网 Remote 操作正在进行。" }),
+            serde_json::json!({
+                "message": "另一项局域网 Remote 操作正在进行。",
+                "transport": "lan",
+            }),
         );
         return;
     }
@@ -2526,7 +2721,10 @@ fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
             emit_bridge_event(
                 &handle,
                 "remote-error",
-                serde_json::json!({ "message": error }),
+                serde_json::json!({
+                    "message": error,
+                    "transport": "lan",
+                }),
             );
         }
         emit_remote_status(&handle);
@@ -2791,6 +2989,29 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
             let force = parameters.get("force").is_some_and(|value| value == "1");
             refresh_remote_status_async(handle, force);
         }
+        "remote-presented" => {
+            let Some(operation_id) = parameters
+                .get("id")
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                emit_bridge_event(
+                    &handle,
+                    "remote-error",
+                    serde_json::json!({
+                        "message": "Remote 操作编号无效。",
+                        "transport": "tailscale",
+                    }),
+                );
+                return;
+            };
+            let cleared = REMOTE_STATE
+                .lock()
+                .map(|mut state| clear_presented_remote_operation(&mut state, operation_id))
+                .unwrap_or(false);
+            if cleared {
+                emit_remote_status(&handle);
+            }
+        }
         "remote-open-https" => {
             thread::spawn(move || {
                 let result = inspect_tailscale_and_cache()
@@ -2805,7 +3026,10 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
                     emit_bridge_event(
                         &handle,
                         "remote-error",
-                        serde_json::json!({ "message": error }),
+                        serde_json::json!({
+                            "message": error,
+                            "transport": "tailscale",
+                        }),
                     );
                 }
                 emit_remote_status(&handle);
@@ -3051,6 +3275,15 @@ fn show_harness_window(
         };
         url.query_pairs_mut().append_pair(key, &value);
     }
+    let remote_operation = REMOTE_STATE
+        .lock()
+        .ok()
+        .and_then(|state| state.operation.clone());
+    let internal_remote_restart =
+        append_remote_operation_resume_parameter(&mut url, remote_operation.as_ref());
+    let remote_operation_id = internal_remote_restart
+        .then(|| remote_operation.as_ref().map(|operation| operation.id))
+        .flatten();
     if let Ok(mut origin) = ALLOWED_HARNESS_ORIGIN.lock() {
         *origin = Some(url.origin().ascii_serialization());
     }
@@ -3059,12 +3292,19 @@ fn show_harness_window(
             .navigate(url)
             .map_err(|error| format!("failed to open Harness: {error}"))?;
         let _ = window.set_title(PRODUCT_NAME);
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
-        let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
-        let _ = window.show();
-        let _ = window.set_focus();
+        if !internal_remote_restart {
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     } else {
         build_main_window(handle, WebviewUrl::External(url), false)?;
+    }
+    if let Some(operation_id) = remote_operation_id {
+        if let Ok(mut state) = REMOTE_STATE.lock() {
+            mark_remote_operation_presentation_handoff(&mut state, operation_id);
+        }
     }
     Ok(())
 }
@@ -3335,6 +3575,9 @@ fn register_harness(
     }
     start_child_monitor(handle.clone(), generation, mode, tail);
     if mode == LaunchMode::Normal && REMOTE_DESIRED.load(Ordering::SeqCst) {
+        if let Some(operation_id) = active_tailscale_operation_id("enable") {
+            publish_remote_operation_stage(handle, operation_id, "starting-serve", true, "");
+        }
         if let Err(error) = sync_remote_serve(handle, url) {
             deactivate_remote_transport(Some(error), false, handle);
         }
@@ -3505,6 +3748,7 @@ fn perform_recovery_action(handle: tauri::AppHandle, action: RecoveryAction) -> 
             state.lan_pairing_url.clear();
             state.lan_qr_svg.clear();
             state.lan_error.clear();
+            state.operation = None;
         }
     }
     stop_managed_child();
@@ -3870,17 +4114,101 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
+        append_remote_operation_resume_parameter, clear_presented_remote_operation,
         create_product_subagent_preset, desktop_preferences_path, detected_plugin,
         enable_product_subagent_tool, ensure_desktop_settings_module_link, installed_plugins,
-        parse_lan_remote_readiness, parse_readiness, pending_change_outcome, plugin_profile_state,
-        plugin_state_changes, plugin_state_fingerprint, product_subagent_marker,
-        product_subagent_preset_ready, product_subagent_status_value, read_desktop_preferences,
-        redact_startup_line, resolve_modules_directory, restore_last_known_good,
-        safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
-        validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
-        write_smooth_stream_preference, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK,
+        mark_remote_operation_presentation_handoff, parse_lan_remote_readiness, parse_readiness,
+        pending_change_outcome, plugin_profile_state, plugin_state_changes,
+        plugin_state_fingerprint, product_subagent_marker, product_subagent_preset_ready,
+        product_subagent_status_value, read_desktop_preferences, redact_startup_line,
+        remote_transition_in_progress, resolve_modules_directory, restore_last_known_good,
+        safe_profile_manifest, same_file, smooth_stream_enabled_from,
+        update_remote_operation_state, usage_record_from_event, validate_plugin_spec,
+        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
+        RemoteOperationState, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK,
         CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
     };
+
+    #[test]
+    fn remote_operation_stages_are_id_scoped_and_acknowledged_once() {
+        let mut state = RemoteRuntimeState {
+            operation: Some(RemoteOperationState::new(
+                41,
+                "enable",
+                "checking-tailscale",
+            )),
+            ..RemoteRuntimeState::default()
+        };
+
+        assert!(!update_remote_operation_state(
+            &mut state,
+            40,
+            "restarting-harness",
+            true,
+            "",
+        ));
+        assert_eq!(
+            state.operation.as_ref().unwrap().stage,
+            "checking-tailscale"
+        );
+        for stage in [
+            "restarting-harness",
+            "starting-serve",
+            "generating-pairing",
+            "restoring-harness",
+        ] {
+            assert!(update_remote_operation_state(
+                &mut state, 41, stage, true, ""
+            ));
+            assert_eq!(state.operation.as_ref().unwrap().stage, stage);
+            assert!(state.operation.as_ref().unwrap().active);
+            assert!(remote_transition_in_progress(&state, false));
+        }
+        assert!(update_remote_operation_state(
+            &mut state, 41, "ready", false, ""
+        ));
+        assert!(!remote_transition_in_progress(&state, false));
+        assert!(remote_transition_in_progress(&state, true));
+        state.lan_busy = true;
+        assert!(remote_transition_in_progress(&state, false));
+        state.lan_busy = false;
+        assert!(!state.operation.as_ref().unwrap().presentation_handoff_ready);
+        assert!(mark_remote_operation_presentation_handoff(&mut state, 41));
+        assert!(state.operation.as_ref().unwrap().presentation_handoff_ready);
+        assert!(!mark_remote_operation_presentation_handoff(&mut state, 40));
+        assert!(!clear_presented_remote_operation(&mut state, 40));
+        assert!(clear_presented_remote_operation(&mut state, 41));
+        assert!(state.operation.is_none());
+    }
+
+    #[test]
+    fn remote_operation_resume_parameter_survives_ready_and_disable_restarts() {
+        let mut ready = RemoteOperationState::new(51, "enable", "checking-tailscale");
+        ready.stage = "ready".into();
+        ready.active = false;
+        let mut ready_url: tauri::Url = "http://127.0.0.1:4001/".parse().unwrap();
+        assert!(append_remote_operation_resume_parameter(
+            &mut ready_url,
+            Some(&ready),
+        ));
+        assert_eq!(
+            ready_url
+                .query_pairs()
+                .find(|(key, _)| key == "dsh-desktop-remote-operation")
+                .map(|(_, value)| value.into_owned()),
+            Some("51".into()),
+        );
+
+        let disable = RemoteOperationState::new(52, "disable", "stopping-serve");
+        let mut disable_url: tauri::Url = "http://127.0.0.1:4002/".parse().unwrap();
+        assert!(append_remote_operation_resume_parameter(
+            &mut disable_url,
+            Some(&disable),
+        ));
+        assert!(disable_url
+            .as_str()
+            .contains("dsh-desktop-remote-operation=52"));
+    }
 
     #[test]
     fn clears_only_recovered_transient_remote_errors() {

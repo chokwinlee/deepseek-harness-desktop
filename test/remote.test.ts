@@ -16,7 +16,10 @@ interface RemoteTestApi {
   ) => string
   copyFor: (language: 'zh' | 'en') => Record<string, string>
   languageFromTag: (tag: string) => 'zh' | 'en'
+  normalizeOperation: (value?: Record<string, unknown>) => Record<string, unknown>
   normalizeStatus: (value?: Record<string, unknown>) => Record<string, unknown>
+  normalizedOperationStage: (value?: string) => string
+  operationProgress: (value?: Record<string, unknown>) => Record<string, unknown>
   pendingActionAfterStatus: (
     pendingAction: string,
     value: Record<string, unknown> | undefined,
@@ -24,9 +27,22 @@ interface RemoteTestApi {
   ) => string
   shouldPollStatus: (
     value: Record<string, unknown> | undefined,
-    settingVisible: boolean,
+    surfaceVisible: boolean,
     pageVisible?: boolean,
     requestInFlight?: boolean,
+  ) => boolean
+  shouldDeferTerminalPresentation: (
+    resumeId: string,
+    value?: Record<string, unknown>,
+  ) => boolean
+  shouldRestoreOperation: (
+    resumeId: string,
+    value?: Record<string, unknown>,
+  ) => boolean
+  shouldAutoOpenLanPairing: (
+    requested: boolean,
+    previous: Record<string, unknown> | undefined,
+    next: Record<string, unknown> | undefined,
   ) => boolean
   statusAfterError: (
     value: Record<string, unknown> | undefined,
@@ -38,6 +54,7 @@ interface RemoteTestApi {
     transport: 'lan' | 'tailscale',
     language?: 'zh' | 'en',
     pendingAction?: string,
+    otherPendingAction?: string,
   ) => Record<string, unknown>
 }
 
@@ -178,12 +195,18 @@ test('Remote actions use the tokenized Desktop bridge', async () => {
     api.actionUrl('remote-status', 'desktop-token', { force: 1 }),
     'dsh-desktop://action/remote-status?token=desktop-token&force=1',
   )
+  assert.equal(
+    api.actionUrl('remote-presented', 'desktop-token', { id: 17 }),
+    'dsh-desktop://action/remote-presented?token=desktop-token&id=17',
+  )
   assert.throws(() => api.actionUrl('serve-reset', 'desktop-token'))
 })
 
 test('Remote state defaults closed and normalizes native payloads', async () => {
   const api = await loadTestApi()
   const initial = api.normalizeStatus()
+  assert.equal(initial.statusReady, false)
+  assert.equal(initial.tailscaleStatusReady, false)
   assert.equal(initial.enabled, false)
   assert.equal(initial.busy, false)
   assert.equal(initial.port, 8443)
@@ -197,6 +220,8 @@ test('Remote state defaults closed and normalizes native payloads', async () => 
     pairingURL: 'dshremote://connect?url=example',
   })
   assert.equal(active.enabled, true)
+  assert.equal(active.statusReady, true)
+  assert.equal(active.tailscaleStatusReady, true)
   assert.equal(active.httpsReady, true)
   assert.equal(active.url, 'https://dsh-mac.example.ts.net:8443/')
 
@@ -220,6 +245,13 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.copyFor('zh').lanTitle, '同一 Wi-Fi')
   assert.match(String(api.copyFor('zh').lanDescription), /无需安装或配置 Tailscale/)
   assert.equal(api.copyFor('zh').tailscaleTitle, '跨网络连接')
+  assert.equal(api.copyFor('zh').operationChecking, '检查 Tailscale')
+  assert.equal(api.copyFor('zh').operationRestarting, '重启 Harness')
+  assert.equal(api.copyFor('zh').operationServing, '启动安全入口')
+  assert.equal(api.copyFor('zh').operationPairing, '生成配对码')
+  assert.equal(api.copyFor('zh').disableStopping, '关闭安全入口')
+  assert.equal(api.copyFor('zh').disableRestarting, '恢复 Harness')
+  assert.equal(api.copyFor('zh').confirmInterrupt, '正在运行的任务会中断。')
   assert.equal(api.copyFor('en').title, 'Mobile Remote')
   assert.equal(api.copyFor('en').lanBadge, 'Recommended')
 })
@@ -236,6 +268,195 @@ test('Remote uses one settings entry and keeps transport choices inside the pair
   assert.match(source, /event\.key !== 'Tab'/)
   assert.match(source, /button\.getClientRects\(\)\.length > 0/)
   assert.match(source, /if \(!controls\.includes\(active\)\)/)
+  assert.match(source, /class="manager-status dialog-view" role="status" aria-live="polite" aria-atomic="true"/)
+  assert.match(source, /class="progress-steps" hidden/)
+  assert.match(source, /class="confirm dialog-view" hidden/)
+  assert.match(source, /class="dsh-remote-primary confirm-enable"/)
+  assert.match(source, /className = 'dsh-remote-spinner'/)
+  assert.match(source, /route\.setAttribute\('aria-busy', String\(view\.busy\)\)/)
+  assert.match(source, /@media\(prefers-reduced-motion:reduce\)/)
+  assert.match(source, /\.dsh-remote-spinner,\.progress-step\[data-state="current"\]::before\{animation:none\}/)
+  assert.match(source, /const surfaceVisible = Boolean\(settingRow\?\.isConnected\)[\s\S]*?Boolean\(layer && !layer\.hidden\)[\s\S]*?Boolean\(resumeCurtain\?\.isConnected\)/)
+  assert.match(source, /request\('remote-presented', \{ id: operationId \}\)/)
+  assert.match(
+    source,
+    /if \(!operation\.active && shouldPresent\) \{[\s\S]*?if \(shouldDeferTerminalPresentation\(resumeOperationId, operation\)\)[\s\S]*?if \(dismissedOperationId === operation\.id\)/,
+  )
+  assert.doesNotMatch(source, /if \(!wasEnabled && status\.enabled\) openPairing\(\)/)
+})
+
+test('Remote cold hydration presents independent loading states for LAN and Tailscale', async () => {
+  const api = await loadTestApi()
+  const coldLan = api.transportViewState(undefined, 'lan', 'zh')
+  const coldTailscale = api.transportViewState(undefined, 'tailscale', 'zh')
+
+  assert.equal(coldLan.checking, true)
+  assert.equal(coldLan.busy, true)
+  assert.equal(coldLan.actionDisabled, true)
+  assert.equal(coldLan.description, '正在检查本地连接能力…')
+  assert.equal(coldTailscale.checking, true)
+  assert.equal(coldTailscale.busy, true)
+  assert.equal(coldTailscale.actionDisabled, true)
+  assert.equal(coldTailscale.description, '正在检查 Tailscale 状态…')
+
+  const localReady = {
+    statusReady: true,
+    tailscaleStatusReady: false,
+    lanAvailable: true,
+  }
+  const readyLan = api.transportViewState(localReady, 'lan', 'zh')
+  const checkingTailscale = api.transportViewState(localReady, 'tailscale', 'zh')
+
+  assert.equal(readyLan.checking, false)
+  assert.equal(readyLan.busy, false)
+  assert.equal(readyLan.actionDisabled, false)
+  assert.match(String(readyLan.description), /无需安装或配置 Tailscale/)
+  assert.equal(checkingTailscale.checking, true)
+  assert.equal(checkingTailscale.actionDisabled, true)
+  assert.equal(checkingTailscale.description, '正在检查 Tailscale 状态…')
+})
+
+test('Remote operation stages normalize into a stable progress contract', async () => {
+  const api = await loadTestApi()
+  const cases = [
+    ['checking-tailscale', 'checking', 0, ''],
+    ['restarting-harness', 'restarting', 1, ''],
+    ['starting-serve', 'serving', 2, ''],
+    ['creating-pairing-code', 'pairing', 3, ''],
+    ['restoring-harness', 'restarting', 1, ''],
+    ['stopping-serve', 'serving', 2, ''],
+    ['ready', 'ready', 4, 'ready'],
+  ] as const
+
+  for (const [stage, normalizedStage, stepIndex, terminal] of cases) {
+    assert.equal(api.normalizedOperationStage(stage), normalizedStage)
+    const progress = api.operationProgress({
+      id: 41,
+      transport: 'tailscale',
+      action: stage === 'stopping-serve' ? 'disable' : 'enable',
+      stage,
+      active: terminal === '',
+    })
+    assert.equal(progress.normalizedStage, normalizedStage)
+    assert.equal(progress.stepIndex, stepIndex)
+    assert.equal(progress.terminal, terminal)
+  }
+
+  const failed = api.operationProgress({
+    id: 41,
+    transport: 'tailscale',
+    action: 'enable',
+    stage: 'failed',
+    active: false,
+    error: 'Serve failed',
+  })
+  assert.equal(failed.normalizedStage, 'error')
+  assert.equal(failed.stepIndex, -1, 'errors must not pretend that a progress step failed')
+  assert.equal(failed.terminal, 'error')
+})
+
+test('Remote presentation resumes only the exact native operation', async () => {
+  const api = await loadTestApi()
+  const operations = [
+    { id: 51, transport: 'tailscale', action: 'enable', stage: 'restarting-harness', active: true },
+    { id: 52, transport: 'tailscale', action: 'disable', stage: 'restoring-harness', active: true },
+    {
+      id: 53,
+      transport: 'tailscale',
+      action: 'enable',
+      stage: 'failed',
+      active: false,
+      error: 'Serve failed',
+    },
+  ]
+
+  for (const operation of operations) {
+    assert.equal(api.shouldRestoreOperation(String(operation.id), operation), true)
+    assert.equal(api.shouldRestoreOperation(String(operation.id + 1), operation), false)
+    assert.equal(api.shouldRestoreOperation('', operation), false)
+  }
+
+  const handedOff = {
+    id: 54,
+    transport: 'tailscale',
+    action: 'enable',
+    stage: 'ready',
+    active: false,
+    presentationHandoffReady: true,
+  }
+  assert.equal(api.shouldDeferTerminalPresentation('', handedOff), true)
+  assert.equal(api.shouldDeferTerminalPresentation('53', handedOff), true)
+  assert.equal(api.shouldDeferTerminalPresentation('54', handedOff), false)
+  assert.equal(
+    api.shouldDeferTerminalPresentation('', { ...handedOff, presentationHandoffReady: false }),
+    false,
+    'a failed or missing native navigation must keep terminal recovery on the current page',
+  )
+
+  const ordinaryHydration = api.normalizeStatus({
+    statusReady: true,
+    tailscaleStatusReady: true,
+    enabled: true,
+    qrSvg: 'data:image/svg+xml,ready',
+  })
+  assert.equal(
+    api.shouldRestoreOperation('51', ordinaryHydration.operation as Record<string, unknown>),
+    false,
+    'an already-enabled status without an operation must not auto-present pairing',
+  )
+})
+
+test('LAN pairing auto-opens only for the locally requested off-to-on transition', async () => {
+  const api = await loadTestApi()
+  const off = { statusReady: true, lanAvailable: true, lanEnabled: false }
+  const on = { statusReady: true, lanEnabled: true, lanQrSvg: 'data:image/svg+xml,lan' }
+
+  assert.equal(api.shouldAutoOpenLanPairing(false, off, on), false)
+  assert.equal(api.shouldAutoOpenLanPairing(true, off, { ...on, lanQrSvg: '' }), false)
+  assert.equal(api.shouldAutoOpenLanPairing(true, on, on), false)
+  assert.equal(api.shouldAutoOpenLanPairing(true, off, on), true)
+  assert.equal(
+    api.pendingActionAfterStatus('remote-lan-enable', { lanBusy: true }, 'lan'),
+    '',
+    'native busy acknowledges the requested LAN transition while its operation continues',
+  )
+})
+
+test('Remote transports block conflicting operations without borrowing the busy label', async () => {
+  const api = await loadTestApi()
+  const ready = {
+    statusReady: true,
+    tailscaleStatusReady: true,
+    lanAvailable: true,
+    installed: true,
+    backendState: 'Running',
+    magicDNS: true,
+    httpsReady: true,
+  }
+  const lanBlocked = api.transportViewState({
+    ...ready,
+    operation: {
+      id: 61,
+      transport: 'tailscale',
+      action: 'enable',
+      stage: 'restarting-harness',
+      active: true,
+    },
+  }, 'lan', 'zh')
+  assert.equal(lanBlocked.blocked, true)
+  assert.equal(lanBlocked.busy, false)
+  assert.equal(lanBlocked.actionDisabled, true)
+
+  const tailscaleBlocked = api.transportViewState(
+    { ...ready, lanBusy: true },
+    'tailscale',
+    'zh',
+    '',
+    'remote-lan-enable',
+  )
+  assert.equal(tailscaleBlocked.blocked, true)
+  assert.equal(tailscaleBlocked.busy, false)
+  assert.equal(tailscaleBlocked.actionDisabled, true)
 })
 
 test('LAN remains the available primary path when Tailscale is unavailable', async () => {
@@ -313,6 +534,11 @@ test('Remote transport errors and busy labels stay isolated', async () => {
 test('Remote status polling is visible, idle, and single-flight', async () => {
   const api = await loadTestApi()
   assert.equal(api.shouldPollStatus(undefined, false), false)
+  assert.equal(
+    api.shouldPollStatus(undefined, true),
+    true,
+    'an open manager or resume curtain must be able to hydrate before the setting row mounts',
+  )
   assert.equal(api.shouldPollStatus({ backendState: 'Stopped', error: 'not connected' }, true), true)
   assert.equal(api.shouldPollStatus({
     backendState: 'Running',
