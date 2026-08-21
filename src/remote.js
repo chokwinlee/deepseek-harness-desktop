@@ -1,9 +1,9 @@
 /**
- * First-party Tailscale Remote controls for the native Desktop shell.
+ * First-party Mobile Remote controls for the native Desktop shell.
  *
  * The Web UI can request status or an explicit enable/disable transition, but
  * it never receives shell access or Tailscale credentials. The native host
- * validates every action and owns both Harness and Serve child processes.
+ * validates every action and owns the LAN proxy, Harness, and Serve processes.
  */
 (() => {
   'use strict'
@@ -15,7 +15,11 @@
   const SETTING_ID = 'dsh-desktop-remote-setting'
   const STYLE_ID = 'dsh-desktop-remote-style'
   const LAYER_ID = 'dsh-desktop-remote-layer'
-  const STATUS_POLL_INTERVAL_MS = 2000
+  const STATUS_POLL_INTERVAL_MS = 10000
+  const STATUS_REQUEST_TIMEOUT_MS = 6000
+  const ACTION_ACK_TIMEOUT_MS = 8000
+  const LAN_TRANSPORT = 'lan'
+  const TAILSCALE_TRANSPORT = 'tailscale'
   const ALLOWED_ACTIONS = new Set([
     'remote-status',
     'remote-open-https',
@@ -29,9 +33,12 @@
     return String(tag || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'
   }
 
-  function actionUrl(action, token = ACTION_TOKEN) {
+  function actionUrl(action, token = ACTION_TOKEN, parameters = {}) {
     if (!ALLOWED_ACTIONS.has(action)) throw new Error(`Unsupported Remote action: ${action}`)
     const query = new URLSearchParams({ token })
+    for (const [name, value] of Object.entries(parameters)) {
+      if (value !== undefined && value !== null && value !== '') query.set(name, String(value))
+    }
     return `dsh-desktop://action/${action}?${query.toString()}`
   }
 
@@ -62,71 +69,205 @@
     })
   }
 
-  function shouldPollStatus(value, settingVisible) {
+  function shouldPollStatus(value, settingVisible, pageVisible = true, requestInFlight = false) {
     const next = normalizeStatus(value)
-    return Boolean(settingVisible) && !next.busy
+    return Boolean(settingVisible)
+      && Boolean(pageVisible)
+      && !requestInFlight
+      && !next.busy
+      && !next.lanBusy
   }
 
   function copyFor(language) {
     return language === 'zh'
       ? {
           title: '手机 Remote',
-          description: '通过你自己的 Tailscale 网络从 iPhone 安全控制这台电脑。',
-          unavailable: '请先安装 Tailscale，并让电脑和 iPhone 登录同一个 Tailnet。',
-          disconnected: 'Tailscale 尚未连接。',
-          magicDNS: '当前 Tailnet 需要开启 MagicDNS。',
-          https: '请先在 Tailscale 管理页启用 HTTPS。',
+          description: '在 iPhone 上继续查看这台电脑里的项目、会话和正在运行的任务。',
+          connect: '连接 iPhone',
+          manage: '管理连接',
+          managerBody: '优先使用同一 Wi-Fi；只有离开本地网络时才需要 Tailscale。',
+          lanSummaryActive: '同一 Wi-Fi 连接已开启，可随时重新显示配对码。',
+          tailscaleSummaryActive: '跨网络连接已开启；同一 Wi-Fi 配对仍可独立使用。',
+          bothSummaryActive: '同一 Wi-Fi 与跨网络连接均已开启。',
+          lanTitle: '同一 Wi-Fi',
+          lanBadge: '推荐',
+          lanDescription: 'iPhone 与电脑连接同一个可信 Wi-Fi，无需安装或配置 Tailscale。',
+          lanUnavailable: 'Harness 启动完成后即可开始本地配对。',
+          lanActive: '本地连接已开启：{url}',
+          lanStart: '开始本地配对',
+          lanStarting: '正在准备本地连接…',
+          lanStop: '关闭本地连接',
+          lanStopping: '正在关闭本地连接…',
+          lanPair: '显示配对码',
+          tailscaleTitle: '跨网络连接',
+          tailscaleBadge: '可选',
+          tailscaleDescription: '离开本地 Wi-Fi 时，通过你自己的 Tailscale 网络连接。',
+          unavailable: '需要先在电脑和 iPhone 安装 Tailscale，并登录同一个 Tailnet。',
+          disconnected: 'Tailscale 尚未连接；这不会影响同一 Wi-Fi 配对。',
+          magicDNS: '当前 Tailnet 需要开启 MagicDNS；这不会影响同一 Wi-Fi 配对。',
+          https: '还需在 Tailscale 管理页启用 HTTPS。',
           setupHTTPS: '设置 HTTPS',
-          active: '仅在你的 Tailnet 内可访问：{url}',
-          enable: '开启',
-          enabling: '正在开启…',
-          disable: '关闭',
-          disabling: '正在关闭…',
-          pair: '配对',
-          lanEnable: '同一 Wi-Fi',
-          lanDisable: '关闭局域网',
-          lanPair: '局域网配对',
-          lanActive: '同一 Wi-Fi 可访问：{url}',
-          lanReady: '也可以只开启“同一 Wi-Fi”，无需在手机安装 Tailscale。',
-          lanUnavailable: 'Harness 启动完成后才可开启局域网直连。',
-          modalTitle: '连接 iPhone',
-          modalBody: '在 DSH Remote 中扫描二维码。手机和电脑必须登录同一个 Tailnet。',
+          active: '跨网络连接已开启：{url}',
+          enable: '开启跨网络',
+          enabling: '正在开启跨网络连接…',
+          disable: '关闭跨网络',
+          disabling: '正在关闭跨网络连接…',
+          pair: '显示配对码',
+          restart: '开启跨网络连接会重启 Harness，并中断正在运行的任务。',
+          modalTitle: '跨网络配对',
+          lanModalTitle: '同一 Wi-Fi 配对',
+          modalBody: '在 DSH Remote 中扫描二维码。电脑和 iPhone 必须登录同一个 Tailnet。',
           lanModalBody: '让 iPhone 与电脑连接同一个受信任的 Wi-Fi，然后扫描二维码。配对凭据只会显示在二维码中。',
-          address: 'Remote 地址',
-          copy: '复制地址',
+          address: '电脑地址',
+          copy: '复制配对链接',
           copied: '已复制',
           close: '完成',
-          restart: '开启或关闭 Remote 会安全重启 Harness，正在运行的任务会中断。',
+          managerClose: '关闭',
+          back: '返回连接方式',
         }
       : {
           title: 'Mobile Remote',
-          description: 'Control this computer from iPhone through your own Tailscale network.',
-          unavailable: 'Install Tailscale and sign in to the same tailnet on this computer and iPhone.',
-          disconnected: 'Tailscale is not connected.',
-          magicDNS: 'MagicDNS must be enabled for this tailnet.',
-          https: 'Enable HTTPS in the Tailscale admin console first.',
+          description: 'Continue with this computer’s projects, sessions, and running tasks from iPhone.',
+          connect: 'Connect iPhone',
+          manage: 'Manage connections',
+          managerBody: 'Use the same Wi-Fi first. Tailscale is only needed away from the local network.',
+          lanSummaryActive: 'Same Wi-Fi is on. You can show the pairing code again at any time.',
+          tailscaleSummaryActive: 'Anywhere access is on. Same Wi-Fi pairing remains independently available.',
+          bothSummaryActive: 'Same Wi-Fi and anywhere access are both on.',
+          lanTitle: 'Same Wi-Fi',
+          lanBadge: 'Recommended',
+          lanDescription: 'Connect iPhone and this computer to the same trusted Wi-Fi. Tailscale is not required.',
+          lanUnavailable: 'Local pairing is available after Harness finishes starting.',
+          lanActive: 'Local connection is on: {url}',
+          lanStart: 'Start local pairing',
+          lanStarting: 'Preparing local connection…',
+          lanStop: 'Turn off local connection',
+          lanStopping: 'Turning off local connection…',
+          lanPair: 'Show pairing code',
+          tailscaleTitle: 'Connect from anywhere',
+          tailscaleBadge: 'Optional',
+          tailscaleDescription: 'Use your own Tailscale network when iPhone is away from local Wi-Fi.',
+          unavailable: 'Install Tailscale on this computer and iPhone, then sign in to the same tailnet.',
+          disconnected: 'Tailscale is not connected. Same Wi-Fi pairing is still available.',
+          magicDNS: 'MagicDNS must be enabled for this tailnet. Same Wi-Fi pairing is unaffected.',
+          https: 'Enable HTTPS in the Tailscale admin console to continue.',
           setupHTTPS: 'Set up HTTPS',
-          active: 'Available only inside your tailnet: {url}',
-          enable: 'Enable',
-          enabling: 'Enabling…',
-          disable: 'Turn off',
-          disabling: 'Turning off…',
-          pair: 'Pair',
-          lanEnable: 'Same Wi-Fi',
-          lanDisable: 'Turn off LAN',
-          lanPair: 'LAN Pairing',
-          lanActive: 'Available on the same Wi-Fi: {url}',
-          lanReady: 'You can also enable Same Wi-Fi without installing Tailscale on iPhone.',
-          lanUnavailable: 'Wait for Harness to finish starting before enabling LAN access.',
-          modalTitle: 'Connect iPhone',
+          active: 'Anywhere connection is on: {url}',
+          enable: 'Connect from anywhere',
+          enabling: 'Preparing anywhere connection…',
+          disable: 'Turn off anywhere access',
+          disabling: 'Turning off anywhere access…',
+          pair: 'Show pairing code',
+          restart: 'Turning on anywhere access restarts Harness and interrupts running tasks.',
+          modalTitle: 'Pair from anywhere',
+          lanModalTitle: 'Pair on the same Wi-Fi',
           modalBody: 'Scan this QR code in DSH Remote. Both devices must use the same tailnet.',
           lanModalBody: 'Connect iPhone and this computer to the same trusted Wi-Fi, then scan. The pairing credential is only carried by the QR code.',
-          address: 'Remote address',
-          copy: 'Copy address',
+          address: 'Computer address',
+          copy: 'Copy pairing link',
           copied: 'Copied',
           close: 'Done',
-          restart: 'Enabling or disabling Remote safely restarts Harness and interrupts running tasks.',
+          managerClose: 'Close',
+          back: 'Back to connection options',
         }
+  }
+
+  function transportViewState(value, transport, language = 'en', pendingAction = '') {
+    const next = normalizeStatus(value)
+    const copy = copyFor(languageFromTag(language))
+    const lan = transport === LAN_TRANSPORT
+    const enabled = lan ? next.lanEnabled : next.enabled
+    const nativeBusy = lan ? next.lanBusy : next.busy
+    const busy = nativeBusy || Boolean(pendingAction)
+    const endpoint = lan ? next.lanURL : next.url
+    const error = lan ? next.lanError : next.error
+    const stopping = pendingAction.endsWith('-disable')
+      || (!pendingAction && nativeBusy && enabled)
+      || (!lan && next.phase === 'stopping')
+
+    let description
+    let hasError = false
+    if (busy) {
+      description = lan
+        ? stopping ? copy.lanStopping : copy.lanStarting
+        : stopping ? copy.disabling : copy.enabling
+    } else if (error) {
+      description = error
+      hasError = true
+    } else if (enabled) {
+      description = (lan ? copy.lanActive : copy.active).replace('{url}', endpoint)
+    } else if (lan) {
+      description = next.lanAvailable ? copy.lanDescription : copy.lanUnavailable
+    } else if (!next.installed) {
+      description = copy.unavailable
+    } else if (next.backendState !== 'Running') {
+      description = copy.disconnected
+    } else if (!next.magicDNS) {
+      description = copy.magicDNS
+    } else if (!next.httpsReady) {
+      description = copy.https
+    } else {
+      description = `${copy.tailscaleDescription} ${copy.restart}`
+    }
+
+    let action
+    let actionLabel
+    let actionDisabled = busy
+    if (lan) {
+      action = enabled ? 'remote-lan-disable' : 'remote-lan-enable'
+      actionLabel = busy
+        ? stopping ? copy.lanStopping : copy.lanStarting
+        : enabled ? copy.lanStop : copy.lanStart
+      actionDisabled ||= !enabled && !next.lanAvailable
+    } else if (enabled) {
+      action = 'remote-disable'
+      actionLabel = busy ? copy.disabling : copy.disable
+    } else if (next.installed
+      && next.backendState === 'Running'
+      && next.magicDNS
+      && !next.httpsReady) {
+      action = 'remote-open-https'
+      actionLabel = copy.setupHTTPS
+    } else {
+      action = 'remote-enable'
+      actionLabel = busy ? copy.enabling : copy.enable
+      actionDisabled ||= !(next.installed
+        && next.backendState === 'Running'
+        && next.magicDNS
+        && next.httpsReady)
+    }
+
+    return Object.freeze({
+      action,
+      actionDisabled,
+      actionLabel,
+      busy,
+      description,
+      enabled,
+      hasError,
+      pairDisabled: busy || !(lan ? next.lanQrSvg : next.qrSvg),
+      pairLabel: lan ? copy.lanPair : copy.pair,
+    })
+  }
+
+  function statusAfterError(value, transport, message) {
+    const next = normalizeStatus(value)
+    if (transport === LAN_TRANSPORT) {
+      return normalizeStatus({ ...next, lanBusy: false, lanError: message })
+    }
+    return normalizeStatus({ ...next, busy: false, phase: 'error', error: message })
+  }
+
+  function pendingActionAfterStatus(pendingAction, value, transport) {
+    if (!pendingAction) return ''
+    const next = normalizeStatus(value)
+    const lan = transport === LAN_TRANSPORT
+    const busy = lan ? next.lanBusy : next.busy
+    const enabled = lan ? next.lanEnabled : next.enabled
+    if (busy) return ''
+    if (pendingAction.endsWith('-enable') && enabled) return ''
+    if (pendingAction.endsWith('-disable') && !enabled) return ''
+    return pendingAction
   }
 
   const testGlobal = typeof globalThis === 'undefined' ? null : globalThis
@@ -136,7 +277,10 @@
       copyFor,
       languageFromTag,
       normalizeStatus,
+      pendingActionAfterStatus,
       shouldPollStatus,
+      statusAfterError,
+      transportViewState,
     })
     return
   }
@@ -148,23 +292,75 @@
   let settingRow = null
   let settingTitle = null
   let settingDescription = null
-  let settingControls = null
-  let settingPrimaryButton = null
-  let settingPairButton = null
-  let settingLanButton = null
-  let settingLanPairButton = null
+  let settingConnectButton = null
+  let lanRoute = null
+  let lanDescription = null
+  let lanActionButton = null
+  let lanPairButton = null
+  let tailscaleRoute = null
+  let tailscaleDescription = null
+  let tailscaleActionButton = null
+  let tailscalePairButton = null
   let layer = null
   let layerShadow = null
   let observer = null
   let mountFrame = 0
-  let pairingTransport = 'tailscale'
+  let pairingTransport = TAILSCALE_TRANSPORT
+  let lastActionTransport = TAILSCALE_TRANSPORT
+  let pendingLanAction = ''
+  let pendingTailscaleAction = ''
+  let pendingLanTimer = 0
+  let pendingTailscaleTimer = 0
+  let statusRequestInFlight = false
+  let statusRequestTimer = 0
+  let pairingReturnFocus = null
 
   function currentLanguage() {
     return languageFromTag(document.documentElement.lang || navigator.language)
   }
 
-  function request(action) {
-    location.assign(actionUrl(action))
+  function request(action, parameters) {
+    location.assign(actionUrl(action, ACTION_TOKEN, parameters))
+  }
+
+  function clearPendingAction(transport) {
+    if (transport === LAN_TRANSPORT) {
+      pendingLanAction = ''
+      if (pendingLanTimer) window.clearTimeout(pendingLanTimer)
+      pendingLanTimer = 0
+    } else {
+      pendingTailscaleAction = ''
+      if (pendingTailscaleTimer) window.clearTimeout(pendingTailscaleTimer)
+      pendingTailscaleTimer = 0
+    }
+  }
+
+  function setPendingAction(transport, action) {
+    clearPendingAction(transport)
+    if (transport === LAN_TRANSPORT) pendingLanAction = action
+    else pendingTailscaleAction = action
+    const timeout = window.setTimeout(() => {
+      clearPendingAction(transport)
+      updateSetting()
+      refreshStatus(true)
+    }, ACTION_ACK_TIMEOUT_MS)
+    if (transport === LAN_TRANSPORT) pendingLanTimer = timeout
+    else pendingTailscaleTimer = timeout
+  }
+
+  function requestTransportAction(action, transport) {
+    lastActionTransport = transport
+    if (action !== 'remote-open-https') {
+      setPendingAction(transport, action)
+      updateSetting()
+    }
+    try {
+      request(action)
+    } catch (error) {
+      clearPendingAction(transport)
+      updateSetting()
+      throw error
+    }
   }
 
   function installStyle() {
@@ -172,46 +368,18 @@
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-      #${SETTING_ID}{box-sizing:border-box;border-bottom:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;gap:16px;width:100%;padding:16px 0;color:var(--dsw-alias-label-primary);font:inherit}
+      #${SETTING_ID}{box-sizing:border-box;border-bottom:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;gap:18px;width:100%;padding:16px 0;color:var(--dsw-alias-label-primary);font:inherit}
       #${SETTING_ID} *{box-sizing:border-box}
-      #${SETTING_ID} .dsh-remote-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;padding-right:24px}
-      #${SETTING_ID} .dsh-remote-title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:400;line-height:22px}
-      #${SETTING_ID} .dsh-remote-description{color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;line-height:18px;overflow-wrap:anywhere}
-      #${SETTING_ID}[data-error] .dsh-remote-description{color:var(--dsw-alias-state-error-primary)}
-      #${SETTING_ID} .dsh-remote-controls{display:flex;flex:none;align-items:center;gap:7px}
-      #${SETTING_ID} button{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;min-height:34px;padding:6px 11px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px;white-space:nowrap}
-      #${SETTING_ID} button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+      #${SETTING_ID} .dsh-remote-heading{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+      #${SETTING_ID} .dsh-remote-title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:21px}
+      #${SETTING_ID} .dsh-remote-intro{max-width:680px;color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;line-height:18px}
+      #${SETTING_ID} button{box-sizing:border-box;border:1px solid var(--dsw-alias-label-primary);border-radius:9px;min-height:34px;padding:6px 12px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px;white-space:nowrap;transition:transform 100ms ease-out,opacity 120ms ease}
+      #${SETTING_ID} button:active:not(:disabled){transform:scale(.97)}
       #${SETTING_ID} button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
-      #${SETTING_ID} button:disabled{cursor:default;opacity:.5}
-      #${SETTING_ID} .dsh-remote-primary{border-color:var(--dsw-alias-label-primary);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}
-      @media(max-width:620px){#${SETTING_ID}{align-items:flex-start;flex-direction:column}#${SETTING_ID} .dsh-remote-copy{padding-right:0}#${SETTING_ID} .dsh-remote-controls{width:100%;justify-content:flex-end}}
+      @media(max-width:620px){#${SETTING_ID}{align-items:flex-start;flex-direction:column}#${SETTING_ID} button{align-self:flex-end}}
+      @media(prefers-reduced-motion:reduce){#${SETTING_ID} button{transition:none}#${SETTING_ID} button:active:not(:disabled){transform:none}}
     `
     ;(document.head || document.documentElement).append(style)
-  }
-
-  function description(copy) {
-    if (status.lanError) return status.lanError
-    const active = []
-    if (status.enabled) active.push(copy.active.replace('{url}', status.url))
-    if (status.lanEnabled) active.push(copy.lanActive.replace('{url}', status.lanURL))
-    if (active.length) return active.join(' · ')
-    if (status.lanAvailable && (!status.installed || status.backendState !== 'Running')) {
-      return `${copy.description} ${copy.lanReady}`
-    }
-    if (status.error) return `${copy.description} ${status.error}`
-    if (!status.installed) return copy.unavailable
-    if (status.backendState !== 'Running') return copy.disconnected
-    if (!status.magicDNS) return copy.magicDNS
-    if (!status.httpsReady) return copy.https
-    return `${copy.description} ${copy.restart}`
-  }
-
-  function canEnable() {
-    return status.installed
-      && status.backendState === 'Running'
-      && status.magicDNS
-      && status.httpsReady
-      && !status.busy
   }
 
   function createButton(label, className, action, disabled = false) {
@@ -233,77 +401,102 @@
     button.hidden = hidden
   }
 
-  function renderControls(copy) {
-    if (!settingPrimaryButton || !settingPairButton || !settingLanButton || !settingLanPairButton) return
-    if (status.enabled) {
-      configureButton(settingPrimaryButton, copy.disable, '', status.busy)
-      configureButton(settingPairButton, copy.pair, 'dsh-remote-primary', status.busy)
-    } else {
-      configureButton(settingPairButton, copy.pair, 'dsh-remote-primary', true, true)
-      if (status.installed
-        && status.backendState === 'Running'
-        && status.magicDNS
-        && !status.httpsReady
-        && !status.busy) {
-        configureButton(settingPrimaryButton, copy.setupHTTPS, 'dsh-remote-primary', false)
-      } else {
-        const label = status.busy
-          ? status.phase === 'stopping' ? copy.disabling : copy.enabling
-          : copy.enable
-        configureButton(settingPrimaryButton, label, 'dsh-remote-primary', !canEnable())
-      }
-    }
+  function renderTransport(transport, view) {
+    const lan = transport === LAN_TRANSPORT
+    const route = lan ? lanRoute : tailscaleRoute
+    const description = lan ? lanDescription : tailscaleDescription
+    const actionButton = lan ? lanActionButton : tailscaleActionButton
+    const pairButton = lan ? lanPairButton : tailscalePairButton
+    if (!route || !description || !actionButton || !pairButton) return
+
+    description.textContent = view.description
+    route.toggleAttribute('data-busy', view.busy)
+    route.toggleAttribute('data-error', view.hasError)
+    route.setAttribute('aria-busy', String(view.busy))
     configureButton(
-      settingLanButton,
-      status.lanEnabled ? copy.lanDisable : copy.lanEnable,
-      '',
-      status.lanBusy || (!status.lanEnabled && !status.lanAvailable),
+      actionButton,
+      view.actionLabel,
+      view.enabled || !lan ? '' : 'dsh-remote-primary',
+      view.actionDisabled,
     )
-    configureButton(
-      settingLanPairButton,
-      copy.lanPair,
-      'dsh-remote-primary',
-      status.lanBusy,
-      !status.lanEnabled,
-    )
+    configureButton(pairButton, view.pairLabel, 'dsh-remote-primary', view.pairDisabled, !view.enabled)
   }
 
   function updateSetting() {
-    if (!settingRow || !settingTitle || !settingDescription) return
+    if (!settingRow || !settingTitle || !settingDescription || !settingConnectButton) return
     const copy = copyFor(currentLanguage())
+    const lanView = transportViewState(status, LAN_TRANSPORT, currentLanguage(), pendingLanAction)
+    const tailscaleView = transportViewState(
+      status,
+      TAILSCALE_TRANSPORT,
+      currentLanguage(),
+      pendingTailscaleAction,
+    )
     settingTitle.textContent = copy.title
-    settingDescription.textContent = description(copy)
-    settingRow.toggleAttribute('data-error', Boolean(status.lanError || (!status.lanEnabled && status.error)))
-    renderControls(copy)
+    if (lanView.busy) settingDescription.textContent = lanView.description
+    else if (tailscaleView.busy) settingDescription.textContent = tailscaleView.description
+    else if (status.lanEnabled && status.enabled) settingDescription.textContent = copy.bothSummaryActive
+    else if (status.lanEnabled) settingDescription.textContent = copy.lanSummaryActive
+    else if (status.enabled) settingDescription.textContent = copy.tailscaleSummaryActive
+    else settingDescription.textContent = copy.description
+    const hasActiveConnection = status.enabled
+      || status.lanEnabled
+      || status.busy
+      || status.lanBusy
+      || pendingLanAction
+      || pendingTailscaleAction
+    settingConnectButton.textContent = hasActiveConnection ? copy.manage : copy.connect
+    settingConnectButton.setAttribute('aria-label', settingConnectButton.textContent)
+    if (!lanRoute || !tailscaleRoute) return
+    lanRoute.querySelector('.dsh-remote-route-title').textContent = copy.lanTitle
+    lanRoute.querySelector('.dsh-remote-badge').textContent = copy.lanBadge
+    tailscaleRoute.querySelector('.dsh-remote-route-title').textContent = copy.tailscaleTitle
+    tailscaleRoute.querySelector('.dsh-remote-badge').textContent = copy.tailscaleBadge
+    renderTransport(LAN_TRANSPORT, lanView)
+    renderTransport(TAILSCALE_TRANSPORT, tailscaleView)
+  }
+
+  function createTransportRoute(transport) {
+    const route = document.createElement('section')
+    route.className = 'dsh-remote-route'
+    route.dataset.kind = transport
+    const heading = document.createElement('div')
+    heading.className = 'dsh-remote-route-heading'
+    const title = document.createElement('h3')
+    title.className = 'dsh-remote-route-title'
+    const badge = document.createElement('span')
+    badge.className = 'dsh-remote-badge'
+    heading.append(title, badge)
+    const description = document.createElement('p')
+    description.className = 'dsh-remote-route-description'
+    description.setAttribute('aria-live', 'polite')
+    const controls = document.createElement('div')
+    controls.className = 'dsh-remote-controls'
+    const actionButton = createButton('', 'dsh-remote-primary', () => {
+      const pendingAction = transport === LAN_TRANSPORT ? pendingLanAction : pendingTailscaleAction
+      const view = transportViewState(status, transport, currentLanguage(), pendingAction)
+      if (!view.actionDisabled) requestTransportAction(view.action, transport)
+    })
+    const pairButton = createButton('', 'dsh-remote-primary', () => openPairing(transport), true)
+    controls.append(actionButton, pairButton)
+    route.append(heading, description, controls)
+    return { actionButton, description, pairButton, route }
   }
 
   function createSettingRow() {
-    const row = document.createElement('div')
+    const row = document.createElement('section')
     row.id = SETTING_ID
-    const content = document.createElement('div')
-    content.className = 'dsh-remote-copy'
+    row.setAttribute('aria-labelledby', `${SETTING_ID}-title`)
+    const heading = document.createElement('header')
+    heading.className = 'dsh-remote-heading'
     settingTitle = document.createElement('div')
     settingTitle.className = 'dsh-remote-title'
+    settingTitle.id = `${SETTING_ID}-title`
     settingDescription = document.createElement('div')
-    settingDescription.className = 'dsh-remote-description'
-    content.append(settingTitle, settingDescription)
-    settingControls = document.createElement('div')
-    settingControls.className = 'dsh-remote-controls'
-    settingPrimaryButton = createButton('', 'dsh-remote-primary', () => {
-      if (status.enabled) request('remote-disable')
-      else if (status.installed
-        && status.backendState === 'Running'
-        && status.magicDNS
-        && !status.httpsReady) request('remote-open-https')
-      else request('remote-enable')
-    })
-    settingPairButton = createButton('', 'dsh-remote-primary', () => openPairing(), true)
-    settingLanButton = createButton('', '', () => {
-      request(status.lanEnabled ? 'remote-lan-disable' : 'remote-lan-enable')
-    })
-    settingLanPairButton = createButton('', 'dsh-remote-primary', () => openPairing('lan'), true)
-    settingControls.append(settingPrimaryButton, settingPairButton, settingLanButton, settingLanPairButton)
-    row.append(content, settingControls)
+    settingDescription.className = 'dsh-remote-intro'
+    heading.append(settingTitle, settingDescription)
+    settingConnectButton = createButton('', '', openConnectionManager)
+    row.append(heading, settingConnectButton)
     settingRow = row
     updateSetting()
     return row
@@ -327,22 +520,63 @@
     layerShadow = layer.attachShadow({ mode: 'closed' })
     layerShadow.innerHTML = `
       <style>
-        :host{all:initial}:host([hidden]){display:none}*{box-sizing:border-box}.backdrop{position:fixed;z-index:2147483002;inset:0;display:grid;place-items:center;padding:24px;background:rgba(9,16,29,.48);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.dialog{width:min(460px,100%);border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:18px;padding:22px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#111827);box-shadow:0 24px 80px rgba(0,0,0,.28)}h2,p{margin:0}h2{font-size:19px;line-height:26px}.body{margin-top:6px;color:var(--dsw-alias-label-tertiary,#64748b)}.qr{display:block;width:248px;height:248px;margin:20px auto 16px;border:10px solid #fff;border-radius:14px;background:#fff}.label{margin-top:6px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.url{margin-top:5px;border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}button{min-height:36px;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:9px;padding:7px 13px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px}.primary{border-color:var(--dsw-alias-label-primary,#172033);background:var(--dsw-alias-label-primary,#172033);color:var(--dsw-alias-bg-layer-3,#fff)}button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#2563eb);outline-offset:2px}
+        :host{all:initial}:host([hidden]){display:none}*{box-sizing:border-box}[hidden]{display:none!important}.backdrop{position:fixed;z-index:2147483002;inset:0;display:grid;place-items:center;overflow:auto;padding:24px;background:rgba(9,16,29,.48);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.dialog{width:min(560px,100%);max-height:calc(100vh - 48px);overflow:auto;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:18px;padding:22px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#111827);box-shadow:0 24px 80px rgba(0,0,0,.28)}h2,p{margin:0}h2{font-size:19px;line-height:26px}.body{margin-top:6px;color:var(--dsw-alias-label-tertiary,#64748b)}.chooser-routes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:18px}.dsh-remote-route{min-width:0;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:13px;padding:13px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);transition:border-color 160ms ease,background-color 160ms ease}.dsh-remote-route[data-kind="lan"]{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 32%,var(--dsw-alias-border-l2,#dbe1ea));background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 5%,var(--dsw-alias-bg-layer-1,#f1f5f9))}.dsh-remote-route[data-busy]{border-color:var(--dsw-alias-state-business-primary,#2563eb)}.dsh-remote-route[data-error]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 48%,var(--dsw-alias-border-l2,#dbe1ea))}.dsh-remote-route-heading{display:flex;align-items:center;gap:7px;min-height:20px}.dsh-remote-route-title{margin:0;color:var(--dsw-alias-label-primary,#111827);font-size:13px;font-weight:600;line-height:20px}.dsh-remote-badge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-tertiary,#64748b);font-size:10px;font-weight:600;line-height:17px}.dsh-remote-route[data-kind="lan"] .dsh-remote-badge{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 12%,transparent);color:var(--dsw-alias-state-business-primary,#2563eb)}.dsh-remote-route-description{min-height:54px;margin:5px 0 0;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px;overflow-wrap:anywhere}.dsh-remote-route[data-error] .dsh-remote-route-description{color:var(--dsw-alias-state-error-primary,#dc2626)}.dsh-remote-controls{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:12px}.qr{display:block;width:248px;height:248px;margin:20px auto 16px;border:10px solid #fff;border-radius:14px;background:#fff}.label{margin-top:6px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.url{margin-top:5px;border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.actions{display:flex;align-items:center;gap:8px;margin-top:18px}.spacer{flex:1}button{min-height:36px;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:9px;padding:7px 13px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px;transition:transform 100ms ease-out,background-color 120ms ease,color 120ms ease}button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#e9eef5)}button:active:not(:disabled){transform:scale(.97)}button:disabled{cursor:default;opacity:.5}.primary,.dsh-remote-primary{border-color:var(--dsw-alias-label-primary,#172033);background:var(--dsw-alias-label-primary,#172033);color:var(--dsw-alias-bg-layer-3,#fff)}button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#2563eb);outline-offset:2px}@media(max-width:620px){.chooser-routes{grid-template-columns:1fr}.dsh-remote-route-description{min-height:0}}@media(prefers-reduced-motion:reduce){.dsh-remote-route,button{transition:none}button:active:not(:disabled){transform:none}}
       </style>
-      <div class="backdrop" role="presentation"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-remote-dialog-title"><h2 id="dsh-remote-dialog-title"></h2><p class="body"></p><img class="qr" alt=""><p class="label"></p><div class="url"></div><div class="actions"><button class="copy"></button><button class="primary close"></button></div></section></div>
+      <div class="backdrop" role="presentation"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-remote-dialog-title" aria-describedby="dsh-remote-dialog-description"><h2 id="dsh-remote-dialog-title"></h2><p class="body" id="dsh-remote-dialog-description"></p><div class="chooser"><div class="chooser-routes"></div></div><div class="pairing" hidden><img class="qr" alt=""><p class="label"></p><div class="url"></div></div><div class="actions"><button class="back" hidden></button><span class="spacer"></span><button class="copy" hidden></button><button class="primary close"></button></div></section></div>
     `
+    const routes = layerShadow.querySelector('.chooser-routes')
+    const lan = createTransportRoute(LAN_TRANSPORT)
+    lanRoute = lan.route
+    lanDescription = lan.description
+    lanActionButton = lan.actionButton
+    lanPairButton = lan.pairButton
+    const tailscale = createTransportRoute(TAILSCALE_TRANSPORT)
+    tailscaleRoute = tailscale.route
+    tailscaleDescription = tailscale.description
+    tailscaleActionButton = tailscale.actionButton
+    tailscalePairButton = tailscale.pairButton
+    routes.append(lanRoute, tailscaleRoute)
     layerShadow.querySelector('.backdrop').addEventListener('click', event => {
       if (event.target === event.currentTarget) closePairing()
     })
     layerShadow.querySelector('.close').addEventListener('click', closePairing)
     layerShadow.querySelector('.copy').addEventListener('click', copyAddress)
+    layerShadow.querySelector('.back').addEventListener('click', openConnectionManager)
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        if (layer.hidden) return
+        closePairing()
+        return
+      }
+      if (event.key !== 'Tab' || layer.hidden) return
+      const controls = [...layerShadow.querySelectorAll('button')]
+        .filter(button => !button.disabled && !button.hidden && button.getClientRects().length > 0)
+      if (!controls.length) return
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      const active = layerShadow.activeElement
+      if (!controls.includes(active)) {
+        event.preventDefault()
+        const target = event.shiftKey ? last : first
+        target.focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }, true)
+    layer.hidden = true
     document.body.append(layer)
+    updateSetting()
   }
 
   async function copyAddress() {
     const button = layerShadow?.querySelector('.copy')
-    const pairingURL = pairingTransport === 'lan' ? status.lanPairingURL : status.pairingURL
-    const endpoint = pairingTransport === 'lan' ? status.lanURL : status.url
+    if (pairingTransport === LAN_TRANSPORT) return
+    const pairingURL = status.pairingURL
+    const endpoint = status.url
     if (!button || !endpoint) return
     try {
       await navigator.clipboard.writeText(pairingURL || endpoint)
@@ -356,40 +590,91 @@
     }
   }
 
-  function openPairing(transport = 'tailscale') {
-    const lan = transport === 'lan'
+  function openConnectionManager() {
+    const shouldRememberFocus = !layer || layer.hidden
+    ensureLayer()
+    if (shouldRememberFocus) pairingReturnFocus = document.activeElement
+    const copy = copyFor(currentLanguage())
+    layerShadow.querySelector('h2').textContent = copy.connect
+    layerShadow.querySelector('.body').textContent = copy.managerBody
+    layerShadow.querySelector('.chooser').hidden = false
+    layerShadow.querySelector('.pairing').hidden = true
+    layerShadow.querySelector('.back').hidden = true
+    layerShadow.querySelector('.copy').hidden = true
+    layerShadow.querySelector('.close').textContent = copy.managerClose
+    layer.hidden = false
+    updateSetting()
+    let preferredControl = layerShadow.querySelector('.close')
+    if (status.lanEnabled && !lanPairButton.disabled && !lanPairButton.hidden) {
+      preferredControl = lanPairButton
+    } else if (!lanActionButton.disabled) {
+      preferredControl = lanActionButton
+    } else if (status.enabled && !tailscalePairButton.disabled && !tailscalePairButton.hidden) {
+      preferredControl = tailscalePairButton
+    } else if (!tailscaleActionButton.disabled) {
+      preferredControl = tailscaleActionButton
+    }
+    preferredControl.focus()
+  }
+
+  function openPairing(transport = TAILSCALE_TRANSPORT) {
+    const lan = transport === LAN_TRANSPORT
     const enabled = lan ? status.lanEnabled : status.enabled
     const qrSvg = lan ? status.lanQrSvg : status.qrSvg
     const endpoint = lan ? status.lanURL : status.url
     if (!enabled || !qrSvg) return
+    const shouldRememberFocus = !layer || layer.hidden
     pairingTransport = transport
     ensureLayer()
     const copy = copyFor(currentLanguage())
-    layerShadow.querySelector('h2').textContent = copy.modalTitle
+    const title = lan ? copy.lanModalTitle : copy.modalTitle
+    if (shouldRememberFocus) pairingReturnFocus = document.activeElement
+    layerShadow.querySelector('h2').textContent = title
     layerShadow.querySelector('.body').textContent = lan ? copy.lanModalBody : copy.modalBody
+    layerShadow.querySelector('.chooser').hidden = true
+    layerShadow.querySelector('.pairing').hidden = false
     layerShadow.querySelector('.qr').src = qrSvg
-    layerShadow.querySelector('.qr').alt = copy.modalTitle
+    layerShadow.querySelector('.qr').alt = title
     layerShadow.querySelector('.label').textContent = copy.address
     layerShadow.querySelector('.url').textContent = endpoint
     layerShadow.querySelector('.copy').textContent = copy.copy
+    layerShadow.querySelector('.copy').hidden = lan
+    layerShadow.querySelector('.back').textContent = copy.back
+    layerShadow.querySelector('.back').hidden = false
     layerShadow.querySelector('.close').textContent = copy.close
     layer.hidden = false
     layerShadow.querySelector('.close').focus()
   }
 
   function closePairing() {
-    if (layer) layer.hidden = true
+    if (!layer || layer.hidden) return
+    layer.hidden = true
+    if (pairingReturnFocus?.isConnected) pairingReturnFocus.focus()
+    pairingReturnFocus = null
   }
 
   function publish(next) {
     const wasEnabled = status.enabled
     const wasLanEnabled = status.lanEnabled
-    status = normalizeStatus(next)
+    finishStatusRequest()
+    const nextStatus = normalizeStatus(next)
+    const nextLanPending = pendingActionAfterStatus(pendingLanAction, nextStatus, LAN_TRANSPORT)
+    const nextTailscalePending = pendingActionAfterStatus(
+      pendingTailscaleAction,
+      nextStatus,
+      TAILSCALE_TRANSPORT,
+    )
+    if (!nextLanPending) clearPendingAction(LAN_TRANSPORT)
+    else pendingLanAction = nextLanPending
+    if (!nextTailscalePending) clearPendingAction(TAILSCALE_TRANSPORT)
+    else pendingTailscaleAction = nextTailscalePending
+    status = nextStatus
     updateSetting()
     if (!wasEnabled && status.enabled) openPairing()
-    if (!wasLanEnabled && status.lanEnabled) openPairing('lan')
-    if (pairingTransport === 'tailscale' && !status.enabled) closePairing()
-    if (pairingTransport === 'lan' && !status.lanEnabled) closePairing()
+    if (!wasLanEnabled && status.lanEnabled) openPairing(LAN_TRANSPORT)
+    const pairingVisible = layer && !layer.hidden && !layerShadow.querySelector('.pairing').hidden
+    if (pairingVisible && pairingTransport === TAILSCALE_TRANSPORT && !status.enabled) openConnectionManager()
+    if (pairingVisible && pairingTransport === LAN_TRANSPORT && !status.lanEnabled) openConnectionManager()
   }
 
   function scheduleMount() {
@@ -400,30 +685,62 @@
     })
   }
 
-  function refreshStatus() {
-    if (document.visibilityState === 'visible' && !status.busy) request('remote-status')
+  function handleMutations(mutations) {
+    if (mutations.some(mutation => mutation.type === 'attributes' && mutation.attributeName === 'lang')) {
+      updateSetting()
+    }
+    const slot = document.querySelector(SETTINGS_SLOT_SELECTOR)
+    if (slot && (!settingRow?.isConnected || settingRow.parentElement !== slot)) scheduleMount()
+  }
+
+  function finishStatusRequest() {
+    statusRequestInFlight = false
+    if (statusRequestTimer) window.clearTimeout(statusRequestTimer)
+    statusRequestTimer = 0
+  }
+
+  function refreshStatus(force = false) {
+    const hasPendingAction = Boolean(pendingLanAction || pendingTailscaleAction)
+    if (!shouldPollStatus(
+      status,
+      settingRow?.isConnected,
+      document.visibilityState === 'visible',
+      statusRequestInFlight || hasPendingAction,
+    )) return
+    statusRequestInFlight = true
+    statusRequestTimer = window.setTimeout(finishStatusRequest, STATUS_REQUEST_TIMEOUT_MS)
+    try {
+      request('remote-status', force ? { force: '1' } : undefined)
+    } catch (error) {
+      finishStatusRequest()
+      throw error
+    }
   }
 
   function pollStatus() {
-    if (shouldPollStatus(status, settingRow?.isConnected)) refreshStatus()
+    refreshStatus()
   }
 
   function start() {
     installStyle()
-    observer = new MutationObserver(scheduleMount)
+    observer = new MutationObserver(handleMutations)
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['lang'] })
-    window.addEventListener('focus', refreshStatus)
-    document.addEventListener('visibilitychange', refreshStatus)
+    window.addEventListener('focus', () => refreshStatus(true))
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshStatus(true)
+    })
     window.setInterval(pollStatus, STATUS_POLL_INTERVAL_MS)
     mountSetting()
-    window.setTimeout(refreshStatus, 0)
+    window.setTimeout(() => refreshStatus(true), 0)
   }
 
   window.addEventListener('dsh-desktop-event', event => {
     const detail = event.detail || {}
     if (detail.type === 'remote-status') publish(detail.payload)
     if (detail.type === 'remote-error') {
-      publish({ ...status, busy: false, phase: 'error', error: detail.payload?.message || 'Remote failed.' })
+      const message = detail.payload?.message || 'Remote failed.'
+      clearPendingAction(lastActionTransport)
+      publish(statusAfterError(status, lastActionTransport, message))
     }
   })
 

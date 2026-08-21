@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var hostStore: RemoteHostStore
     @State private var showsAddHost = false
+    @State private var addHostStartsWithScanner = false
 
     var body: some View {
         #if DEBUG
@@ -18,19 +19,25 @@ struct RootView: View {
 
     private var appRoot: some View {
         NavigationStack {
-            HostListView(showsAddHost: $showsAddHost)
+            HostListView(
+                showsAddHost: $showsAddHost,
+                addHostStartsWithScanner: $addHostStartsWithScanner
+            )
                 .navigationDestination(for: RemoteHost.self) { host in
-                    RemoteSessionView(host: host)
+                    let currentHost = hostStore.hosts.first(where: { $0.id == host.id }) ?? host
+                    RemoteSessionView(host: currentHost)
+                        .id(currentHost)
                 }
         }
         .tint(RemoteTheme.accent)
         .sheet(isPresented: $showsAddHost) {
-            AddHostView()
+            AddHostView(autoStartsScanner: addHostStartsWithScanner)
                 .environmentObject(hostStore)
                 .presentationBackground(RemoteTheme.canvas)
         }
         .onChange(of: hostStore.pendingImportedConnection) { _, importedConnection in
             if importedConnection != nil {
+                addHostStartsWithScanner = false
                 showsAddHost = true
             }
         }

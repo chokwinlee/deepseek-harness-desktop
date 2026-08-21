@@ -12,7 +12,7 @@ No login or review credentials are required.
 
 1. Launch the app.
 2. On the no-computer screen, tap **先体验一下** below the connect button.
-3. Open **Login flow release check**.
+3. Open **登录流程上线检查** (`Login flow release check`).
 4. Inspect the native conversation and tool-summary cards.
 5. Answer the visible confirmation question.
 6. Send a prompt; the demo simulates running and completion without network access or an LLM.
@@ -22,7 +22,7 @@ The offline experience is presented as an explicit secondary action when no comp
 
 ## Live connection
 
-Live mode connects directly to the user's Harness computer through Tailscale Serve, an authenticated same-Wi-Fi endpoint, or another HTTPS endpoint the user controls. The same-Wi-Fi endpoint is opt-in, restricted to the Remote API allowlist, and protected by a random 256-bit bearer credential carried in the pairing QR code. It uses local HTTP and is labeled for trusted private Wi-Fi only. Tailscale is recommended for cross-network or untrusted-network use but is not required by the app. The maintainer operates no relay. No Tailscale account is created or purchased in the app.
+Live mode connects directly to the user's Harness computer through Tailscale Serve, an authenticated same-Wi-Fi endpoint, or another HTTPS endpoint the user controls. The same-Wi-Fi endpoint is the recommended first pairing path, is opt-in, is restricted to the Remote API allowlist, and is protected by a high-entropy random bearer credential carried in the pairing QR code. It uses local HTTP and is labeled for trusted private Wi-Fi only. Tailscale is presented only as an optional cross-network or untrusted-network path and is not required by the app. The maintainer operates no relay. No Tailscale account is created or purchased in the app.
 
 ## Data and privacy
 

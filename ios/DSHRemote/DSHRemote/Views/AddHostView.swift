@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VisionKit
 
 struct AddHostView: View {
@@ -9,43 +10,69 @@ struct AddHostView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var hostStore: RemoteHostStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    let autoStartsScanner: Bool
 
     @State private var name = ""
     @State private var address = ""
     @State private var showsScanner = false
+    @State private var showsCrossNetworkEntry = false
+    @State private var hasImportedConnection = false
     @State private var isChecking = false
     @State private var errorMessage: String?
     @State private var verificationTask: Task<Void, Never>?
+    @State private var verificationGeneration = 0
+    @State private var didAutoStartScanner = false
+    @State private var scannerAvailabilityRevision = 0
     @FocusState private var focusedField: Field?
+
+    init(autoStartsScanner: Bool = false) {
+        self.autoStartsScanner = autoStartsScanner
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 RemoteSheetHeader(
-                    title: "连接电脑",
-                    subtitle: "扫码最快，也可以输入安全的 HTTPS 地址",
+                    title: "添加电脑",
+                    subtitle: connectionSubtitle,
                     closeLabel: "取消",
                     onClose: cancelAndDismiss
                 )
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: RemoteTheme.sectionSpacing) {
-                        connectionGuide
+                        localPairingSection
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            RemoteSectionHeader(title: "电脑信息")
-                            nameField
-                            addressField
+                        if hasImportedConnection {
+                            importedConnectionSection
+                        } else {
+                            crossNetworkSection
                         }
 
                         if let errorMessage {
-                            RemoteInlineNotice(
-                                title: "连接失败",
-                                message: errorMessage,
-                                icon: "exclamationmark.triangle.fill",
-                                tone: .danger
-                            )
-                            .accessibilityAddTraits(.isStaticText)
+                            VStack(alignment: .leading, spacing: 10) {
+                                RemoteInlineNotice(
+                                    title: "连接失败",
+                                    message: errorMessage,
+                                    icon: "exclamationmark.triangle.fill",
+                                    tone: .danger
+                                )
+                                .accessibilityAddTraits(.isStaticText)
+
+                                if importedIsSameWiFi {
+                                    Button(action: openAppSettings) {
+                                        Label("检查 iPhone 网络权限", systemImage: "gear")
+                                    }
+                                    .buttonStyle(RemoteActionButtonStyle(
+                                        kind: .secondary,
+                                        fillsWidth: false,
+                                        compact: true
+                                    ))
+                                }
+                            }
                         }
 
                         securityNote
@@ -56,7 +83,9 @@ struct AddHostView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    connectDock
+                    if hasConnectionInput {
+                        connectDock
+                    }
                 }
             }
             .background(RemoteTheme.canvas.ignoresSafeArea())
@@ -67,17 +96,27 @@ struct AddHostView: View {
                     UISelectionFeedbackGenerator().selectionChanged()
                     showsScanner = false
                     address = value
+                    hasImportedConnection = true
+                    showsCrossNetworkEntry = false
                     errorMessage = nil
-                    focusedField = .name
+                    focusedField = nil
+                    connect(addressOverride: value)
                 }
                 .presentationBackground(.black)
             }
             .onAppear {
                 if let connection = hostStore.consumePendingImportedConnection() {
-                    address = connection.importedURL.absoluteString
+                    let importedAddress = connection.importedURL.absoluteString
+                    address = importedAddress
+                    hasImportedConnection = true
+                    connect(addressOverride: importedAddress)
+                } else if autoStartsScanner, scannerIsAvailable, !didAutoStartScanner {
+                    didAutoStartScanner = true
+                    showsScanner = true
                 }
             }
             .onDisappear {
+                verificationGeneration += 1
                 verificationTask?.cancel()
                 verificationTask = nil
             }
@@ -88,33 +127,223 @@ struct AddHostView: View {
                     argument: "连接失败，\(message)"
                 )
             }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                scannerAvailabilityRevision += 1
+                if autoStartsScanner,
+                   scannerIsAvailable,
+                   !didAutoStartScanner,
+                   !hasImportedConnection,
+                   !showsScanner {
+                    didAutoStartScanner = true
+                    showsScanner = true
+                }
+            }
         }
     }
 
-    @ViewBuilder
-    private var connectionGuide: some View {
-        if scannerIsAvailable {
+    private var localPairingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RemoteSectionHeader(title: "同一 Wi-Fi", detail: "推荐")
+
+            if scannerIsAvailable {
+                Button {
+                    focusedField = nil
+                    showsScanner = true
+                } label: {
+                    connectionGuideContent(
+                        title: hasImportedConnection ? "重新扫描二维码" : "扫描 Desktop 二维码",
+                        detail: "在 Mac 打开手机 Remote，点“连接 iPhone”，再选择“开始本地配对”。",
+                        showsDisclosure: true
+                    )
+                }
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 16))
+                .remoteSurface(cornerRadius: 16, elevated: !hasImportedConnection)
+                .accessibilityHint("打开相机扫描，iPhone 不需要安装 Tailscale")
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    connectionGuideContent(
+                        title: "这台设备无法使用相机扫码",
+                        detail: "同一 Wi-Fi 配对必须扫描 Desktop 二维码。你仍可以在下方配置跨网络 HTTPS。",
+                        showsDisclosure: false
+                    )
+                    .remoteSurface(cornerRadius: 16)
+
+                    if DataScannerViewController.isSupported {
+                        HStack(spacing: 8) {
+                            Button(action: retryScannerAvailability) {
+                                Label("重新检查", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(RemoteActionButtonStyle(
+                                kind: .secondary,
+                                fillsWidth: false,
+                                compact: true
+                            ))
+
+                            Button(action: openAppSettings) {
+                                Label("检查相机权限", systemImage: "gear")
+                            }
+                            .buttonStyle(RemoteActionButtonStyle(
+                                kind: .secondary,
+                                fillsWidth: false,
+                                compact: true
+                            ))
+                        }
+                    }
+                }
+            }
+
+            if !hasImportedConnection || importedIsSameWiFi {
+                Label("iPhone 无需安装或登录 Tailscale", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(RemoteTheme.success)
+                    .padding(.horizontal, 2)
+                    .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private var importedConnectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RemoteSectionHeader(title: "配对结果")
+
+            RemoteInlineNotice(
+                title: isChecking ? "正在验证电脑" : "二维码已读取",
+                message: isChecking
+                    ? "正在确认这是可用的 DSH Desktop，并保存此连接。"
+                    : "自动验证没有完成。你可以重新扫描，或在修复网络后重新验证。",
+                icon: isChecking ? "arrow.trianglehead.2.clockwise.rotate.90" : "qrcode.viewfinder",
+                tone: isChecking ? .info : .warning
+            )
+            .accessibilityAddTraits(.isStaticText)
+
+            importedEndpointSummary
+        }
+    }
+
+    private var importedEndpointSummary: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: importedIsSameWiFi ? "wifi" : "network")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 38, height: 38)
+                .background(
+                    RemoteTheme.accent.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 11)
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(importedHost?.transportLabel ?? "Remote 连接")
+                    .font(.subheadline.weight(.semibold))
+                Text(importedHost?.address ?? "等待验证")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+            if isChecking {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(RemoteTheme.warning)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(13)
+        .remoteSurface(cornerRadius: 14)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("已读取 \(importedHost?.transportLabel ?? "Remote") 连接")
+        .accessibilityValue(importedHost?.address ?? "等待验证")
+    }
+
+    private var crossNetworkSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RemoteSectionHeader(title: "不在同一 Wi-Fi？", detail: "可选")
+
             Button {
                 focusedField = nil
-                showsScanner = true
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    showsCrossNetworkEntry.toggle()
+                }
             } label: {
-                connectionGuideContent(
-                    title: "推荐扫描 Desktop 二维码",
-                    detail: "自动带入 Tailscale 地址，或同一 Wi-Fi 所需的配对凭据。",
-                    showsDisclosure: true
-                )
+                crossNetworkGuideContent
             }
             .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
             .remoteSurface(cornerRadius: 14)
-            .accessibilityHint("打开相机扫描")
-        } else {
-            connectionGuideContent(
-                title: "从 Desktop 复制 Remote 地址",
-                detail: "这台设备暂时不能扫码，你仍可以在下方粘贴 HTTPS 地址。",
-                showsDisclosure: false
-            )
-            .remoteSurface(cornerRadius: 14)
+            .accessibilityLabel(showsCrossNetworkEntry ? "收起跨网络连接" : "配置跨网络连接")
+            .accessibilityHint("使用 Tailscale 或你自己管理的 HTTPS 地址")
+
+            if showsCrossNetworkEntry {
+                VStack(alignment: .leading, spacing: 10) {
+                    RemoteInlineNotice(
+                        title: "跨网络方式",
+                        message: "先在 Mac 配置 Tailscale Serve，或使用你自己管理的 HTTPS。Tailscale 不是同一 Wi-Fi 配对的前置条件。",
+                        icon: "point.3.connected.trianglepath.dotted",
+                        tone: .info
+                    )
+                    nameField
+                    addressField
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+    }
+
+    private var crossNetworkGuideContent: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        crossNetworkIcon
+                        Spacer(minLength: 8)
+                        crossNetworkDisclosure
+                    }
+                    crossNetworkCopy
+                }
+            } else {
+                HStack(alignment: .center, spacing: 13) {
+                    crossNetworkIcon
+                    crossNetworkCopy
+                    Spacer(minLength: 4)
+                    crossNetworkDisclosure
+                }
+            }
+        }
+        .padding(14)
+        .frame(minHeight: 68)
+        .contentShape(Rectangle())
+    }
+
+    private var crossNetworkIcon: some View {
+        Image(systemName: "network")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 40, height: 40)
+            .background(RemoteTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 11))
+            .accessibilityHidden(true)
+    }
+
+    private var crossNetworkCopy: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Tailscale 或自有 HTTPS")
+                .font(.subheadline.weight(.semibold))
+            Text("离开家庭或办公室网络时使用")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var crossNetworkDisclosure: some View {
+        Image(systemName: "chevron.down")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.tertiary)
+            .rotationEffect(.degrees(showsCrossNetworkEntry ? 180 : 0))
+            .accessibilityHidden(true)
     }
 
     private func connectionGuideContent(
@@ -195,46 +424,26 @@ struct AddHostView: View {
 
     private var addressField: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("Remote 地址")
+            Text("HTTPS 地址")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 4) {
-                TextField("https://电脑地址", text: $address)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .textContentType(.URL)
-                    .submitLabel(.go)
-                    .focused($focusedField, equals: .address)
-                    .onSubmit {
-                        if canConnect { connect() }
-                    }
-
-                if scannerIsAvailable {
-                    Rectangle()
-                        .fill(RemoteTheme.hairline)
-                        .frame(width: 0.5, height: 24)
-
-                    Button {
-                        focusedField = nil
-                        showsScanner = true
-                    } label: {
-                        Image(systemName: "qrcode.viewfinder")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(RemoteTheme.accent)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
-                    .accessibilityLabel("扫描二维码")
+            TextField("https://电脑地址", text: $address)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .textContentType(.URL)
+                .submitLabel(.go)
+                .focused($focusedField, equals: .address)
+                .onSubmit {
+                    if canConnect { connect() }
                 }
-            }
-            .remoteFieldSurface(
-                focused: focusedField == .address,
-                invalid: errorMessage != nil
-            )
+                .remoteFieldSurface(
+                    focused: focusedField == .address,
+                    invalid: errorMessage != nil
+                )
 
-            Text("手动输入仅接受 HTTPS；局域网连接必须扫码完成配对。")
+            Text("只接受 HTTPS。Tailscale Serve 地址通常以 .ts.net 结尾；同一 Wi-Fi 的 HTTP 地址不能手动输入。")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 2)
@@ -247,7 +456,9 @@ struct AddHostView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(RemoteTheme.success)
                 .frame(width: 22)
-            Text("连接信息只保存在这台 iPhone；首次连接后可允许任务完成和等待确认提醒。")
+            Text(hasImportedConnection && importedIsSameWiFi
+                 ? "局域网配对凭据只保存在这台 iPhone。仅在你信任的家庭或办公 Wi-Fi 使用；公共网络请改用 Tailscale HTTPS。"
+                 : "连接信息只保存在这台 iPhone；App 不保存 DeepSeek API Key、项目文件或 Tailscale 登录凭据。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
@@ -270,7 +481,7 @@ struct AddHostView: View {
                     } else {
                         Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
                     }
-                    Text(isChecking ? "正在验证电脑…" : "连接并保存")
+                    Text(isChecking ? "正在验证电脑…" : (hasImportedConnection ? "重新验证" : "验证并保存"))
                 }
             }
             .buttonStyle(RemoteActionButtonStyle(kind: .primary))
@@ -283,20 +494,61 @@ struct AddHostView: View {
     }
 
     private var scannerIsAvailable: Bool {
-        DataScannerViewController.isSupported && DataScannerViewController.isAvailable
+        _ = scannerAvailabilityRevision
+        return DataScannerViewController.isSupported && DataScannerViewController.isAvailable
+    }
+
+    private func retryScannerAvailability() {
+        scannerAvailabilityRevision += 1
+        if scannerIsAvailable {
+            showsScanner = true
+        }
+    }
+
+    private var connectionSubtitle: String {
+        if (isChecking || errorMessage != nil), importedHost != nil {
+            let transport = importedIsSameWiFi ? "同一 Wi-Fi 配对" : "跨网络连接"
+            return isChecking ? "正在验证\(transport)" : "\(transport)尚未完成"
+        }
+        guard hasImportedConnection else { return "同一 Wi-Fi 扫码，无需 Tailscale" }
+        return importedIsSameWiFi ? "同一 Wi-Fi 配对尚未完成" : "跨网络连接尚未完成"
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private var hasConnectionInput: Bool {
+        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var canConnect: Bool {
-        !isChecking && !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isChecking && hasConnectionInput
     }
 
-    private func connect() {
+    private var importedHost: RemoteHost? {
+        guard let connection = try? RemoteEndpointValidator.connection(from: address) else { return nil }
+        return RemoteHost(
+            name: name,
+            baseURL: connection.baseURL,
+            accessToken: connection.accessToken
+        )
+    }
+
+    private var importedIsSameWiFi: Bool {
+        guard let importedHost else { return false }
+        if case .sameWiFi = importedHost.transport { return true }
+        return false
+    }
+
+    private func connect(addressOverride: String? = nil) {
         errorMessage = nil
         focusedField = nil
 
         let connection: RemoteConnectionDescriptor
         do {
-            connection = try RemoteEndpointValidator.connection(from: address)
+            connection = try RemoteEndpointValidator.connection(from: addressOverride ?? address)
         } catch {
             errorMessage = error.localizedDescription
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -305,10 +557,13 @@ struct AddHostView: View {
 
         isChecking = true
         verificationTask?.cancel()
+        verificationGeneration += 1
+        let generation = verificationGeneration
         verificationTask = Task { @MainActor in
             do {
                 try await RemoteConnectionVerifier.verify(connection)
                 try Task.checkCancellation()
+                guard generation == verificationGeneration else { return }
                 hostStore.add(name: name, connection: connection)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 isChecking = false
@@ -318,15 +573,17 @@ struct AddHostView: View {
                     await RemoteNotificationManager.shared.requestAuthorizationIfNeeded()
                 }
             } catch is CancellationError {
+                guard generation == verificationGeneration else { return }
                 isChecking = false
                 verificationTask = nil
             } catch {
-                guard !Task.isCancelled else {
+                guard generation == verificationGeneration, !Task.isCancelled else {
+                    if generation != verificationGeneration { return }
                     isChecking = false
                     verificationTask = nil
                     return
                 }
-                errorMessage = connectionMessage(for: error)
+                errorMessage = connectionMessage(for: error, connection: connection)
                 isChecking = false
                 verificationTask = nil
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -335,19 +592,33 @@ struct AddHostView: View {
     }
 
     private func cancelAndDismiss() {
+        verificationGeneration += 1
         verificationTask?.cancel()
         verificationTask = nil
         isChecking = false
         dismiss()
     }
 
-    private func connectionMessage(for error: Error) -> String {
+    private func connectionMessage(
+        for error: Error,
+        connection: RemoteConnectionDescriptor
+    ) -> String {
+        let localConnection = isSameWiFiConnection(connection)
+
         if let urlError = error as? URLError {
             switch urlError.code {
             case .cannotFindHost, .dnsLookupFailed:
-                return "找不到电脑。使用 Tailscale 时，请确认手机已连接 Tailnet 且 MagicDNS 可用。"
+                return localConnection
+                    ? "找不到电脑。请确认 iPhone 和 Mac 仍在同一 Wi-Fi，并在 Desktop 重新显示局域网二维码。"
+                    : "找不到电脑。请确认手机已连接 Tailnet，或检查 HTTPS 域名。"
             case .cannotConnectToHost, .timedOut, .networkConnectionLost:
-                return "无法连接电脑。请确认 Desktop 正在运行且 Remote 已开启。"
+                return localConnection
+                    ? "无法连接电脑。请确认 Desktop 正在运行、“同一 Wi-Fi”入口仍已开启；网络变化后请重新扫码。"
+                    : "无法连接电脑。请确认 Desktop 正在运行，且 Tailscale Serve 或 HTTPS 入口已开启。"
+            case .notConnectedToInternet:
+                return localConnection
+                    ? "无法访问本地网络。请确认 Wi-Fi 已连接，并在 iPhone 设置中允许 DSH Remote 访问本地网络。"
+                    : "当前没有可用网络，请联网后重试。"
             case .secureConnectionFailed, .serverCertificateUntrusted:
                 return "HTTPS 证书无效。请检查 Tailscale Serve 或你自己的 HTTPS 配置。"
             default:
@@ -356,12 +627,24 @@ struct AddHostView: View {
         }
         return error.localizedDescription
     }
+
+    private func isSameWiFiConnection(_ connection: RemoteConnectionDescriptor) -> Bool {
+        let host = RemoteHost(
+            name: "",
+            baseURL: connection.baseURL,
+            accessToken: connection.accessToken
+        )
+        if case .sameWiFi = host.transport { return true }
+        return false
+    }
 }
 
 private struct RemoteScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var errorMessage: String?
+    @State private var cameraErrorMessage: String?
+    @State private var validationMessage: String?
+    @State private var scannerAttempt = 0
 
     let onResult: (String) -> Void
 
@@ -369,22 +652,34 @@ private struct RemoteScannerSheet: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let scannerFailure = errorMessage {
-                RemoteEmptyState(
-                    icon: "camera.fill",
-                    title: "无法启动相机",
-                    message: "相机暂时不可用。可以重新尝试，或关闭扫码后手动输入 Remote 地址。",
-                    action: { errorMessage = nil }
-                ) {
-                    Label("重新尝试", systemImage: "arrow.clockwise")
+            if let scannerFailure = cameraErrorMessage {
+                VStack(spacing: 12) {
+                    RemoteEmptyState(
+                        icon: "camera.fill",
+                        title: "无法启动相机",
+                        message: "相机暂时不可用。可以重新尝试；如果已拒绝相机权限，请前往系统设置重新允许。",
+                        action: { cameraErrorMessage = nil }
+                    ) {
+                        Label("重新尝试", systemImage: "arrow.clockwise")
+                    }
+
+                    Button(action: openAppSettings) {
+                        Label("打开系统设置", systemImage: "gear")
+                    }
+                    .buttonStyle(RemoteActionButtonStyle(
+                        kind: .secondary,
+                        fillsWidth: false,
+                        compact: true
+                    ))
                 }
                 .foregroundStyle(.white)
                 .accessibilityHint(scannerFailure)
             } else {
                 QRCodeScannerView(
-                    onResult: onResult,
-                    onError: { errorMessage = $0 }
+                    onResult: validateScanResult,
+                    onError: { cameraErrorMessage = $0 }
                 )
+                .id(scannerAttempt)
                 .ignoresSafeArea()
 
                 scanReticle
@@ -431,14 +726,65 @@ private struct RemoteScannerSheet: View {
                 .stroke(RemoteTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .frame(width: 246, height: 246)
                 .shadow(color: RemoteTheme.accent.opacity(0.45), radius: 12)
-            Text("二维码会自动验证后保存")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 44)
-                .background(.black.opacity(0.5), in: Capsule())
+                .allowsHitTesting(false)
+
+            if let validationMessage {
+                VStack(spacing: 8) {
+                    Text(validationMessage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        self.validationMessage = nil
+                        scannerAttempt += 1
+                    } label: {
+                        Label("继续扫描", systemImage: "qrcode.viewfinder")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
+                    .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHint("重新启动二维码识别")
+                }
+                .padding(14)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 24)
+            } else {
+                Text("扫码后自动验证并保存")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .allowsHitTesting(false)
+            }
             Spacer()
         }
-        .allowsHitTesting(false)
+    }
+
+    private func validateScanResult(_ value: String) {
+        DispatchQueue.main.async {
+            do {
+                _ = try RemoteEndpointValidator.connection(from: value)
+                validationMessage = nil
+                onResult(value)
+            } catch {
+                validationMessage = "这不是 DSH Desktop 配对码，请扫描 Desktop 显示的二维码。"
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: validationMessage
+                )
+            }
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }

@@ -13,6 +13,7 @@ pub const REMOTE_PORT: u16 = 8443;
 pub const LAN_REMOTE_PORT: u16 = 8765;
 const SERVE_START_TIMEOUT: Duration = Duration::from_secs(12);
 const SERVE_STOP_TIMEOUT: Duration = Duration::from_secs(4);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TailscaleInfo {
@@ -60,22 +61,77 @@ pub fn resolve_tailscale() -> Option<PathBuf> {
 }
 
 fn run_json(executable: &PathBuf, arguments: &[&str]) -> Result<serde_json::Value, String> {
-    let output = Command::new(executable)
+    run_json_with_timeout(executable, arguments, COMMAND_TIMEOUT)
+}
+
+fn run_json_with_timeout(
+    executable: &PathBuf,
+    arguments: &[&str],
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let mut command = Command::new(executable);
+    command
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("无法启动 Tailscale：{error}"))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_reader = thread::spawn(move || {
+        let mut value = Vec::new();
+        if let Some(mut stream) = stdout {
+            let _ = stream.read_to_end(&mut value);
+        }
+        value
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut value = Vec::new();
+        if let Some(mut stream) = stderr {
+            let _ = stream.read_to_end(&mut value);
+        }
+        value
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                #[cfg(unix)]
+                signal_process_group(&child, libc::SIGKILL);
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err("Tailscale 状态检查超时，请确认客户端仍在运行。".into());
+            }
+            Err(error) => {
+                #[cfg(unix)]
+                signal_process_group(&child, libc::SIGKILL);
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!("无法检查 Tailscale 状态：{error}"));
+            }
+        }
+    };
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if !status.success() {
+        let detail = String::from_utf8_lossy(&stderr).trim().to_string();
         return Err(if detail.is_empty() {
-            format!("Tailscale 命令失败（{}）。", output.status)
+            format!("Tailscale 命令失败（{status}）。")
         } else {
             format!("Tailscale 命令失败：{detail}")
         });
     }
-    serde_json::from_slice(&output.stdout)
+    serde_json::from_slice(&stdout)
         .map_err(|error| format!("Tailscale 返回了无法识别的状态：{error}"))
 }
 
@@ -136,8 +192,8 @@ pub fn parse_tailscale_status(value: &serde_json::Value) -> Result<TailscaleInfo
 }
 
 pub fn inspect_tailscale() -> Result<TailscaleInfo, String> {
-    let executable = resolve_tailscale()
-        .ok_or("未找到 Tailscale。请先安装并登录，再重新打开 DSH Desktop。")?;
+    let executable =
+        resolve_tailscale().ok_or("未找到 Tailscale。请先安装并登录，再重新打开 DSH Desktop。")?;
     let value = run_json(&executable, &["status", "--json"])?;
     let mut info = parse_tailscale_status(&value)?;
     info.executable = executable;
@@ -412,6 +468,31 @@ pub fn wait_until_port_clear(info: &TailscaleInfo) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn bounds_tailscale_command_runtime() {
+        let started = Instant::now();
+        let result = run_json_with_timeout(
+            &PathBuf::from("/bin/sh"),
+            &["-c", "sleep 1; printf '{}'"],
+            Duration::from_millis(50),
+        );
+        assert!(result.unwrap_err().contains("超时"));
+        assert!(started.elapsed() < Duration::from_millis(750));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_json_from_bounded_command() {
+        let value = run_json_with_timeout(
+            &PathBuf::from("/bin/sh"),
+            &["-c", "printf '{\"ok\":true}'"],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(value["ok"], true);
+    }
 
     fn info() -> TailscaleInfo {
         TailscaleInfo {

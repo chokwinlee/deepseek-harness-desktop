@@ -40,6 +40,7 @@ const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-works
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
 const PRODUCT_NAME: &str = "DSH Desktop";
 const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
+const REMOTE_STATUS_CACHE_TTL: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Copy)]
 struct ProductSubagent {
@@ -87,7 +88,7 @@ const SMOOTH_STREAM_SCRIPT: &str = include_str!("../../src/smooth-stream.js");
 /// Desktop-only text-selection boundary for app chrome and copyable content.
 const SELECTION_GUARD_SCRIPT: &str = include_str!("../../src/selection-guard.js");
 
-/// Tailnet-only mobile Remote controls and pairing UI.
+/// Private-network mobile Remote controls and pairing UI.
 const REMOTE_BRIDGE_SCRIPT: &str = include_str!("../../src/remote.js");
 
 /// Current shell version, kept in sync with package.json / tauri.conf.json.
@@ -103,6 +104,7 @@ static OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
 static LAN_REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
 static PROFILE_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static REMOTE_STATUS_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ALLOWED_HARNESS_ORIGIN: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 static CURRENT_HARNESS_URL: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 static LOADED_PLUGIN_STATE: LazyLock<Mutex<Option<serde_json::Value>>> =
@@ -119,6 +121,8 @@ static REMOTE_TRUSTED_HOST: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| M
 static LAN_REMOTE_TOKEN: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 static REMOTE_STATE: LazyLock<Mutex<RemoteRuntimeState>> =
     LazyLock::new(|| Mutex::new(RemoteRuntimeState::default()));
+static TAILSCALE_STATUS_CACHE: LazyLock<Mutex<TailscaleStatusCache>> =
+    LazyLock::new(|| Mutex::new(TailscaleStatusCache::default()));
 
 type StartupTail = Arc<Mutex<VecDeque<String>>>;
 
@@ -167,6 +171,17 @@ struct RemoteRuntimeState {
     lan_pairing_url: String,
     lan_qr_svg: String,
     lan_error: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TailscaleStatusCache {
+    installed: bool,
+    backend_state: String,
+    dns_name: String,
+    magic_dns: bool,
+    https_ready: bool,
+    error: String,
+    refreshed_at: Option<Instant>,
 }
 
 impl RemoteRuntimeState {
@@ -1813,43 +1828,67 @@ fn emit_bridge_event(handle: &tauri::AppHandle, event: &str, payload: serde_json
     }
 }
 
-fn remote_status_value() -> serde_json::Value {
+fn inspect_tailscale_and_cache() -> Result<remote::TailscaleInfo, String> {
     let installed = remote::resolve_tailscale().is_some();
     let inspected = remote::inspect_tailscale();
+    if let Ok(mut cache) = TAILSCALE_STATUS_CACHE.lock() {
+        cache.installed = installed;
+        cache.refreshed_at = Some(Instant::now());
+        match inspected.as_ref() {
+            Ok(info) => {
+                cache.backend_state = info.backend_state.clone();
+                cache.dns_name = info.dns_name.clone();
+                cache.magic_dns = info.magic_dns;
+                cache.https_ready = info.https_ready;
+                cache.error.clear();
+            }
+            Err(error) => {
+                cache.backend_state.clear();
+                cache.dns_name.clear();
+                cache.magic_dns = false;
+                cache.https_ready = false;
+                cache.error = error.clone();
+            }
+        }
+    }
+    inspected
+}
+
+fn remote_status_value() -> serde_json::Value {
+    let cached = TAILSCALE_STATUS_CACHE
+        .lock()
+        .map(|cache| cache.clone())
+        .unwrap_or_default();
+    let installed = if cached.refreshed_at.is_some() {
+        cached.installed
+    } else {
+        remote::resolve_tailscale().is_some()
+    };
+    let tailscale_ready =
+        cached.error.is_empty() && cached.backend_state == "Running" && cached.magic_dns;
     let state = REMOTE_STATE
         .lock()
         .map(|mut state| {
-            state.clear_recovered_transport_error(inspected.is_ok());
+            state.clear_recovered_transport_error(tailscale_ready);
             state.clone()
         })
         .unwrap_or_default();
-    let (backend_state, magic_dns, https_ready, detected_dns, inspection_error) =
-        match inspected.as_ref() {
-            Ok(info) => (
-                info.backend_state.clone(),
-                info.magic_dns,
-                info.https_ready,
-                info.dns_name.clone(),
-                String::new(),
-            ),
-            Err(error) => (String::new(), false, false, String::new(), error.clone()),
-        };
     let dns_name = if state.dns_name.is_empty() {
-        detected_dns
+        cached.dns_name.clone()
     } else {
         state.dns_name.clone()
     };
     let endpoint = if state.endpoint.is_empty() {
-        inspected
-            .as_ref()
-            .ok()
-            .map(remote::endpoint_url)
-            .unwrap_or_default()
+        if cached.error.is_empty() && !cached.dns_name.is_empty() {
+            format!("https://{}:{}/", cached.dns_name, remote::REMOTE_PORT)
+        } else {
+            String::new()
+        }
     } else {
         state.endpoint.clone()
     };
     let error = if state.error.is_empty() {
-        inspection_error
+        cached.error.clone()
     } else {
         state.error.clone()
     };
@@ -1864,9 +1903,9 @@ fn remote_status_value() -> serde_json::Value {
     serde_json::json!({
         "phase": if state.phase.is_empty() { "off" } else { &state.phase },
         "installed": installed,
-        "backendState": backend_state,
-        "magicDNS": magic_dns,
-        "httpsReady": https_ready,
+        "backendState": cached.backend_state,
+        "magicDNS": cached.magic_dns,
+        "httpsReady": cached.https_ready,
         "enabled": state.enabled,
         "busy": state.busy,
         "dnsName": dns_name,
@@ -1888,6 +1927,36 @@ fn remote_status_value() -> serde_json::Value {
 
 fn emit_remote_status(handle: &tauri::AppHandle) {
     emit_bridge_event(handle, "remote-status", remote_status_value());
+}
+
+struct RemoteStatusProbeGuard;
+
+impl Drop for RemoteStatusProbeGuard {
+    fn drop(&mut self) {
+        REMOTE_STATUS_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
+
+fn refresh_remote_status_async(handle: tauri::AppHandle, force: bool) {
+    let cache_is_fresh = TAILSCALE_STATUS_CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.refreshed_at)
+        .is_some_and(|refreshed_at| refreshed_at.elapsed() < REMOTE_STATUS_CACHE_TTL);
+    if !force && cache_is_fresh {
+        return;
+    }
+    if REMOTE_STATUS_PROBE_ACTIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    thread::spawn(move || {
+        let _guard = RemoteStatusProbeGuard;
+        let _ = inspect_tailscale_and_cache();
+        emit_remote_status(&handle);
+    });
 }
 
 fn stop_remote_serve_process() {
@@ -2092,7 +2161,7 @@ fn start_remote_serve_monitor(handle: tauri::AppHandle, generation: u64) {
                 if REMOTE_SERVE_GENERATION.load(Ordering::SeqCst) != generation {
                     return;
                 }
-                let clear_error_when_tailscale_ready = remote::inspect_tailscale().is_err();
+                let clear_error_when_tailscale_ready = inspect_tailscale_and_cache().is_err();
                 deactivate_remote_transport(
                     Some(format!(
                         "Tailscale Serve 已退出（{exit}），Remote 已自动关闭。"
@@ -2149,7 +2218,7 @@ fn deactivate_remote_transport(
 }
 
 fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Result<(), String> {
-    let info = remote::inspect_tailscale()?;
+    let info = inspect_tailscale_and_cache()?;
     if !info.https_ready {
         return Err("当前 Tailnet 尚未启用 HTTPS。请在 Tailscale 授权页完成 Enable HTTPS。".into());
     }
@@ -2230,7 +2299,7 @@ fn perform_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
     {
         return Err("安全模式下不能开启 Remote；请先恢复普通 Harness。".into());
     }
-    let info = remote::inspect_tailscale()?;
+    let info = inspect_tailscale_and_cache()?;
     if !info.https_ready {
         return Err(
             "当前 Tailnet 尚未启用 HTTPS。请先完成 Tailscale 的 Enable HTTPS 授权。".into(),
@@ -2288,7 +2357,7 @@ fn perform_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
         state.clear_error_when_tailscale_ready = false;
     }
     stop_remote_serve_process();
-    let serve_stop_error = remote::inspect_tailscale()
+    let serve_stop_error = inspect_tailscale_and_cache()
         .ok()
         .and_then(|info| remote::wait_until_port_clear(&info).err());
     REMOTE_DESIRED.store(false, Ordering::SeqCst);
@@ -2717,22 +2786,31 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
                 ),
             }
         }
-        "remote-status" => emit_remote_status(&handle),
-        "remote-open-https" => match remote::inspect_tailscale()
-            .and_then(|info| remote::https_setup_url(&info))
-            .and_then(|url| {
-                handle
-                    .opener()
-                    .open_url(url, None::<&str>)
-                    .map_err(|error| format!("无法打开 Tailscale HTTPS 设置页：{error}"))
-            }) {
-            Ok(()) => {}
-            Err(error) => emit_bridge_event(
-                &handle,
-                "remote-error",
-                serde_json::json!({ "message": error }),
-            ),
-        },
+        "remote-status" => {
+            emit_remote_status(&handle);
+            let force = parameters.get("force").is_some_and(|value| value == "1");
+            refresh_remote_status_async(handle, force);
+        }
+        "remote-open-https" => {
+            thread::spawn(move || {
+                let result = inspect_tailscale_and_cache()
+                    .and_then(|info| remote::https_setup_url(&info))
+                    .and_then(|url| {
+                        handle
+                            .opener()
+                            .open_url(url, None::<&str>)
+                            .map_err(|error| format!("无法打开 Tailscale HTTPS 设置页：{error}"))
+                    });
+                if let Err(error) = result {
+                    emit_bridge_event(
+                        &handle,
+                        "remote-error",
+                        serde_json::json!({ "message": error }),
+                    );
+                }
+                emit_remote_status(&handle);
+            });
+        }
         "remote-enable" => begin_remote_operation(handle, true),
         "remote-disable" => begin_remote_operation(handle, false),
         "remote-lan-enable" => begin_lan_remote_operation(handle, true),
@@ -3800,8 +3878,8 @@ mod tests {
         redact_startup_line, resolve_modules_directory, restore_last_known_good,
         safe_profile_manifest, same_file, smooth_stream_enabled_from, usage_record_from_event,
         validate_plugin_spec, without_cli_path_block, write_profile_snapshot,
-        write_smooth_stream_preference, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT,
-        CLI_PATH_BLOCK, CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
+        write_smooth_stream_preference, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK,
+        CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]

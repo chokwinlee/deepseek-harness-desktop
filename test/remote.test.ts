@@ -9,11 +9,36 @@ import test from 'node:test'
 import { runInNewContext } from 'node:vm'
 
 interface RemoteTestApi {
-  actionUrl: (action: string, token?: string) => string
+  actionUrl: (
+    action: string,
+    token?: string,
+    parameters?: Record<string, string | number | boolean>,
+  ) => string
   copyFor: (language: 'zh' | 'en') => Record<string, string>
   languageFromTag: (tag: string) => 'zh' | 'en'
   normalizeStatus: (value?: Record<string, unknown>) => Record<string, unknown>
-  shouldPollStatus: (value: Record<string, unknown> | undefined, settingVisible: boolean) => boolean
+  pendingActionAfterStatus: (
+    pendingAction: string,
+    value: Record<string, unknown> | undefined,
+    transport: 'lan' | 'tailscale',
+  ) => string
+  shouldPollStatus: (
+    value: Record<string, unknown> | undefined,
+    settingVisible: boolean,
+    pageVisible?: boolean,
+    requestInFlight?: boolean,
+  ) => boolean
+  statusAfterError: (
+    value: Record<string, unknown> | undefined,
+    transport: 'lan' | 'tailscale',
+    message: string,
+  ) => Record<string, unknown>
+  transportViewState: (
+    value: Record<string, unknown> | undefined,
+    transport: 'lan' | 'tailscale',
+    language?: 'zh' | 'en',
+    pendingAction?: string,
+  ) => Record<string, unknown>
 }
 
 interface LanRemoteProxyTestApi {
@@ -149,6 +174,10 @@ test('Remote actions use the tokenized Desktop bridge', async () => {
     api.actionUrl('remote-lan-disable', 'desktop-token'),
     'dsh-desktop://action/remote-lan-disable?token=desktop-token',
   )
+  assert.equal(
+    api.actionUrl('remote-status', 'desktop-token', { force: 1 }),
+    'dsh-desktop://action/remote-status?token=desktop-token&force=1',
+  )
   assert.throws(() => api.actionUrl('serve-reset', 'desktop-token'))
 })
 
@@ -187,15 +216,101 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.languageFromTag('zh-CN'), 'zh')
   assert.equal(api.languageFromTag('en-US'), 'en')
   assert.equal(api.copyFor('zh').title, '手机 Remote')
+  assert.equal(api.copyFor('zh').connect, '连接 iPhone')
+  assert.equal(api.copyFor('zh').lanTitle, '同一 Wi-Fi')
+  assert.match(String(api.copyFor('zh').lanDescription), /无需安装或配置 Tailscale/)
+  assert.equal(api.copyFor('zh').tailscaleTitle, '跨网络连接')
   assert.equal(api.copyFor('en').title, 'Mobile Remote')
+  assert.equal(api.copyFor('en').lanBadge, 'Recommended')
 })
 
-test('Remote pairing layer preserves an explicit hidden state', async () => {
+test('Remote uses one settings entry and keeps transport choices inside the pairing layer', async () => {
   const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
   assert.match(source, /:host\(\[hidden\]\)\{display:none\}/)
+  assert.match(source, /row\.append\(heading, settingConnectButton\)/)
+  assert.match(source, /class="chooser-routes"/)
+  assert.match(source, /querySelector\('\.copy'\)\.hidden = lan/)
+  assert.match(source, /button:active:not\(:disabled\)\{transform:scale\(\.97\)\}/)
+  assert.match(source, /aria-describedby="dsh-remote-dialog-description"/)
+  assert.match(source, /document\.addEventListener\('keydown',[\s\S]*?}, true\)/)
+  assert.match(source, /event\.key !== 'Tab'/)
+  assert.match(source, /button\.getClientRects\(\)\.length > 0/)
+  assert.match(source, /if \(!controls\.includes\(active\)\)/)
 })
 
-test('Remote polls Tailscale while its settings row is visible', async () => {
+test('LAN remains the available primary path when Tailscale is unavailable', async () => {
+  const api = await loadTestApi()
+  const status = {
+    lanAvailable: true,
+    installed: false,
+    backendState: 'Stopped',
+    error: 'Tailscale is not installed',
+  }
+  const lan = api.transportViewState(status, 'lan', 'zh')
+  const tailscale = api.transportViewState(status, 'tailscale', 'zh')
+
+  assert.equal(lan.action, 'remote-lan-enable')
+  assert.equal(lan.actionDisabled, false)
+  assert.match(String(lan.description), /无需安装或配置 Tailscale/)
+  assert.equal(lan.hasError, false)
+  assert.equal(tailscale.actionDisabled, true)
+  assert.equal(tailscale.description, 'Tailscale is not installed')
+  assert.equal(tailscale.hasError, true)
+})
+
+test('Remote transport errors and busy labels stay isolated', async () => {
+  const api = await loadTestApi()
+  const initial = {
+    installed: true,
+    backendState: 'Running',
+    magicDNS: true,
+    httpsReady: true,
+    busy: true,
+    lanBusy: true,
+    error: 'tailnet failed',
+    lanError: 'local network failed',
+  }
+
+  const lanFailure = api.statusAfterError(initial, 'lan', 'new local error')
+  assert.equal(lanFailure.lanBusy, false)
+  assert.equal(lanFailure.lanError, 'new local error')
+  assert.equal(lanFailure.busy, true)
+  assert.equal(lanFailure.error, 'tailnet failed')
+
+  const tailscaleFailure = api.statusAfterError(initial, 'tailscale', 'new tailnet error')
+  assert.equal(tailscaleFailure.busy, false)
+  assert.equal(tailscaleFailure.error, 'new tailnet error')
+  assert.equal(tailscaleFailure.lanBusy, true)
+  assert.equal(tailscaleFailure.lanError, 'local network failed')
+
+  const localPending = api.transportViewState(
+    { lanAvailable: true },
+    'lan',
+    'zh',
+    'remote-lan-enable',
+  )
+  assert.equal(localPending.busy, true)
+  assert.equal(localPending.actionDisabled, true)
+  assert.equal(localPending.description, '正在准备本地连接…')
+
+  assert.equal(
+    api.pendingActionAfterStatus('remote-lan-enable', { lanAvailable: true }, 'lan'),
+    'remote-lan-enable',
+    'an older poll response must not clear optimistic LAN busy state',
+  )
+  assert.equal(
+    api.pendingActionAfterStatus('remote-lan-enable', { lanBusy: true }, 'lan'),
+    '',
+    'native busy state acknowledges the LAN action',
+  )
+  assert.equal(
+    api.pendingActionAfterStatus('remote-enable', { enabled: true }, 'tailscale'),
+    '',
+    'the completed target state acknowledges the Tailscale action',
+  )
+})
+
+test('Remote status polling is visible, idle, and single-flight', async () => {
   const api = await loadTestApi()
   assert.equal(api.shouldPollStatus(undefined, false), false)
   assert.equal(api.shouldPollStatus({ backendState: 'Stopped', error: 'not connected' }, true), true)
@@ -205,6 +320,16 @@ test('Remote polls Tailscale while its settings row is visible', async () => {
     httpsReady: true,
   }, true), true)
   assert.equal(api.shouldPollStatus({ busy: true }, true), false)
+  assert.equal(api.shouldPollStatus({ lanBusy: true }, true), false)
+  assert.equal(api.shouldPollStatus({}, true, false), false)
+  assert.equal(api.shouldPollStatus({}, true, true, true), false)
+})
+
+test('Remote DOM observer does not schedule mounts for its own text updates', async () => {
+  const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
+  assert.match(source, /new MutationObserver\(handleMutations\)/)
+  assert.doesNotMatch(source, /new MutationObserver\(scheduleMount\)/)
+  assert.match(source, /settingRow\.parentElement !== slot\)\) scheduleMount\(\)/)
 })
 
 test('LAN Remote HTTP allowlist exactly matches the reviewed capability boundary', async () => {

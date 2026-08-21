@@ -19,7 +19,7 @@ flowchart LR
 
 ## 当前实现状态
 
-macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale HTTPS 路径完成真实 Harness、WebSocket、DeepSeek 模型调用与模拟器展示闭环。局域网路径实现独立开关、随机 256-bit 配对凭据、固定 API 白名单代理、二维码导入及 iOS HTTP/WebSocket 认证，并完成代理协议联调。基于本机 DSH Desktop v0.3.0 / Harness rc.8 的专用会话还完成了 DeepSeek 文本与引用、视觉模型图片、持久附件回读、多级子代理浏览，以及 continuable 子代理的历史/补充/停止真实闭环。物理 iPhone 的局域网权限弹窗、蜂窝网络和 Windows Host 仍需发布前验收。
+macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale HTTPS 路径完成真实 Harness、WebSocket、DeepSeek 模型调用与模拟器展示闭环。局域网路径实现独立开关、高强度随机配对凭据、固定 API 白名单代理、二维码导入及 iOS HTTP/WebSocket 认证，并完成代理协议联调。基于本机 DSH Desktop v0.3.0 / Harness rc.8 的专用会话还完成了 DeepSeek 文本与引用、视觉模型图片、持久附件回读、多级子代理浏览，以及 continuable 子代理的历史/补充/停止真实闭环。物理 iPhone 的局域网权限弹窗、蜂窝网络和 Windows Host 仍需发布前验收。
 
 ## 为什么 iOS 使用原生 Remote UI
 
@@ -27,9 +27,16 @@ macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale 
 
 ## Desktop 端需要增加的 Remote Host
 
-### 开启流程
+### 连接方式选择
 
-1. Remote 默认关闭。用户在 Desktop 设置中主动点击“开启 Remote”。
+1. Remote 默认关闭。Desktop 设置行只显示“连接 iPhone”入口。
+2. 进入后先展示“同一 Wi-Fi（推荐、无需 Tailscale）”，再展示“跨网络连接（可选）”。两种方式分别显示自己的状态、错误、开启、配对和关闭操作。
+3. 同一 Wi-Fi 路径一键启动认证局域网代理并自动显示二维码；iOS 扫码后立即验证并保存。
+4. 只有用户选择跨网络路径时，才检查 Tailscale、MagicDNS 与 Tailnet HTTPS。
+
+### Tailscale 跨网络开启流程
+
+1. 用户在“连接 iPhone”中选择“跨网络连接”。
 2. Desktop 查找 `tailscale` CLI，并读取 `tailscale status --json`。
 3. 只有 `BackendState=Running` 且存在本机 `DNSName` 时继续；否则显示安装或登录指引。
 4. 选用专用端口 `8443`，构造公开给 Tailnet 的 authority：`<DNSName>:8443`。
@@ -70,7 +77,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - Harness 始终绑定 `127.0.0.1`，不能改为 `0.0.0.0`。
 - 跨网络只能使用 Tailscale Serve 或用户自己管理的 HTTPS，不能使用 Funnel。
 - `--trusted-host` 只加入当前 Tailnet 的精确 DNS authority 和端口，不能加入通配符。
-- Tailscale 二维码只包含 URL；局域网二维码包含 Desktop 每次开启时重新生成的 256-bit bearer 凭据，但不包含 API Key 或 Tailscale key。
+- Tailscale 二维码只包含 URL；局域网二维码包含 Desktop 每次开启时重新生成的高强度随机 bearer 凭据，但不包含 API Key 或 Tailscale key。
 - Remote 默认关闭，并提供明确的离线/撤销入口。
 
 ### 两层边界

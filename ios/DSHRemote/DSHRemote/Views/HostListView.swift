@@ -5,6 +5,7 @@ struct HostListView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var showsAddHost: Bool
+    @Binding var addHostStartsWithScanner: Bool
     @State private var showsAbout = false
     @State private var pendingRemoval: RemoteHost?
 
@@ -12,6 +13,7 @@ struct HostListView: View {
         Group {
             if hostStore.hosts.isEmpty {
                 EmptyConnectionView {
+                    addHostStartsWithScanner = true
                     showsAddHost = true
                 }
             } else {
@@ -88,6 +90,7 @@ struct HostListView: View {
 
             if !hostStore.hosts.isEmpty {
                 Button {
+                    addHostStartsWithScanner = false
                     showsAddHost = true
                 } label: {
                     Image(systemName: "plus")
@@ -159,53 +162,42 @@ private struct EmptyConnectionView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(RemoteTheme.raisedSurface)
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(RemoteTheme.hairline, lineWidth: 1)
-                    Image(systemName: "laptopcomputer.and.iphone")
-                        .font(.system(size: 37, weight: .medium))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(RemoteTheme.accent)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(RemoteTheme.accent.opacity(0.10))
+                        Image(systemName: "laptopcomputer.and.iphone")
+                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 28 : 33, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(RemoteTheme.accent)
+                    }
+                    .frame(width: 70, height: 70)
+                    .accessibilityHidden(true)
+
+                    Text("先连接同一 Wi-Fi 的电脑")
+                        .font(.title.weight(.bold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("iPhone 和 Mac 在同一个受信任 Wi-Fi 时，直接扫描 Desktop 二维码即可，不需要安装或登录 Tailscale。")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(
-                    width: dynamicTypeSize.isAccessibilitySize ? 66 : 82,
-                    height: dynamicTypeSize.isAccessibilitySize ? 66 : 82
-                )
-                .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 16 : 24)
 
-                Text("连接你的电脑")
-                    .font(.title.weight(.bold))
-
-                Text(onboardingMessage)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .padding(.top, 9)
+                localPairingSteps
+                    .padding(.top, 22)
 
                 Button(action: addHost) {
-                    Label("连接电脑", systemImage: "qrcode.viewfinder")
+                    Label("开始同一 Wi-Fi 配对", systemImage: "qrcode.viewfinder")
                 }
                 .buttonStyle(RemoteActionButtonStyle(kind: .primary))
-                .padding(.top, 28)
+                .accessibilityHint("打开连接页面并扫描 DSH Desktop 二维码")
+                .padding(.top, 18)
 
-                Group {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(spacing: 8) {
-                            connectionCapability(icon: "network", text: "同一 Wi-Fi")
-                            connectionCapability(icon: "point.3.connected.trianglepath.dotted", text: "Tailscale")
-                        }
-                    } else {
-                        HStack(spacing: 8) {
-                            connectionCapability(icon: "network", text: "同一 Wi-Fi")
-                            connectionCapability(icon: "point.3.connected.trianglepath.dotted", text: "Tailscale")
-                        }
-                    }
-                }
-                .padding(.top, 14)
+                crossNetworkNote
+                    .padding(.top, 14)
 
                 NavigationLink {
                     RemoteSessionView()
@@ -236,29 +228,76 @@ private struct EmptyConnectionView: View {
                 }
                 .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
                 .remoteSurface(cornerRadius: 14)
-                .padding(.top, 32)
+                .padding(.top, 28)
             }
             .frame(maxWidth: 390)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
-            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 40)
+            .padding(.horizontal, RemoteTheme.pagePadding)
+            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 28)
             .padding(.bottom, 34)
         }
     }
 
-    private func connectionCapability(icon: String, text: String) -> some View {
-        Label(text, systemImage: icon)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 30)
-            .background(RemoteTheme.raisedSurface, in: Capsule())
+    private var localPairingSteps: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            pairingStep(
+                number: 1,
+                title: "在 Mac 打开本地 Remote",
+                detail: "DSH Desktop → 设置 → 通用 → 手机 Remote → 连接 iPhone → 开始本地配对"
+            )
+            pairingStep(
+                number: 2,
+                title: "用 iPhone 扫描二维码",
+                detail: "扫码后 App 会自动验证电脑并保存连接"
+            )
+        }
+        .padding(14)
+        .remoteSurface(cornerRadius: 16)
     }
 
-    private var onboardingMessage: String {
-        dynamicTypeSize.isAccessibilitySize
-            ? "在 DSH Desktop 开启手机 Remote。扫码后即可查看项目、会话和运行状态。"
-            : "在 DSH Desktop 开启手机 Remote，\n扫码后即可查看项目、会话和运行状态。"
+    private func pairingStep(number: Int, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Text("\(number)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 25, height: 25)
+                .background(RemoteTheme.accent.opacity(0.11), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var crossNetworkNote: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "network")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(RemoteTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("需要跨网络连接？")
+                    .font(.subheadline.weight(.semibold))
+                Text("Tailscale 或自有 HTTPS 是离开同一 Wi-Fi 后的可选方式，可在下一页配置。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
