@@ -6,6 +6,10 @@ enum RemoteTheme {
         light: UIColor(red: 0.18, green: 0.36, blue: 0.75, alpha: 1),
         dark: UIColor(red: 0.404, green: 0.620, blue: 0.996, alpha: 1)
     )
+    static let accentFill = dynamicColor(
+        light: UIColor(red: 0.18, green: 0.36, blue: 0.75, alpha: 1),
+        dark: UIColor(red: 0.239, green: 0.435, blue: 0.800, alpha: 1)
+    )
     static let thinking = dynamicColor(
         light: UIColor(red: 0.40, green: 0.30, blue: 0.73, alpha: 1),
         dark: UIColor(red: 0.55, green: 0.49, blue: 0.96, alpha: 1)
@@ -52,14 +56,20 @@ enum RemoteTheme {
         dark: UIColor(red: 0.059, green: 0.059, blue: 0.067, alpha: 1)
     )
     static let hairline = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor.white.withAlphaComponent(0.09)
-            : UIColor.black.withAlphaComponent(0.075)
+        let alpha: CGFloat = traits.accessibilityContrast == .high
+            ? (traits.userInterfaceStyle == .dark ? 0.20 : 0.16)
+            : (traits.userInterfaceStyle == .dark ? 0.09 : 0.075)
+        return traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(alpha)
+            : UIColor.black.withAlphaComponent(alpha)
     })
     static let strongHairline = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor.white.withAlphaComponent(0.14)
-            : UIColor.black.withAlphaComponent(0.12)
+        let alpha: CGFloat = traits.accessibilityContrast == .high
+            ? (traits.userInterfaceStyle == .dark ? 0.30 : 0.24)
+            : (traits.userInterfaceStyle == .dark ? 0.14 : 0.12)
+        return traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(alpha)
+            : UIColor.black.withAlphaComponent(alpha)
     })
     static let shadow = Color.black.opacity(0.12)
 
@@ -88,6 +98,7 @@ struct RemoteActionButtonStyle: ButtonStyle {
     var compact = false
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -103,9 +114,9 @@ struct RemoteActionButtonStyle: ButtonStyle {
             }
             .clipShape(RoundedRectangle(cornerRadius: compact ? 11 : RemoteTheme.controlRadius))
             .contentShape(RoundedRectangle(cornerRadius: compact ? 11 : RemoteTheme.controlRadius))
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
             .opacity(isEnabled ? 1 : 0.42)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
     private var foregroundColor: Color {
@@ -118,7 +129,7 @@ struct RemoteActionButtonStyle: ButtonStyle {
 
     private var borderColor: Color {
         switch kind {
-        case .primary: RemoteTheme.accent.opacity(0.75)
+        case .primary: RemoteTheme.accentFill.opacity(0.75)
         case .secondary: RemoteTheme.strongHairline
         case .ghost: .clear
         case .danger: RemoteTheme.danger.opacity(0.22)
@@ -129,7 +140,7 @@ struct RemoteActionButtonStyle: ButtonStyle {
         let pressed = configuration.isPressed
         return switch kind {
         case .primary:
-            RemoteTheme.accent.opacity(pressed ? 0.78 : 1)
+            RemoteTheme.accentFill.opacity(pressed ? 0.78 : 1)
         case .secondary:
             RemoteTheme.raisedSurface.opacity(pressed ? 0.72 : 1)
         case .ghost:
@@ -143,6 +154,8 @@ struct RemoteActionButtonStyle: ButtonStyle {
 struct RemoteIconButtonStyle: ButtonStyle {
     var tint: Color = .primary
     var emphasized = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -158,8 +171,28 @@ struct RemoteIconButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 13)
                     .stroke(RemoteTheme.hairline, lineWidth: 1)
             }
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct RemotePressableRowButtonStyle: ButtonStyle {
+    var cornerRadius: CGFloat = 0
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(
+                        configuration.isPressed && isEnabled
+                            ? RemoteTheme.mutedSurface.opacity(0.60)
+                            : Color.clear
+                    )
+                    .allowsHitTesting(false)
+            }
     }
 }
 
@@ -201,32 +234,27 @@ struct RemotePageHeader<Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            if showsBackButton {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .bold))
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        backButton
+                        titleBlock
+                        Spacer(minLength: 4)
+                    }
+                    HStack {
+                        Spacer(minLength: showsBackButton ? 52 : 0)
+                        trailing
+                    }
                 }
-                .buttonStyle(RemoteToolbarButtonStyle())
-                .accessibilityLabel("返回")
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            } else {
+                HStack(spacing: 10) {
+                    backButton
+                    titleBlock
+                    Spacer(minLength: 8)
+                    trailing
                 }
             }
-            .layoutPriority(1)
-            .accessibilityElement(children: .combine)
-
-            Spacer(minLength: 8)
-            trailing
         }
         .frame(minHeight: 56)
         .padding(.horizontal, 12)
@@ -237,7 +265,37 @@ struct RemotePageHeader<Trailing: View>: View {
                 .fill(RemoteTheme.hairline)
                 .frame(height: 0.5)
         }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    @ViewBuilder
+    private var backButton: some View {
+        if showsBackButton {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .bold))
+            }
+            .buttonStyle(RemoteToolbarButtonStyle())
+            .accessibilityLabel("返回")
+            .fixedSize()
+            .layoutPriority(2)
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -256,39 +314,45 @@ struct RemoteSheetHeader<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let closeLabel: String
+    let onClose: (() -> Void)?
     let trailing: Trailing
 
     init(
         title: String,
         subtitle: String? = nil,
         closeLabel: String = "关闭",
+        onClose: (() -> Void)? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
         self.subtitle = subtitle
         self.closeLabel = closeLabel
+        self.onClose = onClose
         self.trailing = trailing()
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .top, spacing: 8) {
+                        titleBlock
+                        Spacer(minLength: 4)
+                        closeButton
+                    }
+                    HStack {
+                        Spacer(minLength: 0)
+                        trailing
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    titleBlock
+                    Spacer(minLength: 8)
+                    trailing
+                    closeButton
                 }
             }
-            Spacer(minLength: 8)
-            trailing
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(RemoteToolbarButtonStyle())
-            .accessibilityLabel(closeLabel)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -297,35 +361,97 @@ struct RemoteSheetHeader<Trailing: View>: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(RemoteTheme.hairline).frame(height: 0.5)
         }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+    }
+
+    private var closeButton: some View {
+        Button {
+            if let onClose {
+                onClose()
+            } else {
+                dismiss()
+            }
+        } label: {
+            Image(systemName: "xmark")
+        }
+        .buttonStyle(RemoteToolbarButtonStyle())
+        .accessibilityLabel(closeLabel)
+        .fixedSize()
+        .layoutPriority(2)
     }
 }
 
 extension RemoteSheetHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String? = nil, closeLabel: String = "关闭") {
-        self.init(title: title, subtitle: subtitle, closeLabel: closeLabel) { EmptyView() }
+    init(
+        title: String,
+        subtitle: String? = nil,
+        closeLabel: String = "关闭",
+        onClose: (() -> Void)? = nil
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            closeLabel: closeLabel,
+            onClose: onClose
+        ) { EmptyView() }
     }
 }
 
 struct RemoteSectionHeader: View {
     let title: String
     var detail: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-            Spacer(minLength: 8)
-            if let detail {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.trailing)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 3) {
+                    sectionTitle
+                    if let detail {
+                        sectionDetail(detail)
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    sectionTitle
+                    Spacer(minLength: 8)
+                    if let detail {
+                        sectionDetail(detail)
+                    }
+                }
             }
         }
         .padding(.horizontal, 2)
         .accessibilityElement(children: .combine)
+    }
+
+    private var sectionTitle: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func sectionDetail(_ detail: String) -> some View {
+        Text(detail)
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -333,6 +459,7 @@ struct RemoteStatusPill: View {
     let text: String
     var color: Color = .secondary
     var icon: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 5) {
@@ -341,7 +468,7 @@ struct RemoteStatusPill: View {
                     .font(.system(size: 9, weight: .bold))
             }
             Text(text)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(color)
@@ -349,7 +476,7 @@ struct RemoteStatusPill: View {
         .frame(minHeight: 24)
         .background(color.opacity(0.11), in: Capsule())
         .overlay { Capsule().stroke(color.opacity(0.14), lineWidth: 1) }
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
     }
 }
 
@@ -397,7 +524,7 @@ struct RemoteInlineNotice: View {
                 Button(actionTitle, action: action)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(tone.color)
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                     .frame(minWidth: 44, minHeight: 44)
             }
         }
@@ -584,6 +711,7 @@ struct RemoteDestructiveConfirmationSheet: View {
 
     private func performConfirm() {
         confirm()
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
         dismiss()
     }
 }

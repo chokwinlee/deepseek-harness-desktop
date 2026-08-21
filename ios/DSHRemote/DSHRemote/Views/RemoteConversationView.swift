@@ -55,12 +55,21 @@ struct RemoteConversationView: View {
     @State private var lastItemCount = 0
     @State private var shouldFollowNextSend = false
     @State private var showsModelPicker = false
+    @State private var conversationVisibleAnchor: String?
+    @State private var trajectoryVisibleAnchor: String?
+    @State private var conversationVisibleAlignment: UnitPoint = .top
+    @State private var trajectoryVisibleAlignment: UnitPoint = .top
+    @State private var isRestoringViewMode = false
+    @State private var pendingFollowAfterModeRestore = false
+    @State private var viewModeGeneration = 0
     #if DEBUG
     @State private var didRunLiveAcceptance = false
     @State private var debugSubagent: RemoteSubagentEntry?
     #endif
     @FocusState private var composerFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         _viewModel = StateObject(wrappedValue: RemoteConversationViewModel(client: client, session: session))
@@ -124,7 +133,23 @@ struct RemoteConversationView: View {
                     LazyVStack(spacing: viewMode == .conversation ? 16 : 0) {
                         if viewModel.hasMoreHistory {
                             Button {
-                                Task { await viewModel.loadOlderHistory() }
+                                let anchor = viewMode == .conversation
+                                    ? viewModel.items.first?.id
+                                    : (trajectoryVisibleAnchor
+                                       ?? (trajectoryQuery.isEmpty
+                                           ? (viewModel.trajectory.first?.id ?? "trajectory-top")
+                                           : "trajectory-top"))
+                                Task {
+                                    await viewModel.loadOlderHistory()
+                                    guard let anchor else { return }
+                                    DispatchQueue.main.async {
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            proxy.scrollTo(anchor, anchor: .top)
+                                        }
+                                    }
+                                }
                             } label: {
                                 if viewModel.isLoadingOlder {
                                     ProgressView().controlSize(.small)
@@ -134,7 +159,7 @@ struct RemoteConversationView: View {
                             }
                             .font(.caption.weight(.medium))
                             .foregroundStyle(RemoteTheme.accent)
-                            .buttonStyle(.plain)
+                            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                             .frame(minHeight: 44)
                             .disabled(viewModel.isLoadingOlder)
                         }
@@ -174,6 +199,18 @@ struct RemoteConversationView: View {
                                     onOpenDetails: { selectedDetail = item }
                                 )
                                 .id(item.id)
+                                .background {
+                                    GeometryReader { itemGeometry in
+                                        Color.clear.preference(
+                                            key: ConversationVisibleAnchorPreferenceKey.self,
+                                            value: [
+                                                "conversation:\(item.id)": itemGeometry.frame(
+                                                    in: .named("conversation-scroll")
+                                                ),
+                                            ]
+                                        )
+                                    }
+                                }
                             }
                         } else {
                             TrajectoryLedgerView(
@@ -196,23 +233,55 @@ struct RemoteConversationView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
                     .padding(.bottom, 20)
-                    .opacity(contentIsPositioned ? 1 : 0)
+                    .opacity(contentIsPositioned && !isRestoringViewMode ? 1 : 0)
                 }
                 .coordinateSpace(name: "conversation-scroll")
                 .scrollDismissesKeyboard(.interactively)
                 .onPreferenceChange(ConversationBottomOffsetKey.self) { bottom in
+                    guard viewMode == .conversation,
+                          didInitialPosition,
+                          !isRestoringViewMode else { return }
                     isNearBottom = bottom <= viewport.size.height + 140
                     if isNearBottom { unseenUpdates = 0 }
+                }
+                .onPreferenceChange(ConversationVisibleAnchorPreferenceKey.self) { positions in
+                    guard didInitialPosition, !isRestoringViewMode else { return }
+                    let prefix = viewMode == .conversation ? "conversation:" : "trajectory:"
+                    let visible = positions.filter {
+                        $0.key.hasPrefix(prefix)
+                            && $0.value.maxY >= 0
+                            && $0.value.minY <= viewport.size.height
+                    }
+                    guard let nearest = visible.min(by: {
+                        visibleDistanceToTop($0.value) < visibleDistanceToTop($1.value)
+                    }) else {
+                        return
+                    }
+                    let anchor = String(nearest.key.dropFirst(prefix.count))
+                    let alignment = scrollAlignment(
+                        for: nearest.value,
+                        viewportHeight: viewport.size.height
+                    )
+                    if viewMode == .conversation {
+                        conversationVisibleAnchor = anchor
+                        conversationVisibleAlignment = alignment
+                    } else {
+                        trajectoryVisibleAnchor = anchor
+                        trajectoryVisibleAlignment = alignment
+                    }
+                }
+                .onChange(of: viewMode) { _, mode in
+                    restoreViewMode(mode, proxy: proxy)
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if viewMode == .conversation, unseenUpdates > 0 {
                         Button {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 1)) {
                                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
                             }
                             unseenUpdates = 0
                         } label: {
-                            Label("\(unseenUpdates) 条更新", systemImage: "arrow.down")
+                            Label("有新内容", systemImage: "arrow.down")
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 12)
                                 .frame(minHeight: 44)
@@ -221,7 +290,7 @@ struct RemoteConversationView: View {
                                 .overlay { Capsule().stroke(RemoteTheme.hairline) }
                                 .shadow(color: .black.opacity(0.14), radius: 10, y: 4)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                         .padding(14)
                     }
                 }
@@ -234,11 +303,25 @@ struct RemoteConversationView: View {
                             #if DEBUG
                             if let target = debugInitialScrollTarget {
                                 proxy.scrollTo(target, anchor: .top)
+                            } else if viewMode == .trajectory,
+                                      let first = viewModel.trajectory.first?.id {
+                                proxy.scrollTo(first, anchor: .top)
+                                trajectoryVisibleAnchor = first
+                            } else if viewMode == .trajectory {
+                                proxy.scrollTo("trajectory-top", anchor: .top)
                             } else {
                                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
                             }
                             #else
-                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            if viewMode == .trajectory,
+                               let first = viewModel.trajectory.first?.id {
+                                proxy.scrollTo(first, anchor: .top)
+                                trajectoryVisibleAnchor = first
+                            } else if viewMode == .trajectory {
+                                proxy.scrollTo("trajectory-top", anchor: .top)
+                            } else {
+                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            }
                             #endif
                         }
                         lastItemCount = viewModel.items.count
@@ -251,15 +334,32 @@ struct RemoteConversationView: View {
                     lastItemCount = viewModel.items.count
                     guard viewMode == .conversation else {
                         shouldFollowNextSend = false
+                        unseenUpdates = max(added, 1)
+                        return
+                    }
+                    if isRestoringViewMode {
+                        if isNearBottom || shouldFollowNextSend {
+                            pendingFollowAfterModeRestore = true
+                        } else {
+                            unseenUpdates = max(added, 1)
+                        }
                         return
                     }
                     if isNearBottom || shouldFollowNextSend {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        if shouldFollowNextSend, !reduceMotion {
+                            withAnimation(.spring(response: 0.30, dampingFraction: 1)) {
+                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            }
+                        } else {
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            }
                         }
                         shouldFollowNextSend = false
                     } else {
-                        unseenUpdates += added
+                        unseenUpdates = max(added, 1)
                     }
                 }
                 .onChange(of: viewModel.isLoadingOlder) { wasLoading, isLoading in
@@ -268,6 +368,7 @@ struct RemoteConversationView: View {
                 .onChange(of: viewModel.goal) { _, _ in
                     guard viewMode == .conversation,
                           didInitialPosition,
+                          !isRestoringViewMode,
                           isNearBottom else { return }
                     DispatchQueue.main.async {
                         var transaction = Transaction()
@@ -280,6 +381,7 @@ struct RemoteConversationView: View {
                 .onChange(of: viewModel.plan) { _, _ in
                     guard viewMode == .conversation,
                           didInitialPosition,
+                          !isRestoringViewMode,
                           isNearBottom else { return }
                     DispatchQueue.main.async {
                         var transaction = Transaction()
@@ -324,10 +426,10 @@ struct RemoteConversationView: View {
                             .padding(.horizontal, 10)
                             .frame(minHeight: 34)
                             .background(RemoteTheme.mutedSurface, in: Capsule())
-                            .frame(minHeight: 44)
+                            .frame(minWidth: 44, minHeight: 44)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
                         .accessibilityLabel("子代理")
                         .accessibilityValue(subagentCount > 0 ? "\(subagentCount) 个" : "暂无")
 
@@ -339,7 +441,10 @@ struct RemoteConversationView: View {
                     }
                 }
                 sessionSummaryLine
-                DSHConversationTabBar(selection: $viewMode)
+                DSHConversationTabBar(selection: Binding(
+                    get: { viewMode },
+                    set: { selectViewMode($0) }
+                ))
 
                 if viewMode == .trajectory {
                     trajectorySearch
@@ -347,7 +452,7 @@ struct RemoteConversationView: View {
 
                 if viewMode == .trajectory, viewModel.interaction != nil {
                     Button {
-                        viewMode = .conversation
+                        selectViewMode(.conversation)
                     } label: {
                         Label("有一项问题等待确认", systemImage: "exclamationmark.bubble.fill")
                             .font(.caption.weight(.semibold))
@@ -356,7 +461,7 @@ struct RemoteConversationView: View {
                             .foregroundStyle(RemoteTheme.warning)
                             .background(RemoteTheme.warning.opacity(0.08))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                 }
 
                 if let error = viewModel.errorMessage, viewModel.hasLoadedConversationSnapshot {
@@ -376,9 +481,14 @@ struct RemoteConversationView: View {
                     .frame(height: 0.5)
             }
             .background(RemoteTheme.canvas)
-            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
         .remoteNavigationChromeHidden()
+        .onAppear {
+            RemoteNotificationManager.shared.setActiveSession(viewModel.session.id)
+        }
+        .onDisappear {
+            RemoteNotificationManager.shared.clearActiveSession(viewModel.session.id)
+        }
         .task { await viewModel.monitor() }
         #if DEBUG
         .task { await runLiveAcceptanceIfRequested() }
@@ -396,9 +506,27 @@ struct RemoteConversationView: View {
         .onChange(of: composerSelection) { _, _ in
             updateReferenceSuggestionVisibility()
         }
+        .onChange(of: trajectoryQuery) { _, _ in
+            trajectoryVisibleAnchor = nil
+            trajectoryVisibleAlignment = .top
+        }
         .onChange(of: composerNotice) { _, notice in
             guard let notice, !notice.isEmpty else { return }
             UIAccessibility.post(notification: .announcement, argument: notice)
+        }
+        .onChange(of: viewModel.errorMessage) { _, message in
+            guard let message, !message.isEmpty else { return }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: "操作没有完成，\(message)"
+            )
+        }
+        .onChange(of: viewModel.modelErrorMessage) { _, message in
+            guard let message, !message.isEmpty else { return }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: "模型操作没有完成，\(message)"
+            )
         }
         .sheet(item: $selectedDetail) { item in
             ConversationDetailSheet(
@@ -408,21 +536,25 @@ struct RemoteConversationView: View {
                 }
             )
                 .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
+                .presentationDragIndicator(.visible)
                 .presentationBackground(RemoteTheme.canvas)
         }
         .sheet(isPresented: $showsModelPicker) {
             RemoteModelSelectionSheet(viewModel: viewModel)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
+                .presentationDetents(
+                    dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large]
+                )
+                .presentationDragIndicator(.visible)
                 .presentationBackground(RemoteTheme.canvas)
         }
         .sheet(isPresented: $showsSubagents, onDismiss: {
             Task { await viewModel.refreshSubagents() }
         }) {
             RemoteSubagentBrowserView(viewModel: viewModel)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
+                .presentationDetents(
+                    dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large]
+                )
+                .presentationDragIndicator(.visible)
                 .presentationBackground(RemoteTheme.canvas)
         }
         #if DEBUG
@@ -556,7 +688,12 @@ struct RemoteConversationView: View {
                     interaction: interaction,
                     isResponding: viewModel.isResponding,
                     onRespond: { decision in
-                        Task { await viewModel.respond(decision) }
+                        Task {
+                            let responded = await viewModel.respond(decision)
+                            UINotificationFeedbackGenerator().notificationOccurred(
+                                responded ? .success : .error
+                            )
+                        }
                     }
                 )
                 .id(interaction.id)
@@ -579,7 +716,6 @@ struct RemoteConversationView: View {
             )
             .ignoresSafeArea()
         )
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private func dockBottomPadding(bottomSafeArea: CGFloat) -> CGFloat {
@@ -623,7 +759,7 @@ struct RemoteConversationView: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteToolbarButtonStyle())
             }
         }
         .padding(.horizontal, 10)
@@ -676,7 +812,8 @@ struct RemoteConversationView: View {
                         get: { composerFocused },
                         set: { composerFocused = $0 }
                     ),
-                    isEnabled: viewModel.interaction == nil && modelIsRoutable
+                    isEnabled: viewModel.interaction == nil,
+                    maxHeight: verticalSizeClass == .compact ? 88 : 142
                 )
                 .frame(height: composerTextHeight)
             }
@@ -770,8 +907,8 @@ struct RemoteConversationView: View {
             .padding(.horizontal, 9)
             .frame(minHeight: 34)
             .background(RemoteTheme.mutedSurface, in: Capsule())
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Capsule())
-            .frame(minHeight: 44)
         }
         .accessibilityLabel("发送方式")
         .accessibilityValue(busyDelivery == .queue ? "排队发送" : "插话发送")
@@ -793,6 +930,7 @@ struct RemoteConversationView: View {
             } label: {
                 Label("粘贴图片", systemImage: "doc.on.clipboard")
             }
+            .disabled(remainingImageSlots == 0)
 
             Button {
                 beginReferenceInsertion()
@@ -865,7 +1003,7 @@ struct RemoteConversationView: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
         .disabled(viewModel.isSelectingModel)
         .accessibilityLabel(modelAccessibilityLabel)
         .accessibilityHint("打开模型选择")
@@ -893,7 +1031,7 @@ struct RemoteConversationView: View {
                     .background(RemoteTheme.danger.opacity(0.10), in: Circle())
                     .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                 .disabled(viewModel.isCancelling || viewModel.isSending)
                 .accessibilityLabel(viewModel.isCancelling ? "正在停止任务" : "停止任务")
             }
@@ -932,10 +1070,10 @@ struct RemoteConversationView: View {
                 }
                 .foregroundStyle(.white)
                 .frame(width: 34, height: 34)
-                .background(RemoteTheme.accent, in: Circle())
+                .background(RemoteTheme.accentFill, in: Circle())
                 .frame(width: 44, height: 44)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
             .disabled(!canSendDraft)
             .opacity(canSendDraft ? 1 : 0.45)
             .accessibilityLabel(sendAccessibilityLabel)
@@ -1040,12 +1178,12 @@ struct RemoteConversationView: View {
     }
 
     private func pasteImage() {
-        guard let image = UIPasteboard.general.image else {
+        guard let provider = UIPasteboard.general.itemProviders.first(where: {
+            $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+        }), let typeIdentifier = provider.registeredTypeIdentifiers.first(where: {
+            UTType($0)?.conforms(to: .image) == true
+        }) else {
             composerNotice = "剪贴板中没有可用图片。"
-            return
-        }
-        guard let data = image.pngData() else {
-            composerNotice = "无法读取剪贴板中的图片。"
             return
         }
         isPreparingImages = true
@@ -1054,15 +1192,40 @@ struct RemoteConversationView: View {
         Task {
             defer { isPreparingImages = false }
             do {
+                let data = try await pasteboardData(
+                    from: provider,
+                    typeIdentifier: typeIdentifier
+                )
+                try Task.checkCancellation()
+                let type = UTType(typeIdentifier)
                 let prepared = try await RemoteImagePreparer.prepare(
                     data: data,
-                    declaredMediaType: "image/png",
-                    name: "粘贴图片.png",
+                    declaredMediaType: type?.preferredMIMEType,
+                    name: "粘贴图片.\(type?.preferredFilenameExtension ?? "png")",
                     limits: limits
                 )
                 try appendPreparedImage(prepared, limits: limits)
             } catch {
+                guard !Task.isCancelled else { return }
                 composerNotice = error.localizedDescription
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func pasteboardData(
+        from provider: NSItemProvider,
+        typeIdentifier: String
+    ) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let data {
+                    continuation.resume(returning: data)
+                } else {
+                    continuation.resume(throwing: RemoteImagePreparationError.unreadable)
+                }
             }
         }
     }
@@ -1285,9 +1448,9 @@ struct RemoteConversationView: View {
                                     height: 2
                                 )
                         }
-                        .frame(minHeight: 44)
+                        .frame(minWidth: 44, minHeight: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 8))
                     .accessibilityAddTraits(selection == mode ? .isSelected : [])
                 }
                 Spacer()
@@ -1446,6 +1609,71 @@ struct RemoteConversationView: View {
         value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
     }
 
+    private func restoreViewMode(_ mode: ViewMode, proxy: ScrollViewProxy) {
+        isRestoringViewMode = true
+        let generation = viewModeGeneration
+
+        DispatchQueue.main.async {
+            guard generation == viewModeGeneration, mode == viewMode else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                switch mode {
+                case .conversation:
+                    if let conversationVisibleAnchor {
+                        proxy.scrollTo(
+                            conversationVisibleAnchor,
+                            anchor: conversationVisibleAlignment
+                        )
+                    } else {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                case .trajectory:
+                    if let trajectoryVisibleAnchor {
+                        proxy.scrollTo(
+                            trajectoryVisibleAnchor,
+                            anchor: trajectoryVisibleAlignment
+                        )
+                    } else {
+                        proxy.scrollTo("trajectory-top", anchor: .top)
+                    }
+                }
+            }
+            DispatchQueue.main.async {
+                guard generation == viewModeGeneration, mode == viewMode else { return }
+                if mode == .conversation, pendingFollowAfterModeRestore {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                    pendingFollowAfterModeRestore = false
+                    shouldFollowNextSend = false
+                }
+                isRestoringViewMode = false
+            }
+        }
+    }
+
+    private func selectViewMode(_ mode: ViewMode) {
+        guard mode != viewMode else { return }
+        viewModeGeneration += 1
+        if mode == .trajectory { pendingFollowAfterModeRestore = false }
+        isRestoringViewMode = true
+        viewMode = mode
+    }
+
+    private func visibleDistanceToTop(_ frame: CGRect) -> CGFloat {
+        frame.minY <= 0 && frame.maxY >= 0 ? 0 : abs(frame.minY)
+    }
+
+    private func scrollAlignment(for frame: CGRect, viewportHeight: CGFloat) -> UnitPoint {
+        guard frame.minY < 0, frame.height > viewportHeight else { return .top }
+        let denominator = max(frame.height - viewportHeight, 1)
+        let y = min(max(-frame.minY / denominator, 0), 1)
+        return UnitPoint(x: 0.5, y: y)
+    }
+
 }
 
 private struct RemoteComposerTextView: UIViewRepresentable {
@@ -1455,6 +1683,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
     @Binding var measuredHeight: CGFloat
     @Binding var isFocused: Bool
     let isEnabled: Bool
+    let maxHeight: CGFloat
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -1519,7 +1748,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        return CGSize(width: width, height: min(max(measured.height, 38), 142))
+        return CGSize(width: width, height: min(max(measured.height, 38), maxHeight))
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -1690,8 +1919,8 @@ private struct RemoteComposerTextView: UIViewRepresentable {
             let fitting = view.sizeThatFits(
                 CGSize(width: width, height: .greatestFiniteMagnitude)
             ).height
-            let next = min(max(ceil(fitting), 38), 142)
-            view.isScrollEnabled = fitting > 142
+            let next = min(max(ceil(fitting), 38), parent.maxHeight)
+            view.isScrollEnabled = fitting > parent.maxHeight
             guard abs(parent.measuredHeight - next) > 0.5 else { return }
             DispatchQueue.main.async {
                 if abs(self.parent.measuredHeight - next) > 0.5 {
@@ -1720,6 +1949,8 @@ private struct RemoteReferenceSuggestions: View {
     @State private var isLoading = true
     @State private var errorMessages: [String] = []
     @State private var revision = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1737,7 +1968,7 @@ private struct RemoteReferenceSuggestions: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteToolbarButtonStyle())
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("关闭引用建议")
             }
@@ -1787,9 +2018,9 @@ private struct RemoteReferenceSuggestions: View {
                             if !errorMessages.isEmpty {
                                 Button("重试") { revision += 1 }
                                     .font(.caption.weight(.semibold))
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 8))
                                     .foregroundStyle(RemoteTheme.accent)
-                                    .frame(minHeight: 44)
+                                    .frame(minWidth: 44, minHeight: 44)
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -1809,8 +2040,8 @@ private struct RemoteReferenceSuggestions: View {
                             Button("重试") { revision += 1 }
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(RemoteTheme.accent)
-                                .frame(minHeight: 44)
-                                .buttonStyle(.plain)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 8))
                         }
                         .padding(.horizontal, 10)
                     }
@@ -1844,11 +2075,11 @@ private struct RemoteReferenceSuggestions: View {
                     Text(title)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     Text(subtitle)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
@@ -1856,10 +2087,11 @@ private struct RemoteReferenceSuggestions: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
-            .frame(minHeight: 48)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 7 : 0)
+            .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 76 : 48)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
     }
 
     private func fileCandidateTitle(_ candidate: RemoteFileReferenceCandidate) -> String {
@@ -1884,7 +2116,11 @@ private struct RemoteReferenceSuggestions: View {
         if fileCount + sessionCount == 0 { return 92 }
         let divider: CGFloat = fileCount > 0 && sessionCount > 0 ? 9 : 0
         let errorRow: CGFloat = errorMessages.isEmpty ? 0 : 44
-        return min(CGFloat(fileCount + sessionCount) * 48 + divider + errorRow, 220)
+        let rowHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 90 : 48
+        let maximumHeight: CGFloat = verticalSizeClass == .compact
+            ? 132
+            : (dynamicTypeSize.isAccessibilitySize ? 280 : 220)
+        return min(CGFloat(fileCount + sessionCount) * rowHeight + divider + errorRow, maximumHeight)
     }
 
     private func load() async {
@@ -1955,7 +2191,7 @@ private struct RemoteDraftImageRail: View {
                                 .background(.black.opacity(0.68), in: Circle())
                                 .frame(width: 44, height: 44, alignment: .topTrailing)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                         .offset(x: 8, y: -8)
                         .accessibilityLabel("移除\(image.name ?? "图片")")
                     }
@@ -2335,7 +2571,7 @@ private struct RemoteSubagentBrowserView: View {
                                         } label: {
                                             subagentRow(entry)
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                                     }
                                     if index < entries.count - 1 {
                                         Rectangle()
@@ -2594,7 +2830,7 @@ private struct RemoteNestedSubagentCatalogView: View {
                                         .accessibilityElement(children: .combine)
                                         .accessibilityHint("打开子代理对话")
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                                 }
 
                                 if index < entries.count - 1 {
@@ -2736,6 +2972,7 @@ private struct RemoteSubagentConversationView: View {
     @State private var shouldFollowNextSend = false
     @State private var selectedDetail: RemoteConversationItem?
     @FocusState private var composerFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG
     @State private var didRunLiveSubagentAction = false
     #endif
@@ -2766,10 +3003,12 @@ private struct RemoteSubagentConversationView: View {
                                 Task {
                                     await viewModel.loadOlderHistory()
                                     guard let anchor else { return }
-                                    var transaction = Transaction()
-                                    transaction.disablesAnimations = true
-                                    withTransaction(transaction) {
-                                        proxy.scrollTo(anchor, anchor: .top)
+                                    DispatchQueue.main.async {
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            proxy.scrollTo(anchor, anchor: .top)
+                                        }
                                     }
                                 }
                             } label: {
@@ -2782,7 +3021,7 @@ private struct RemoteSubagentConversationView: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(RemoteTheme.accent)
                             .frame(minHeight: 44)
-                            .buttonStyle(.plain)
+                            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                             .disabled(viewModel.isLoadingOlder)
                         }
 
@@ -2851,12 +3090,12 @@ private struct RemoteSubagentConversationView: View {
                 .overlay(alignment: .bottomTrailing) {
                     if unseenUpdates > 0 {
                         Button {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 1)) {
                                 proxy.scrollTo("subagent-bottom", anchor: .bottom)
                             }
                             unseenUpdates = 0
                         } label: {
-                            Label("\(unseenUpdates) 条更新", systemImage: "arrow.down")
+                            Label("有新内容", systemImage: "arrow.down")
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 12)
                                 .frame(minHeight: 44)
@@ -2864,7 +3103,7 @@ private struct RemoteSubagentConversationView: View {
                                 .background(RemoteTheme.surface, in: Capsule())
                                 .overlay { Capsule().stroke(RemoteTheme.hairline) }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                         .padding(14)
                     }
                 }
@@ -2885,12 +3124,20 @@ private struct RemoteSubagentConversationView: View {
                     let added = max(viewModel.items.count - lastItemCount, 1)
                     lastItemCount = viewModel.items.count
                     if isNearBottom || shouldFollowNextSend {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                        if shouldFollowNextSend, !reduceMotion {
+                            withAnimation(.spring(response: 0.30, dampingFraction: 1)) {
+                                proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                            }
+                        } else {
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                            }
                         }
                         shouldFollowNextSend = false
                     } else {
-                        unseenUpdates += added
+                        unseenUpdates = max(added, 1)
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -2934,7 +3181,7 @@ private struct RemoteSubagentConversationView: View {
                                     .background(RemoteTheme.accent.opacity(0.10), in: Circle())
                                     .frame(width: 44, height: 44)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                             .accessibilityLabel("查看下级子代理")
                         }
                         RemoteStatusPill(
@@ -3073,7 +3320,7 @@ private struct RemoteSubagentConversationView: View {
                         .background(RemoteTheme.danger.opacity(0.10), in: Circle())
                         .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                     .disabled(viewModel.isInterrupting || viewModel.isSending)
                     .accessibilityLabel("停止子代理")
                 }
@@ -3099,10 +3346,10 @@ private struct RemoteSubagentConversationView: View {
                         }
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
-                        .background(RemoteTheme.accent, in: Circle())
+                        .background(RemoteTheme.accentFill, in: Circle())
                         .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                     .disabled(
                         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || viewModel.isSending
@@ -3126,7 +3373,7 @@ private struct RemoteSubagentConversationView: View {
 }
 
 private struct SubagentBottomOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+    static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
@@ -3210,18 +3457,18 @@ private struct RemoteModelSelectionSheet: View {
                             RemoteSectionHeader(title: group.name, detail: "\(group.models.count) 个模型")
                             VStack(spacing: 0) {
                                 ForEach(Array(group.models.enumerated()), id: \.element.id) { index, model in
-                                Button {
-                                    chooseModel(provider: group.id, model: model.id)
-                                } label: {
-                                    selectionRow(
-                                        title: model.name,
-                                        description: model.description,
-                                        selected: directory.current.provider == group.id
-                                            && directory.current.model == model.id
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(viewModel.isSelectingModel)
+                                    Button {
+                                        chooseModel(provider: group.id, model: model.id)
+                                    } label: {
+                                        selectionRow(
+                                            title: model.name,
+                                            description: model.description,
+                                            selected: directory.current.provider == group.id
+                                                && directory.current.model == model.id
+                                        )
+                                    }
+                                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
+                                    .disabled(viewModel.isSelectingModel)
 
                                     if index < group.models.count - 1 {
                                         Rectangle()
@@ -3240,17 +3487,17 @@ private struct RemoteModelSelectionSheet: View {
                             RemoteSectionHeader(title: "推理强度")
                             VStack(spacing: 0) {
                                 ForEach(Array(effortOptions.enumerated()), id: \.element.id) { index, option in
-                                Button {
-                                    chooseEffort(option.value)
-                                } label: {
-                                    selectionRow(
-                                        title: option.name,
-                                        description: option.description,
-                                        selected: effectiveEffort == option.value
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(viewModel.isSelectingModel)
+                                    Button {
+                                        chooseEffort(option.value)
+                                    } label: {
+                                        selectionRow(
+                                            title: option.name,
+                                            description: option.description,
+                                            selected: effectiveEffort == option.value
+                                        )
+                                    }
+                                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
+                                    .disabled(viewModel.isSelectingModel)
 
                                     if index < effortOptions.count - 1 {
                                         Rectangle()
@@ -3363,7 +3610,7 @@ private struct RemoteModelSelectionSheet: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 24, height: 24)
-                    .background(RemoteTheme.accent, in: Circle())
+                    .background(RemoteTheme.accentFill, in: Circle())
                     .accessibilityHidden(true)
             }
         }
@@ -3387,6 +3634,7 @@ private struct RemoteModelSelectionSheet: View {
                 model: model,
                 reasoningEffort: nil
             )) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 dismiss()
             }
         }
@@ -3404,6 +3652,7 @@ private struct RemoteModelSelectionSheet: View {
                 model: current.model,
                 reasoningEffort: effort
             )) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 dismiss()
             }
         }
@@ -3418,6 +3667,7 @@ private struct ConversationItemView: View {
     @State private var showsReasoning = false
     @State private var showsToolDetails = false
     @State private var copied = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         switch item.kind {
@@ -3449,7 +3699,7 @@ private struct ConversationItemView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let reasoning = item.reasoning, !reasoning.isEmpty {
                     Button {
-                        withAnimation(.easeOut(duration: 0.16)) {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
                             showsReasoning.toggle()
                         }
                     } label: {
@@ -3480,7 +3730,8 @@ private struct ConversationItemView: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                    .accessibilityValue(showsReasoning ? "已展开" : "已收起")
 
                     if showsReasoning {
                         Text(reasoning)
@@ -3526,7 +3777,7 @@ private struct ConversationItemView: View {
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemoteToolbarButtonStyle(tint: Color.secondary))
                         .accessibilityLabel(copied ? "已复制" : "复制回答")
                         MetadataLine(values: item.metadata)
                         Spacer(minLength: 0)
@@ -3543,13 +3794,14 @@ private struct ConversationItemView: View {
                         .accessibilityElement(children: .combine)
                 } else {
                     Button {
-                        withAnimation(.easeOut(duration: 0.16)) {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
                             showsToolDetails.toggle()
                         }
                     } label: {
                         toolHeader
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                    .accessibilityValue(showsToolDetails ? "已展开" : "已收起")
                     .accessibilityHint(showsToolDetails ? "收起工具详情" : "展开工具详情")
                 }
 
@@ -3602,33 +3854,16 @@ private struct ConversationItemView: View {
             }
         case .context:
             VStack(alignment: .leading, spacing: 4) {
-                Button(action: onOpenDetails) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 18)
-                        Text(item.title ?? "上下文")
-                            .font(.caption.weight(.semibold))
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        Text(item.text)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        if !item.details.isEmpty {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.tertiary)
-                        }
+                if item.details.isEmpty {
+                    contextRow
+                        .accessibilityElement(children: .combine)
+                } else {
+                    Button(action: onOpenDetails) {
+                        contextRow
                     }
-                    .padding(.vertical, 7)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                    .accessibilityHint("查看上下文详情")
                 }
-                .buttonStyle(.plain)
-                .disabled(item.details.isEmpty)
                 if !item.attachments.isEmpty {
                     RemoteMessageImageGallery(
                         attachments: item.attachments,
@@ -3646,10 +3881,36 @@ private struct ConversationItemView: View {
                 Button(action: onOpenDetails) {
                     statusRow
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                 .accessibilityHint("查看状态详情")
             }
         }
+    }
+
+    private var contextRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(item.title ?? "上下文")
+                .font(.caption.weight(.semibold))
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text(item.text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            if !item.details.isEmpty {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 7)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     private var statusRow: some View {
@@ -3804,12 +4065,16 @@ private struct TrajectoryLedgerView: View {
     let records: [RemoteTrajectoryRecord]
     @Binding var query: String
     let onOpenDetails: (RemoteTrajectoryRecord) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
             ledgerToolbar
-            trajectoryOverview
-                .padding(.bottom, 8)
+                .id("trajectory-top")
+            if !dynamicTypeSize.isAccessibilitySize {
+                trajectoryOverview
+                    .padding(.bottom, 8)
+            }
             Rectangle()
                 .fill(RemoteTheme.hairline)
                 .frame(height: 0.5)
@@ -3838,17 +4103,32 @@ private struct TrajectoryLedgerView: View {
 
                         VStack(spacing: 0) {
                             ForEach(Array(group.records.enumerated()), id: \.element.id) { index, record in
-                                if record.details.isEmpty {
-                                    trajectoryRow(record)
-                                        .accessibilityElement(children: .combine)
-                                } else {
-                                    Button {
-                                        onOpenDetails(record)
-                                    } label: {
+                                Group {
+                                    if record.details.isEmpty {
                                         trajectoryRow(record)
+                                            .accessibilityElement(children: .combine)
+                                    } else {
+                                        Button {
+                                            onOpenDetails(record)
+                                        } label: {
+                                            trajectoryRow(record)
+                                        }
+                                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 8))
+                                        .accessibilityHint("查看事件详情")
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityHint("查看事件详情")
+                                }
+                                .id(record.id)
+                                .background {
+                                    GeometryReader { rowGeometry in
+                                        Color.clear.preference(
+                                            key: ConversationVisibleAnchorPreferenceKey.self,
+                                            value: [
+                                                "trajectory:\(record.id)": rowGeometry.frame(
+                                                    in: .named("conversation-scroll")
+                                                ),
+                                            ]
+                                        )
+                                    }
                                 }
 
                                 if index < group.records.count - 1 {
@@ -3866,43 +4146,45 @@ private struct TrajectoryLedgerView: View {
     }
 
     private func trajectoryRow(_ record: RemoteTrajectoryRecord) -> some View {
-        HStack(alignment: .center, spacing: 9) {
-            Image(systemName: icon(for: record.kind))
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(kindColor(record))
-                .frame(width: 24, height: 24)
-                .background(kindColor(record).opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(record.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if let step = record.step {
-                        Text("步骤 \(step + 1)")
-                            .font(.caption2.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(.tertiary)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .top, spacing: 9) {
+                        trajectoryIcon(record)
+                        Text(record.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
                     }
+                    Text(record.summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    trajectoryMetadata(record)
                 }
-                Text(record.summary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 6)
-            if record.state == .running
-                && record.kind != .goal
-                && record.kind != .plan {
-                ProgressView().controlSize(.mini)
             } else {
-                VStack(alignment: .trailing, spacing: 2) {
-                    if let duration = record.duration {
-                        Text(durationLabel(duration))
+                HStack(alignment: .center, spacing: 9) {
+                    trajectoryIcon(record)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text(record.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if let step = record.step {
+                                Text("步骤 \(step + 1)")
+                                    .font(.caption2.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        Text(record.summary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    Text("#\(record.sequence)")
+                    Spacer(minLength: 6)
+                    trajectoryMetadata(record)
                 }
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 8)
@@ -3910,12 +4192,56 @@ private struct TrajectoryLedgerView: View {
         .contentShape(Rectangle())
     }
 
+    private func trajectoryIcon(_ record: RemoteTrajectoryRecord) -> some View {
+        Image(systemName: icon(for: record.kind))
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(kindColor(record))
+            .frame(width: 24, height: 24)
+            .background(kindColor(record).opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func trajectoryMetadata(_ record: RemoteTrajectoryRecord) -> some View {
+        if record.state == .running
+            && record.kind != .goal
+            && record.kind != .plan {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("执行中")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        } else {
+            HStack(spacing: 8) {
+                if let step = record.step, dynamicTypeSize.isAccessibilitySize {
+                    Text("步骤 \(step + 1)")
+                }
+                if let duration = record.duration {
+                    Text(durationLabel(duration))
+                }
+                Text("#\(record.sequence)")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+        }
+    }
+
     private var ledgerToolbar: some View {
-        HStack(spacing: 13) {
-            metric("耗时", value: durationLabel(trajectoryDuration))
-            metric("轮次", value: "\(Set(filteredRecords.compactMap(\.turn)).count)")
-            metric("调用", value: "\(filteredRecords.filter { $0.kind == .tool }.count)")
-            Spacer(minLength: 0)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Text("总耗时 \(durationLabel(trajectoryDuration)) · \(Set(filteredRecords.compactMap(\.turn)).count) 轮 · \(filteredRecords.filter { $0.kind == .tool }.count) 次调用")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 13) {
+                    metric("耗时", value: durationLabel(trajectoryDuration))
+                    metric("轮次", value: "\(Set(filteredRecords.compactMap(\.turn)).count)")
+                    metric("调用", value: "\(filteredRecords.filter { $0.kind == .tool }.count)")
+                    Spacer(minLength: 0)
+                }
+            }
         }
         .padding(.vertical, 9)
     }
@@ -4003,13 +4329,13 @@ private struct TrajectoryLedgerView: View {
         }
     }
 
-    private struct Group: Identifiable {
+    private struct TrajectoryGroup: Identifiable {
         let turn: Int?
         let records: [RemoteTrajectoryRecord]
         var id: String { turn.map { "turn:\($0)" } ?? "context" }
     }
 
-    private var groups: [Group] {
+    private var groups: [TrajectoryGroup] {
         let grouped = Dictionary(grouping: filteredRecords, by: \.turn)
         return grouped.keys.sorted { lhs, rhs in
             switch (lhs, rhs) {
@@ -4018,10 +4344,10 @@ private struct TrajectoryLedgerView: View {
             case (_, nil): false
             case (.some(let left), .some(let right)): left < right
             }
-        }.map { Group(turn: $0, records: grouped[$0, default: []]) }
+        }.map { TrajectoryGroup(turn: $0, records: grouped[$0, default: []]) }
     }
 
-    private func groupTitle(_ group: Group) -> String {
+    private func groupTitle(_ group: TrajectoryGroup) -> String {
         if let turn = group.turn { return "第 \(turn + 1) 轮" }
         return group.records.contains(where: { [.goal, .plan].contains($0.kind) })
             ? "会话状态与上下文"
@@ -4164,7 +4490,7 @@ private struct RemoteMessageImageView: View {
                         .clipped()
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                 .accessibilityLabel(attachment.name ?? "图片")
                 .accessibilityHint("打开图片预览")
             case .failed:
@@ -4182,7 +4508,7 @@ private struct RemoteMessageImageView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                 .background(RemoteTheme.mutedSurface)
                 .accessibilityLabel("图片加载失败，重试")
             }
@@ -4249,15 +4575,17 @@ private struct RemoteImageViewer: View {
     let name: String?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .padding(.horizontal, 8)
-                .accessibilityLabel(name ?? "图片")
+            RemoteZoomableImageView(
+                image: image,
+                accessibilityName: name ?? "图片",
+                reduceMotion: reduceMotion
+            )
+            .ignoresSafeArea()
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack(spacing: 10) {
@@ -4271,12 +4599,180 @@ private struct RemoteImageViewer: View {
                         .frame(width: 44, height: 44)
                         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 13))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteToolbarButtonStyle(tint: .white))
                 .foregroundStyle(.white)
                 .accessibilityLabel("关闭图片预览")
             }
             .padding(.horizontal, 12)
         }
+        .accessibilityAction(.escape) { dismiss() }
+    }
+}
+
+private struct RemoteZoomableImageView: UIViewRepresentable {
+    let image: UIImage
+    let accessibilityName: String
+    let reduceMotion: Bool
+
+    func makeUIView(context: Context) -> RemoteZoomCanvas {
+        RemoteZoomCanvas()
+    }
+
+    func updateUIView(_ view: RemoteZoomCanvas, context: Context) {
+        view.configure(
+            image: image,
+            accessibilityName: accessibilityName,
+            reduceMotion: reduceMotion
+        )
+    }
+}
+
+private final class RemoteZoomCanvas: UIView, UIScrollViewDelegate {
+    private let scrollView = UIScrollView()
+    private let imageView = UIImageView()
+    private var renderedImage: UIImage?
+    private var reduceMotion = false
+    private var previousBoundsSize: CGSize = .zero
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.backgroundColor = .black
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 4
+        scrollView.bouncesZoom = true
+        scrollView.decelerationRate = .normal
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        imageView.contentMode = .scaleAspectFit
+        imageView.isAccessibilityElement = false
+        scrollView.addSubview(imageView)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .image
+        accessibilityHint = "使用放大和缩小操作调整图片"
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "放大", target: self, selector: #selector(zoomIn)),
+            UIAccessibilityCustomAction(name: "缩小", target: self, selector: #selector(zoomOut)),
+        ]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size != previousBoundsSize else { return }
+        previousBoundsSize = bounds.size
+        resetLayout()
+    }
+
+    func configure(image: UIImage, accessibilityName: String, reduceMotion: Bool) {
+        self.reduceMotion = reduceMotion
+        accessibilityLabel = accessibilityName
+        if renderedImage !== image {
+            renderedImage = image
+            imageView.image = image
+            previousBoundsSize = .zero
+            setNeedsLayout()
+        }
+        updateAccessibilityValue()
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerImage()
+        updateAccessibilityValue()
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if scrollView.zoomScale > scrollView.minimumZoomScale + 0.01 {
+            scrollView.setZoomScale(scrollView.minimumZoomScale, animated: !reduceMotion)
+        } else {
+            zoom(to: 2.5, around: gesture.location(in: imageView))
+        }
+    }
+
+    @objc private func zoomIn() -> Bool {
+        let next = min(scrollView.zoomScale + 0.5, scrollView.maximumZoomScale)
+        zoom(to: next, around: CGPoint(x: imageView.bounds.midX, y: imageView.bounds.midY))
+        return true
+    }
+
+    @objc private func zoomOut() -> Bool {
+        let next = max(scrollView.zoomScale - 0.5, scrollView.minimumZoomScale)
+        scrollView.setZoomScale(next, animated: !reduceMotion)
+        return true
+    }
+
+    private func resetLayout() {
+        guard let image = renderedImage,
+              scrollView.bounds.width > 0,
+              scrollView.bounds.height > 0 else { return }
+        scrollView.setZoomScale(1, animated: false)
+        let available = CGSize(
+            width: max(scrollView.bounds.width - 16, 1),
+            height: max(scrollView.bounds.height, 1)
+        )
+        let source = CGSize(width: max(image.size.width, 1), height: max(image.size.height, 1))
+        let scale = min(available.width / source.width, available.height / source.height)
+        imageView.transform = .identity
+        imageView.frame = CGRect(
+            origin: .zero,
+            size: CGSize(width: source.width * scale, height: source.height * scale)
+        )
+        scrollView.contentSize = imageView.frame.size
+        centerImage()
+        updateAccessibilityValue()
+    }
+
+    private func centerImage() {
+        let contentSize = scrollView.contentSize
+        let horizontalInset = max((scrollView.bounds.width - contentSize.width) / 2, 0)
+        let verticalInset = max((scrollView.bounds.height - contentSize.height) / 2, 0)
+        scrollView.contentInset = UIEdgeInsets(
+            top: verticalInset,
+            left: horizontalInset,
+            bottom: verticalInset,
+            right: horizontalInset
+        )
+    }
+
+    private func zoom(to scale: CGFloat, around point: CGPoint) {
+        let target = min(max(scale, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
+        let rect = CGRect(
+            x: point.x - scrollView.bounds.width / (target * 2),
+            y: point.y - scrollView.bounds.height / (target * 2),
+            width: scrollView.bounds.width / target,
+            height: scrollView.bounds.height / target
+        )
+        scrollView.zoom(to: rect, animated: !reduceMotion)
+    }
+
+    private func updateAccessibilityValue() {
+        accessibilityValue = scrollView.zoomScale <= 1.01
+            ? "适合屏幕"
+            : "已放大 \(Int(scrollView.zoomScale * 100))%"
     }
 }
 
@@ -4356,6 +4852,7 @@ private struct ConversationDetailSheet: View {
     let item: RemoteConversationItem
     let loadAttachment: (RemoteImageAttachment) async throws -> Data
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedSectionID: String?
     @State private var copied = false
 
@@ -4416,20 +4913,70 @@ private struct ConversationDetailSheet: View {
     }
 
     private var detailHeader: some View {
-        HStack(spacing: 8) {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 5) {
+                    detailHeaderIdentity
+                    HStack {
+                        Spacer(minLength: 0)
+                        detailHeaderActions
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    detailHeaderIdentity
+                    Spacer(minLength: 4)
+                    detailHeaderActions
+                }
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(.leading, 12)
+        .padding(.trailing, 2)
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 : 0)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(RemoteTheme.hairline)
+                .frame(height: 0.5)
+        }
+    }
+
+    private var detailHeaderIdentity: some View {
+        HStack(alignment: .top, spacing: 8) {
             Circle()
                 .fill(kindColor)
                 .frame(width: 5, height: 5)
-            Text(headerTitle)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-            if let metadata = item.metadata.first, !metadata.isEmpty {
-                Text(metadata)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                .padding(.top, 7)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(headerTitle)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(3)
+                    if let metadata = item.metadata.first, !metadata.isEmpty {
+                        Text(metadata)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                    }
+                }
+            } else {
+                Text(headerTitle)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                if let metadata = item.metadata.first, !metadata.isEmpty {
+                    Text(metadata)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
-            Spacer(minLength: 4)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var detailHeaderActions: some View {
+        HStack(spacing: 2) {
             Button {
                 copy(copyPayload)
             } label: {
@@ -4438,8 +4985,7 @@ private struct ConversationDetailSheet: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(copied ? RemoteTheme.success : Color.secondary)
+            .buttonStyle(RemoteToolbarButtonStyle(tint: copied ? RemoteTheme.success : Color.secondary))
             .accessibilityLabel(copied ? "已复制" : copyAccessibilityLabel)
 
             Button {
@@ -4450,17 +4996,8 @@ private struct ConversationDetailSheet: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .buttonStyle(RemoteToolbarButtonStyle(tint: .secondary))
             .accessibilityLabel("关闭详情")
-        }
-        .frame(minHeight: 44)
-        .padding(.leading, 12)
-        .padding(.trailing, 2)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(RemoteTheme.hairline)
-                .frame(height: 0.5)
         }
     }
 
@@ -4488,7 +5025,7 @@ private struct ConversationDetailSheet: View {
                                 }
                             }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 8))
                     .accessibilityAddTraits(selectedSectionID == section.id ? .isSelected : [])
                 }
             }
@@ -4962,7 +5499,7 @@ private struct RemoteGoalStatusDock: View {
             .frame(minHeight: 50)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
         .background(RemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
@@ -5038,16 +5575,19 @@ private struct QueueDockView: View {
     @State private var expanded = false
     @State private var editingItem: RemoteQueuedMessage?
     @State private var editText = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             if queued.count > 1 {
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
+                        expanded.toggle()
+                    }
                 } label: {
                     queueHeader
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                 .accessibilityHint(expanded ? "收起排队消息" : "展开排队消息")
             } else {
                 queueHeader
@@ -5160,10 +5700,21 @@ private struct QueueDockView: View {
 }
 
 private struct ConversationBottomOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct ConversationVisibleAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(
+        value: inout [String: CGRect],
+        nextValue: () -> [String: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
     }
 }
 
@@ -5173,6 +5724,8 @@ private struct InteractionCard: View {
     let onRespond: (RemoteInteractionDecision) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var selected: [String: Set<String>] = [:]
     @State private var custom: [String: String] = [:]
 
@@ -5224,7 +5777,9 @@ private struct InteractionCard: View {
                 }
                 .padding(14)
             }
-            .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 238 : 318)
+            .frame(maxHeight: verticalSizeClass == .compact
+                   ? 148
+                   : (dynamicTypeSize.isAccessibilitySize ? 238 : 318))
 
             Rectangle()
                 .fill(RemoteTheme.hairline)
@@ -5241,12 +5796,11 @@ private struct InteractionCard: View {
         }
         .shadow(color: RemoteTheme.shadow.opacity(0.55), radius: 10, y: 4)
         .disabled(isResponding)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .overlay {
             if isResponding {
                 ZStack {
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(RemoteTheme.surface.opacity(0.82))
+                        .fill(reduceTransparency ? RemoteTheme.surface : RemoteTheme.surface.opacity(0.82))
                     VStack(spacing: 9) {
                         ProgressView()
                         Text("正在提交…")
@@ -5307,7 +5861,20 @@ private struct InteractionCard: View {
                                 : Color.clear
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(optionAccessibilityLabel(option))
+                    .accessibilityValue(
+                        isSelected(option.label, for: question) ? "已选择" : "未选择"
+                    )
+                    .accessibilityHint(
+                        question.allowsMultipleSelection
+                            ? "可多选，双击切换"
+                            : "单选，双击选择"
+                    )
+                    .accessibilityAddTraits(
+                        isSelected(option.label, for: question) ? .isSelected : []
+                    )
 
                     if index < question.options.count - 1 {
                         Rectangle()
@@ -5327,6 +5894,7 @@ private struct InteractionCard: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .remoteFieldSurface()
+                .accessibilityLabel("\(question.header ?? question.question)的其他回答")
         }
     }
 
@@ -5371,6 +5939,7 @@ private struct InteractionCard: View {
     }
 
     private func toggle(_ label: String, for question: RemoteQuestion) {
+        UISelectionFeedbackGenerator().selectionChanged()
         if question.allowsMultipleSelection {
             var values = selected[question.id, default: []]
             if values.contains(label) { values.remove(label) } else { values.insert(label) }
@@ -5383,6 +5952,13 @@ private struct InteractionCard: View {
 
     private func isSelected(_ label: String, for question: RemoteQuestion) -> Bool {
         selected[question.id, default: []].contains(label)
+    }
+
+    private func optionAccessibilityLabel(_ option: RemoteQuestion.Option) -> String {
+        guard let description = option.description, !description.isEmpty else {
+            return option.label
+        }
+        return "\(option.label)，\(description)"
     }
 
     private func customBinding(for question: RemoteQuestion) -> Binding<String> {

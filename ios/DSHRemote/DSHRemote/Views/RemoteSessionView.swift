@@ -10,6 +10,7 @@ struct RemoteSessionView: View {
     @State private var didManuallyChangeExpansion = false
     @State private var previousProjectPathsByID: [String: String] = [:]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(host: RemoteHost) {
         let client = LiveHarnessRemoteClient(
@@ -298,7 +299,7 @@ struct RemoteSessionView: View {
 
     private func toggleProject(_ id: String) {
         didManuallyChangeExpansion = true
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
             if expandedProjectIDs.contains(id) {
                 expandedProjectIDs.remove(id)
             } else {
@@ -308,7 +309,7 @@ struct RemoteSessionView: View {
     }
 
     private func toggleAllSessions(_ id: String) {
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
             if fullyExpandedProjectIDs.contains(id) {
                 fullyExpandedProjectIDs.remove(id)
             } else {
@@ -388,7 +389,7 @@ private struct RemoteProjectCard: View {
             Button(action: toggleExpanded) {
                 projectHeader
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
             .accessibilityLabel(project.title)
             .accessibilityValue(projectAccessibilityValue)
             .accessibilityHint(isExpanded ? "轻点收起会话" : "轻点展开会话")
@@ -412,7 +413,7 @@ private struct RemoteProjectCard: View {
                         } label: {
                             RemoteProjectSessionRow(session: session)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
 
                         if index < visibleSessions.count - 1 || hasHiddenSessions || showsAllSessions {
                             Divider()
@@ -435,7 +436,7 @@ private struct RemoteProjectCard: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                     }
                 }
             }
@@ -626,7 +627,7 @@ private struct StaleProjectsBanner: View {
                     bannerMessage
                     Button("重试", action: retry)
                         .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                         .foregroundStyle(RemoteTheme.accent)
                         .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 }
@@ -637,7 +638,7 @@ private struct StaleProjectsBanner: View {
                     Spacer(minLength: 8)
                     Button("重试", action: retry)
                         .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
                         .foregroundStyle(RemoteTheme.accent)
                         .frame(minWidth: 44, minHeight: 44)
                 }

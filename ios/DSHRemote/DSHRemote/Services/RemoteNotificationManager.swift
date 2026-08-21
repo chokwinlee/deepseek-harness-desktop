@@ -10,11 +10,13 @@ struct RemoteNotificationEvent {
 
     let id: String
     let kind: Kind
+    let sessionID: String?
     let body: String
 
-    init(id: String, kind: Kind, body: String) {
+    init(id: String, kind: Kind, sessionID: String? = nil, body: String) {
         self.id = id
         self.kind = kind
+        self.sessionID = sessionID
         self.body = body
     }
 
@@ -28,16 +30,19 @@ struct RemoteNotificationEvent {
 
         self.id = id
         self.kind = kind
+        self.sessionID = payload["sessionID"] as? String
         self.body = (payload["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
-final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegate {
+final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = RemoteNotificationManager()
 
     private let center = UNUserNotificationCenter.current()
     private let deliveredEventLock = NSLock()
+    private let activeSessionLock = NSLock()
     private var deliveredEventIDs = Set<String>()
+    private var activeSessionID: String?
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     private override init() {
@@ -52,6 +57,18 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .notDetermined else { return }
         _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    }
+
+    func setActiveSession(_ sessionID: String) {
+        activeSessionLock.lock()
+        activeSessionID = sessionID
+        activeSessionLock.unlock()
+    }
+
+    func clearActiveSession(_ sessionID: String) {
+        activeSessionLock.lock()
+        if activeSessionID == sessionID { activeSessionID = nil }
+        activeSessionLock.unlock()
     }
 
     func deliver(_ event: RemoteNotificationEvent) {
@@ -73,15 +90,19 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
             content.categoryIdentifier = event.kind == .completed
                 ? "HARNESS_REMOTE_COMPLETED"
                 : "HARNESS_REMOTE_ATTENTION"
-            content.userInfo = [
+            var userInfo: [String: Any] = [
                 "eventID": event.id,
                 "kind": event.kind.rawValue,
             ]
+            if let sessionID = event.sessionID {
+                userInfo["sessionID"] = sessionID
+            }
+            content.userInfo = userInfo
 
             let request = UNNotificationRequest(
                 identifier: "harness-remote-\(event.id)",
                 content: content,
-                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.2, repeats: false)
+                trigger: nil
             )
             try? await center.add(request)
         }
@@ -113,7 +134,24 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        let sessionID = notification.request.content.userInfo["sessionID"] as? String
+        guard sessionID != nil, sessionID == currentActiveSessionID() else {
+            return [.banner, .list]
+        }
+        let kind = (notification.request.content.userInfo["kind"] as? String)
+            .flatMap(RemoteNotificationEvent.Kind.init(rawValue:))
+        await MainActor.run {
+            UINotificationFeedbackGenerator().notificationOccurred(
+                kind == .completed ? .success : .warning
+            )
+        }
+        return []
+    }
+
+    private func currentActiveSessionID() -> String? {
+        activeSessionLock.lock()
+        defer { activeSessionLock.unlock() }
+        return activeSessionID
     }
 
     private func markAsDelivered(_ eventID: String) -> Bool {

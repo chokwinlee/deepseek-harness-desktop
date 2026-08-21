@@ -48,32 +48,54 @@ struct AboutRemoteView: View {
     }
 
     private var aboutHero: some View {
-        HStack(spacing: 15) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 19)
-                    .fill(RemoteTheme.accent.opacity(0.11))
-                RoundedRectangle(cornerRadius: 19)
-                    .stroke(RemoteTheme.accent.opacity(0.16), lineWidth: 1)
-                Image(systemName: "iphone.and.arrow.forward")
-                    .font(.system(size: 29, weight: .semibold))
-                    .foregroundStyle(RemoteTheme.accent)
-            }
-            .frame(width: 66, height: 66)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("DSH Remote")
-                    .font(.title2.weight(.bold))
-                Text("开源、独立的 Harness 手机控制端")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("连接你的电脑，不经过项目方中继")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    aboutHeroIcon
+                    aboutHeroCopy
+                }
+            } else {
+                HStack(spacing: 15) {
+                    aboutHeroIcon
+                    aboutHeroCopy
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(15)
         .remoteSurface(cornerRadius: 16)
+    }
+
+    private var aboutHeroIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 19)
+                .fill(RemoteTheme.accent.opacity(0.11))
+            RoundedRectangle(cornerRadius: 19)
+                .stroke(RemoteTheme.accent.opacity(0.16), lineWidth: 1)
+            Image(systemName: "iphone.and.arrow.forward")
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 23 : 29, weight: .semibold))
+                .foregroundStyle(RemoteTheme.accent)
+        }
+        .frame(
+            width: dynamicTypeSize.isAccessibilitySize ? 54 : 66,
+            height: dynamicTypeSize.isAccessibilitySize ? 54 : 66
+        )
+        .accessibilityHidden(true)
+    }
+
+    private var aboutHeroCopy: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DSH Remote")
+                .font(.title2.weight(.bold))
+            Text("开源、独立的 Harness 手机控制端")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("连接你的电脑，不经过项目方中继")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
 
     private var privacySection: some View {
@@ -101,7 +123,7 @@ struct AboutRemoteView: View {
                 Link(destination: privacyURL) {
                     AboutActionRow(icon: "hand.raised", title: "查看完整隐私政策")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
             }
             .remoteSurface(cornerRadius: 14)
         }
@@ -122,7 +144,7 @@ struct AboutRemoteView: View {
                 } label: {
                     AboutActionRow(icon: "bell", title: "打开系统通知设置")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
             }
             .remoteSurface(cornerRadius: 14)
         }
@@ -142,12 +164,12 @@ struct AboutRemoteView: View {
                 Link(destination: issuesURL) {
                     AboutActionRow(icon: "exclamationmark.bubble", title: "获取支持或报告问题")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
                 divider
                 Link(destination: sourceURL) {
                     AboutActionRow(icon: "chevron.left.forwardslash.chevron.right", title: "查看源代码与许可证")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
             }
             .remoteSurface(cornerRadius: 14)
         }
@@ -207,6 +229,7 @@ private struct AboutInfoRow: View {
                 .foregroundStyle(RemoteTheme.accent)
                 .frame(width: 24, height: 24)
                 .background(RemoteTheme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -219,6 +242,7 @@ private struct AboutInfoRow: View {
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -232,6 +256,7 @@ private struct AboutActionRow: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
@@ -239,6 +264,7 @@ private struct AboutActionRow: View {
             Image(systemName: "arrow.up.right")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 13)
         .frame(minHeight: 48)

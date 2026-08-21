@@ -3,6 +3,7 @@ import SwiftUI
 struct HostListView: View {
     @EnvironmentObject private var hostStore: RemoteHostStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var showsAddHost: Bool
     @State private var showsAbout = false
     @State private var pendingRemoval: RemoteHost?
@@ -73,7 +74,6 @@ struct HostListView: View {
         .padding(.top, 8)
         .padding(.bottom, 12)
         .background(RemoteTheme.canvas)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private var homeActions: some View {
@@ -109,7 +109,7 @@ struct HostListView: View {
                         NavigationLink(value: host) {
                             HostRow(host: host)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
 
                         Menu {
                             Button("删除电脑", systemImage: "trash", role: .destructive) {
@@ -147,7 +147,7 @@ struct HostListView: View {
 
     private func remove(_ host: RemoteHost) {
         guard let index = hostStore.hosts.firstIndex(where: { $0.id == host.id }) else { return }
-        withAnimation(.easeOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
             hostStore.remove(at: IndexSet(integer: index))
         }
     }
@@ -234,7 +234,7 @@ private struct EmptyConnectionView: View {
                     .padding(13)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
                 .remoteSurface(cornerRadius: 14)
                 .padding(.top, 32)
             }
@@ -286,9 +286,10 @@ private struct HostRow: View {
                             .lineLimit(2)
                             .truncationMode(.middle)
                         Spacer(minLength: 4)
-                        RemoteStatusPill(text: host.transportLabel, color: transportColor)
                     }
                     .padding(.leading, 50)
+                    RemoteStatusPill(text: host.transportLabel, color: transportColor)
+                        .padding(.leading, 50)
                 }
             } else {
                 HStack(spacing: 12) {

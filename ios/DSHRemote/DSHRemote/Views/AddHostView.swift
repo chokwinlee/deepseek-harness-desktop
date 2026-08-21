@@ -8,12 +8,14 @@ struct AddHostView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var hostStore: RemoteHostStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var name = ""
     @State private var address = ""
     @State private var showsScanner = false
     @State private var isChecking = false
     @State private var errorMessage: String?
+    @State private var verificationTask: Task<Void, Never>?
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -22,7 +24,8 @@ struct AddHostView: View {
                 RemoteSheetHeader(
                     title: "连接电脑",
                     subtitle: "扫码最快，也可以输入安全的 HTTPS 地址",
-                    closeLabel: "取消"
+                    closeLabel: "取消",
+                    onClose: cancelAndDismiss
                 )
 
                 ScrollView {
@@ -58,8 +61,10 @@ struct AddHostView: View {
             }
             .background(RemoteTheme.canvas.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+            .interactiveDismissDisabled(isChecking)
             .sheet(isPresented: $showsScanner) {
                 RemoteScannerSheet { value in
+                    UISelectionFeedbackGenerator().selectionChanged()
                     showsScanner = false
                     address = value
                     errorMessage = nil
@@ -71,6 +76,17 @@ struct AddHostView: View {
                 if let connection = hostStore.consumePendingImportedConnection() {
                     address = connection.importedURL.absoluteString
                 }
+            }
+            .onDisappear {
+                verificationTask?.cancel()
+                verificationTask = nil
+            }
+            .onChange(of: errorMessage) { _, message in
+                guard let message, !message.isEmpty else { return }
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: "连接失败，\(message)"
+                )
             }
         }
     }
@@ -88,7 +104,7 @@ struct AddHostView: View {
                     showsDisclosure: true
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
             .remoteSurface(cornerRadius: 14)
             .accessibilityHint("打开相机扫描")
         } else {
@@ -106,31 +122,56 @@ struct AddHostView: View {
         detail: String,
         showsDisclosure: Bool
     ) -> some View {
-        HStack(alignment: .center, spacing: 13) {
-            Image(systemName: "qrcode.viewfinder")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(RemoteTheme.accent)
-                .frame(width: 42, height: 42)
-                .background(RemoteTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                Text(detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(2)
-            }
-            Spacer(minLength: 4)
-            if showsDisclosure {
-                Image(systemName: "arrow.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tertiary)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        connectionGuideIcon
+                        Spacer(minLength: 8)
+                        if showsDisclosure { connectionGuideDisclosure }
+                    }
+                    connectionGuideCopy(title: title, detail: detail)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 13) {
+                    connectionGuideIcon
+                    connectionGuideCopy(title: title, detail: detail)
+                    Spacer(minLength: 4)
+                    if showsDisclosure { connectionGuideDisclosure }
+                }
             }
         }
         .padding(14)
         .frame(minHeight: 72)
         .contentShape(Rectangle())
+    }
+
+    private var connectionGuideIcon: some View {
+        Image(systemName: "qrcode.viewfinder")
+            .font(.system(size: 19, weight: .semibold))
+            .foregroundStyle(RemoteTheme.accent)
+            .frame(width: 42, height: 42)
+            .background(RemoteTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityHidden(true)
+    }
+
+    private var connectionGuideDisclosure: some View {
+        Image(systemName: "arrow.right")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+    }
+
+    private func connectionGuideCopy(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.body.weight(.semibold))
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var nameField: some View {
@@ -184,7 +225,7 @@ struct AddHostView: View {
                             .foregroundStyle(RemoteTheme.accent)
                             .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
                     .accessibilityLabel("扫描二维码")
                 }
             }
@@ -258,21 +299,46 @@ struct AddHostView: View {
             connection = try RemoteEndpointValidator.connection(from: address)
         } catch {
             errorMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             return
         }
 
         isChecking = true
-        Task {
+        verificationTask?.cancel()
+        verificationTask = Task { @MainActor in
             do {
                 try await RemoteConnectionVerifier.verify(connection)
+                try Task.checkCancellation()
                 hostStore.add(name: name, connection: connection)
-                await RemoteNotificationManager.shared.requestAuthorizationIfNeeded()
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                isChecking = false
+                verificationTask = nil
                 dismiss()
+                Task {
+                    await RemoteNotificationManager.shared.requestAuthorizationIfNeeded()
+                }
+            } catch is CancellationError {
+                isChecking = false
+                verificationTask = nil
             } catch {
+                guard !Task.isCancelled else {
+                    isChecking = false
+                    verificationTask = nil
+                    return
+                }
                 errorMessage = connectionMessage(for: error)
                 isChecking = false
+                verificationTask = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
+    }
+
+    private func cancelAndDismiss() {
+        verificationTask?.cancel()
+        verificationTask = nil
+        isChecking = false
+        dismiss()
     }
 
     private func connectionMessage(for error: Error) -> String {
@@ -294,6 +360,7 @@ struct AddHostView: View {
 
 private struct RemoteScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var errorMessage: String?
 
     let onResult: (String) -> Void
@@ -328,18 +395,25 @@ private struct RemoteScannerSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("扫描电脑二维码")
                         .font(.headline)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     Text("对准 DSH Desktop 显示的二维码")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .frame(width: 44, height: 44)
                         .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteToolbarButtonStyle(tint: .white))
                 .accessibilityLabel("取消扫描")
+                .fixedSize()
+                .layoutPriority(2)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)

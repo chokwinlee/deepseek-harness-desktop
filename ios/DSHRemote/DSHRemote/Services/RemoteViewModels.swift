@@ -149,6 +149,7 @@ final class RemoteHostViewModel: ObservableObject {
             RemoteNotificationManager.shared.deliver(RemoteNotificationEvent(
                 id: "completed:\(session.id):\(session.updatedAt.timeIntervalSince1970)",
                 kind: .completed,
+                sessionID: session.id,
                 body: "“\(session.title)”已在你的电脑上完成。"
             ))
         }
@@ -500,16 +501,18 @@ final class RemoteConversationViewModel: ObservableObject {
         }
     }
 
-    func respond(_ decision: RemoteInteractionDecision) async {
-        guard let interaction, !isResponding else { return }
+    func respond(_ decision: RemoteInteractionDecision) async -> Bool {
+        guard let interaction, !isResponding else { return false }
         isResponding = true
         defer { isResponding = false }
         do {
             try await client.respond(to: interaction, decision: decision)
             self.interaction = nil
             await refresh(silently: true)
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -529,6 +532,7 @@ final class RemoteConversationViewModel: ObservableObject {
             RemoteNotificationManager.shared.deliver(RemoteNotificationEvent(
                 id: "attention:\(interaction.id)",
                 kind: .attention,
+                sessionID: session.id,
                 body: "“\(session.title)”正在等待你的确认。"
             ))
         case .interactionResolved(let id):
@@ -545,6 +549,7 @@ final class RemoteConversationViewModel: ObservableObject {
         RemoteNotificationManager.shared.deliver(RemoteNotificationEvent(
             id: "completed:\(latest.id):\(latest.updatedAt.timeIntervalSince1970)",
             kind: .completed,
+            sessionID: latest.id,
             body: "“\(latest.title)”已在你的电脑上完成。"
         ))
     }
