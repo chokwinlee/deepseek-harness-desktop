@@ -98,6 +98,98 @@ struct RemoteConversationSnapshot: Hashable, Sendable {
     var trajectory: [RemoteTrajectoryRecord] = []
     var goal: RemoteGoalState? = nil
     var plan: RemotePlanState? = nil
+    var imageLimits: RemoteImageLimits? = nil
+}
+
+struct RemoteImageLimits: Hashable, Sendable {
+    let maxImageBytes: Int
+    let maxImagesPerMessage: Int
+    let maxMessageImageBytes: Int
+    let maxImagePixels: Int
+    let maxImageDimension: Int?
+    let mediaTypes: [String]
+}
+
+struct RemotePromptImage: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let data: Data
+    let thumbnailData: Data
+    let mediaType: String
+    let name: String?
+    let width: Int
+    let height: Int
+
+    init(
+        id: UUID = UUID(),
+        data: Data,
+        thumbnailData: Data? = nil,
+        mediaType: String,
+        name: String?,
+        width: Int,
+        height: Int
+    ) {
+        self.id = id
+        self.data = data
+        self.thumbnailData = thumbnailData ?? data
+        self.mediaType = mediaType
+        self.name = name
+        self.width = width
+        self.height = height
+    }
+}
+
+struct RemoteFileReferenceCandidate: Identifiable, Hashable, Sendable {
+    enum Kind: String, Hashable, Sendable {
+        case file
+        case directory
+    }
+
+    let path: String
+    let kind: Kind
+
+    var id: String { "\(kind.rawValue):\(path)" }
+}
+
+struct RemoteSessionReferenceCandidate: Identifiable, Hashable, Sendable {
+    let mention: String
+    let sessionID: String
+    let label: String
+    let cwd: String?
+    let createdAt: Date
+
+    var id: String { sessionID }
+}
+
+struct RemoteSubagentEntry: Identifiable, Hashable, Sendable {
+    enum Mode: String, Hashable, Sendable {
+        case oneShot = "one-shot"
+        case continuable
+    }
+
+    enum Activity: String, Hashable, Sendable {
+        case running
+        case inactive
+    }
+
+    enum DiagnosticReason: String, Hashable, Sendable {
+        case corrupt
+        case unsupported
+        case unavailable
+    }
+
+    let id: String
+    let mode: Mode?
+    let activity: Activity?
+    let hasChildren: Bool
+    let label: String?
+    let diagnosticReason: DiagnosticReason?
+
+    var isDiagnostic: Bool { diagnosticReason != nil }
+}
+
+struct RemoteSubagentCatalog: Hashable, Sendable {
+    let entries: [RemoteSubagentEntry]
+    let parentAvailable: Bool
 }
 
 struct RemoteGoalState: Hashable, Sendable {

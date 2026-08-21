@@ -9,9 +9,28 @@ protocol HarnessRemoteClient: Sendable {
     func sessions() async throws -> [RemoteSessionSummary]
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
     func attachment(sessionID: String, attachmentID: String) async throws -> RemoteImageAttachmentPayload
+    func fileReferences(sessionID: String, query: String) async throws -> [RemoteFileReferenceCandidate]
+    func sessionReferences(sessionID: String, query: String) async throws -> [RemoteSessionReferenceCandidate]
+    func subagents(parentSessionID: String) async throws -> RemoteSubagentCatalog
+    func subagentConversation(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        maxMessages: Int
+    ) async throws -> RemoteConversationSnapshot
+    func promptSubagent(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        text: String
+    ) async throws
+    func interruptSubagent(parentSessionID: String, child: RemoteSubagentEntry) async throws
     func models(sessionID: String) async throws -> RemoteModelDirectory
     func selectModel(sessionID: String, selection: RemoteModelSelection) async throws -> RemoteModelSelection
-    func send(_ text: String, to sessionID: String, steer: Bool) async throws
+    func send(
+        _ text: String,
+        images: [RemotePromptImage],
+        to sessionID: String,
+        steer: Bool
+    ) async throws
     func updateQueue(sessionID: String, itemID: String, action: RemoteQueueAction) async throws
     func cancel(sessionID: String) async throws
     func respond(to interaction: RemoteInteraction, decision: RemoteInteractionDecision) async throws
@@ -32,9 +51,14 @@ enum HarnessRemoteClientError: LocalizedError {
         case .mismatchedResponse:
             "电脑返回了无法匹配的响应。"
         case .server(let statusCode):
-            statusCode == 401
-                ? "局域网配对凭据已失效，请重新扫描 Desktop 二维码。"
-                : "电脑返回了 HTTP \(statusCode)。"
+            switch statusCode {
+            case 401:
+                "局域网配对凭据已失效，请重新扫描 Desktop 二维码。"
+            case 413:
+                "图片或消息过大，超过电脑允许的远程传输上限。"
+            default:
+                "电脑返回了 HTTP \(statusCode)。"
+            }
         case .api(_, let message):
             message
         case .unsupportedDecision:
@@ -143,6 +167,104 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         return RemoteImageAttachmentPayload(attachment: attachment, data: data)
     }
 
+    func fileReferences(
+        sessionID: String,
+        query: String
+    ) async throws -> [RemoteFileReferenceCandidate] {
+        let response: [FileReferenceWire] = try await call(
+            "fileReferences/list",
+            payload: ScopedQueryPayload(args: .init(agentId: sessionID, query: query))
+        )
+        return try response.map { try $0.remoteValue() }
+    }
+
+    func sessionReferences(
+        sessionID: String,
+        query: String
+    ) async throws -> [RemoteSessionReferenceCandidate] {
+        let response: [SessionReferenceWire] = try await call(
+            "sessionReferenceResolver/candidates",
+            payload: ScopedQueryPayload(args: .init(agentId: sessionID, query: query))
+        )
+        return try response.map { try $0.remoteValue() }
+    }
+
+    func subagents(parentSessionID: String) async throws -> RemoteSubagentCatalog {
+        let response: SubagentCatalogWire = try await call(
+            "subagent.list",
+            payload: ParentSessionPayload(parentSessionId: parentSessionID)
+        )
+        return RemoteSubagentCatalog(
+            entries: try response.entries.map { try $0.remoteValue() },
+            parentAvailable: response.parentAvailable
+        )
+    }
+
+    func subagentConversation(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        maxMessages: Int
+    ) async throws -> RemoteConversationSnapshot {
+        guard let mode = child.mode, !child.isDiagnostic else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        let response: SessionHistoryWire = try await call(
+            "subagent.history",
+            payload: SubagentHistoryPayload(
+                parentSessionId: parentSessionID,
+                childSessionId: child.id,
+                mode: mode.rawValue,
+                maxMessages: maxMessages
+            )
+        )
+        return ConversationFolder.fold(response)
+    }
+
+    func promptSubagent(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        text: String
+    ) async throws {
+        guard child.mode == .continuable else {
+            throw HarnessRemoteClientError.api(
+                code: "subagent-not-resumable",
+                message: "这个子代理不支持继续对话。"
+            )
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let _: SubagentPromptReceiptWire = try await call(
+            "subagent.prompt",
+            payload: SubagentPromptPayload(
+                parentSessionId: parentSessionID,
+                childSessionId: child.id,
+                mode: RemoteSubagentEntry.Mode.continuable.rawValue,
+                content: [PromptContentPart.text(trimmed)],
+                clientTimeZone: TimeZone.current.identifier
+            )
+        )
+    }
+
+    func interruptSubagent(
+        parentSessionID: String,
+        child: RemoteSubagentEntry
+    ) async throws {
+        guard child.mode == .continuable else {
+            throw HarnessRemoteClientError.api(
+                code: "subagent-not-resumable",
+                message: "这个子代理不能接收停止操作。"
+            )
+        }
+        let _: AcceptedWire = try await call(
+            "subagent.interrupt",
+            payload: SubagentAddressPayload(
+                parentSessionId: parentSessionID,
+                childSessionId: child.id,
+                mode: RemoteSubagentEntry.Mode.continuable.rawValue
+            )
+        )
+    }
+
     func models(sessionID: String) async throws -> RemoteModelDirectory {
         let response: SessionModelsWire = try await call(
             "session.models",
@@ -167,15 +289,23 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         return response.selected.remoteValue
     }
 
-    func send(_ text: String, to sessionID: String, steer: Bool) async throws {
+    func send(
+        _ text: String,
+        images: [RemotePromptImage],
+        to sessionID: String,
+        steer: Bool
+    ) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !images.isEmpty else { return }
+        var content: [PromptContentPart] = []
+        if !trimmed.isEmpty { content.append(.text(trimmed)) }
+        content.append(contentsOf: images.map { .image($0) })
         let _: AcceptedWire = try await call(
             "session.prompt",
             payload: SessionPromptPayload(
                 sessionId: sessionID,
                 mode: steer ? "steer" : "queue",
-                content: [PromptTextPart(type: "text", text: trimmed)],
+                content: content,
                 clientTimeZone: TimeZone.current.identifier
             )
         )
@@ -352,7 +482,11 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
             return value
         }
         if let error = decoded.result.error {
-            throw HarnessRemoteClientError.api(code: error.code, message: error.message)
+            let message = error.code == "attachment-error"
+                && error.message.localizedCaseInsensitiveContains("does not support image input")
+                ? "当前模型不支持图片输入，请先切换到支持视觉的模型。"
+                : error.message
+            throw HarnessRemoteClientError.api(code: error.code, message: message)
         }
         throw HarnessRemoteClientError.invalidResponse
     }
@@ -411,6 +545,24 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         model: "deepseek-v4-flash",
         reasoningEffort: "high"
     )
+    private var uploadedAttachments: [String: RemoteImageAttachmentPayload] = [:]
+    private var demoSubagentRunning = false
+    private var demoSubagentItems: [RemoteConversationItem] = [
+        RemoteConversationItem(
+            id: "demo-subagent-user",
+            kind: .user,
+            title: nil,
+            text: "检查登录态恢复的回归风险。",
+            time: Date().addingTimeInterval(-90)
+        ),
+        RemoteConversationItem(
+            id: "demo-subagent-answer",
+            kind: .assistant,
+            title: nil,
+            text: "已检查状态恢复、错误提示和回归测试入口。",
+            time: Date().addingTimeInterval(-75)
+        ),
+    ]
     private static let demoInstructionText = """
     <system-reminder>
     The following workspace instructions may be relevant to your work. Use them as guidance when applicable.
@@ -450,6 +602,14 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         updatedAt: Date().addingTimeInterval(-120)
     )
     private static let demoPlan = RemotePlanState(active: true, pending: false)
+    private static let demoImageLimits = RemoteImageLimits(
+        maxImageBytes: 3_670_016,
+        maxImagesPerMessage: 20,
+        maxMessageImageBytes: 104_857_600,
+        maxImagePixels: 40_000_000,
+        maxImageDimension: 2_000,
+        mediaTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"]
+    )
     private var items: [RemoteConversationItem] = [
         RemoteConversationItem(
             id: "demo-context",
@@ -670,7 +830,8 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             ),
             trajectory: demoTrajectory,
             goal: DemoHarnessRemoteClient.demoGoal,
-            plan: DemoHarnessRemoteClient.demoPlan
+            plan: DemoHarnessRemoteClient.demoPlan,
+            imageLimits: DemoHarnessRemoteClient.demoImageLimits
         )
     }
 
@@ -687,16 +848,104 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         }
         #endif
         guard sessionID == self.sessionID,
-              attachmentID == DemoHarnessRemoteClient.demoAttachment.attachmentID else {
+              attachmentID == DemoHarnessRemoteClient.demoAttachment.attachmentID
+                || uploadedAttachments[attachmentID] != nil else {
             throw HarnessRemoteClientError.api(
                 code: "attachment-not-found",
                 message: "找不到这张图片。"
             )
         }
+        if let uploaded = uploadedAttachments[attachmentID] { return uploaded }
         return RemoteImageAttachmentPayload(
             attachment: DemoHarnessRemoteClient.demoAttachment,
             data: DemoHarnessRemoteClient.demoAttachmentData
         )
+    }
+
+    func fileReferences(
+        sessionID: String,
+        query: String
+    ) async throws -> [RemoteFileReferenceCandidate] {
+        let candidates = [
+            RemoteFileReferenceCandidate(path: "Sources/Auth/LoginView.swift", kind: .file),
+            RemoteFileReferenceCandidate(path: "Sources/Auth/SessionStore.swift", kind: .file),
+            RemoteFileReferenceCandidate(path: "Tests/Auth", kind: .directory),
+        ]
+        guard !query.isEmpty else { return candidates }
+        return candidates.filter { $0.path.localizedCaseInsensitiveContains(query) }
+    }
+
+    func sessionReferences(
+        sessionID: String,
+        query: String
+    ) async throws -> [RemoteSessionReferenceCandidate] {
+        let candidate = RemoteSessionReferenceCandidate(
+            mention: "@[登录错误恢复](dsh-session:ZGVtby1yZWZlcmVuY2U)",
+            sessionID: "demo-reference",
+            label: "登录错误恢复",
+            cwd: "/Users/demo/Sample Project",
+            createdAt: Date().addingTimeInterval(-7_200)
+        )
+        return query.isEmpty || candidate.label.localizedCaseInsensitiveContains(query)
+            ? [candidate]
+            : []
+    }
+
+    func subagents(parentSessionID: String) async throws -> RemoteSubagentCatalog {
+        RemoteSubagentCatalog(
+            entries: [RemoteSubagentEntry(
+                id: "demo-subagent",
+                mode: .continuable,
+                activity: demoSubagentRunning ? .running : .inactive,
+                hasChildren: false,
+                label: "登录回归测试",
+                diagnosticReason: nil
+            )],
+            parentAvailable: true
+        )
+    }
+
+    func subagentConversation(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        maxMessages: Int
+    ) async throws -> RemoteConversationSnapshot {
+        RemoteConversationSnapshot(
+            items: demoSubagentItems,
+            hasMore: false,
+            stats: nil,
+            trajectory: []
+        )
+    }
+
+    func promptSubagent(
+        parentSessionID: String,
+        child: RemoteSubagentEntry,
+        text: String
+    ) async throws {
+        demoSubagentRunning = true
+        demoSubagentItems.append(RemoteConversationItem(
+            id: UUID().uuidString,
+            kind: .user,
+            title: nil,
+            text: text,
+            time: Date()
+        ))
+        demoSubagentItems.append(RemoteConversationItem(
+            id: UUID().uuidString,
+            kind: .assistant,
+            title: nil,
+            text: "已收到补充，我会继续检查。",
+            time: Date()
+        ))
+        demoSubagentRunning = false
+    }
+
+    func interruptSubagent(
+        parentSessionID: String,
+        child: RemoteSubagentEntry
+    ) async throws {
+        demoSubagentRunning = false
     }
 
     func models(sessionID: String) async throws -> RemoteModelDirectory {
@@ -764,14 +1013,35 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         return selectedModel
     }
 
-    func send(_ text: String, to sessionID: String, steer: Bool) async throws {
+    func send(
+        _ text: String,
+        images: [RemotePromptImage],
+        to sessionID: String,
+        steer: Bool
+    ) async throws {
         let now = Date()
+        let attachments = images.map { image in
+            let attachment = RemoteImageAttachment(
+                attachmentID: "demo-upload-\(image.id.uuidString.lowercased())",
+                mediaType: image.mediaType,
+                bytes: image.data.count,
+                width: image.width,
+                height: image.height,
+                name: image.name
+            )
+            uploadedAttachments[attachment.attachmentID] = RemoteImageAttachmentPayload(
+                attachment: attachment,
+                data: image.data
+            )
+            return attachment
+        }
         items.append(RemoteConversationItem(
             id: UUID().uuidString,
             kind: .user,
             title: steer ? "中途补充" : nil,
             text: text,
-            time: now
+            time: now,
+            attachments: attachments
         ))
         running = true
         Task {
@@ -817,7 +1087,10 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     nonisolated func liveEvents() -> AsyncStream<RemoteLiveEvent> {
         #if DEBUG
         if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"],
-           ["trajectory", "rc8", "rc8-trajectory", "rc8-image-failure"].contains(scenario) {
+           [
+               "trajectory", "rc8", "rc8-trajectory", "rc8-image-failure",
+               "references", "image-draft", "subagents",
+           ].contains(scenario) {
             return AsyncStream { continuation in continuation.finish() }
         }
         #endif
@@ -960,6 +1233,14 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             projections: SessionProjectionsWire(values: [
                 "goal": goalProjection,
                 "plan": .object(["active": .bool(true), "pending": .bool(false)]),
+                "imageLimits": .object([
+                    "maxImageBytes": .number(Double(demoImageLimits.maxImageBytes)),
+                    "maxImagesPerMessage": .number(Double(demoImageLimits.maxImagesPerMessage)),
+                    "maxMessageImageBytes": .number(Double(demoImageLimits.maxMessageImageBytes)),
+                    "maxImagePixels": .number(Double(demoImageLimits.maxImagePixels)),
+                    "maxImageDimension": .number(Double(demoImageLimits.maxImageDimension ?? 2_000)),
+                    "mediaTypes": .array(demoImageLimits.mediaTypes.map(JSONValue.string)),
+                ]),
                 "sessionStats": .object([
                     "turns": .number(1),
                     "steps": .number(1),
@@ -1134,11 +1415,54 @@ private struct SessionAttachmentPayload: Codable {
     let sessionId: String
     let attachmentId: String
 }
+private struct ScopedQueryPayload: Codable { let args: ScopedQueryArguments }
+private struct ScopedQueryArguments: Codable { let agentId: String; let query: String }
+private struct ParentSessionPayload: Codable { let parentSessionId: String }
+private struct SubagentAddressPayload: Codable {
+    let parentSessionId: String
+    let childSessionId: String
+    let mode: String
+}
+private struct SubagentHistoryPayload: Codable {
+    let parentSessionId: String
+    let childSessionId: String
+    let mode: String
+    let maxMessages: Int
+}
+private struct SubagentPromptPayload: Encodable {
+    let parentSessionId: String
+    let childSessionId: String
+    let mode: String
+    let content: [PromptContentPart]
+    let clientTimeZone: String
+}
 private struct PromptTextPart: Codable { let type: String; let text: String }
-private struct SessionPromptPayload: Codable {
+private enum PromptContentPart: Encodable {
+    case text(String)
+    case image(RemotePromptImage)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, mediaType, data, name
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .image(let image):
+            try container.encode("image", forKey: .type)
+            try container.encode(image.mediaType, forKey: .mediaType)
+            try container.encode(image.data.base64EncodedString(), forKey: .data)
+            try container.encodeIfPresent(image.name, forKey: .name)
+        }
+    }
+}
+private struct SessionPromptPayload: Encodable {
     let sessionId: String
     let mode: String
-    let content: [PromptTextPart]
+    let content: [PromptContentPart]
     let clientTimeZone: String
 }
 private struct SessionUpdateQueuePayload: Codable {
@@ -1242,6 +1566,95 @@ private struct ImageAttachmentWire: Decodable {
         )
     }
 }
+
+private struct FileReferenceWire: Decodable {
+    let path: String
+    let kind: String
+
+    func remoteValue() throws -> RemoteFileReferenceCandidate {
+        guard !path.isEmpty,
+              let kind = RemoteFileReferenceCandidate.Kind(rawValue: kind) else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return RemoteFileReferenceCandidate(path: path, kind: kind)
+    }
+}
+
+private struct SessionReferenceWire: Decodable {
+    let mention: String
+    let sessionId: String
+    let label: String
+    let cwd: String?
+    let createdAt: Double
+
+    func remoteValue() throws -> RemoteSessionReferenceCandidate {
+        guard !mention.isEmpty, !sessionId.isEmpty, !label.isEmpty else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return RemoteSessionReferenceCandidate(
+            mention: mention,
+            sessionID: sessionId,
+            label: label,
+            cwd: cwd,
+            createdAt: Date(timeIntervalSince1970: createdAt / 1_000)
+        )
+    }
+}
+
+private struct SubagentCatalogWire: Decodable {
+    let entries: [SubagentEntryWire]
+    let parentAvailable: Bool
+}
+
+private struct SubagentEntryWire: Decodable {
+    let kind: String
+    let id: String
+    let mode: String?
+    let activity: String?
+    let hasChildren: Bool?
+    let label: String?
+    let reason: String?
+
+    func remoteValue() throws -> RemoteSubagentEntry {
+        guard !id.isEmpty else { throw HarnessRemoteClientError.invalidResponse }
+        if kind == "diagnostic" {
+            guard let reason,
+                  let diagnostic = RemoteSubagentEntry.DiagnosticReason(rawValue: reason) else {
+                throw HarnessRemoteClientError.invalidResponse
+            }
+            return RemoteSubagentEntry(
+                id: id,
+                mode: nil,
+                activity: nil,
+                hasChildren: false,
+                label: nil,
+                diagnosticReason: diagnostic
+            )
+        }
+        guard kind == "child",
+              let mode,
+              let remoteMode = RemoteSubagentEntry.Mode(rawValue: mode),
+              let activity,
+              let remoteActivity = RemoteSubagentEntry.Activity(rawValue: activity),
+              let hasChildren else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        if remoteMode == .continuable,
+           label?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return RemoteSubagentEntry(
+            id: id,
+            mode: remoteMode,
+            activity: remoteActivity,
+            hasChildren: hasChildren,
+            label: label,
+            diagnosticReason: nil
+        )
+    }
+}
+
+private struct SubagentPromptReceiptWire: Decodable { let messageId: String }
 
 private struct SessionModelsWire: Decodable {
     let current: ModelSelectionWire
@@ -1696,7 +2109,8 @@ private enum ConversationFolder {
                 turnStarts: turnStarts
             ),
             goal: goalState(from: history.projections),
-            plan: planState(from: history.projections)
+            plan: planState(from: history.projections),
+            imageLimits: imageLimits(from: history.projections)
         )
     }
 
@@ -2126,6 +2540,28 @@ private enum ConversationFolder {
             return nil
         }
         return RemotePlanState(active: active, pending: pending)
+    }
+
+    private static func imageLimits(
+        from projections: SessionProjectionsWire?
+    ) -> RemoteImageLimits? {
+        guard let value = projections?.values["imageLimits"]?.objectValue,
+              let maxImageBytes = int(value["maxImageBytes"]), maxImageBytes > 0,
+              let maxImagesPerMessage = int(value["maxImagesPerMessage"]), maxImagesPerMessage > 0,
+              let maxMessageImageBytes = int(value["maxMessageImageBytes"]), maxMessageImageBytes > 0,
+              let maxImagePixels = int(value["maxImagePixels"]), maxImagePixels > 0 else {
+            return nil
+        }
+        let mediaTypes = value["mediaTypes"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        guard !mediaTypes.isEmpty else { return nil }
+        return RemoteImageLimits(
+            maxImageBytes: maxImageBytes,
+            maxImagesPerMessage: maxImagesPerMessage,
+            maxMessageImageBytes: maxMessageImageBytes,
+            maxImagePixels: maxImagePixels,
+            maxImageDimension: int(value["maxImageDimension"]).flatMap { $0 > 0 ? $0 : nil },
+            mediaTypes: mediaTypes
+        )
     }
 
     private static func goalChangeItem(

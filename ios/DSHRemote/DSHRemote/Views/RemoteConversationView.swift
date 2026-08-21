@@ -1,6 +1,27 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import PhotosUI
+import UniformTypeIdentifiers
+
+private struct RemoteDraftReference: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case file
+        case session
+    }
+
+    let id: UUID
+    var range: NSRange
+    let displayText: String
+    let submissionText: String
+    let kind: Kind
+}
+
+private struct RemoteActiveReferenceToken: Hashable {
+    let range: NSRange
+    let query: String
+    let quoted: Bool
+}
 
 struct RemoteConversationView: View {
     private enum BusyDelivery {
@@ -15,6 +36,15 @@ struct RemoteConversationView: View {
 
     @StateObject private var viewModel: RemoteConversationViewModel
     @State private var draft = ""
+    @State private var draftReferences: [RemoteDraftReference] = []
+    @State private var composerSelection = NSRange(location: 0, length: 0)
+    @State private var composerTextHeight: CGFloat = 38
+    @State private var draftImages: [RemotePromptImage] = []
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var isPreparingImages = false
+    @State private var composerNotice: String?
+    @State private var showsReferenceSuggestions = false
+    @State private var showsSubagents = false
     @State private var viewMode: ViewMode = .conversation
     @State private var trajectoryQuery = ""
     @State private var busyDelivery: BusyDelivery = .queue
@@ -25,6 +55,10 @@ struct RemoteConversationView: View {
     @State private var lastItemCount = 0
     @State private var shouldFollowNextSend = false
     @State private var showsModelPicker = false
+    #if DEBUG
+    @State private var didRunLiveAcceptance = false
+    @State private var debugSubagent: RemoteSubagentEntry?
+    #endif
     @FocusState private var composerFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -32,12 +66,53 @@ struct RemoteConversationView: View {
         _viewModel = StateObject(wrappedValue: RemoteConversationViewModel(client: client, session: session))
         #if DEBUG
         let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"]
+        let liveView = scenario == "live-acceptance"
+            ? ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_VIEW"]
+            : nil
         _viewMode = State(initialValue:
             scenario == "trajectory" || scenario == "rc8-trajectory" ? .trajectory : .conversation
         )
-        _showsModelPicker = State(initialValue: scenario == "models")
+        _showsModelPicker = State(initialValue: scenario == "models" || liveView == "models")
         if scenario == "details" {
             _selectedDetail = State(initialValue: Self.debugDetailItem)
+        }
+        if scenario == "references" || liveView == "references" {
+            let liveReferenceQuery = ProcessInfo.processInfo.environment[
+                "DSH_REMOTE_LIVE_REFERENCE_QUERY"
+            ] ?? "README"
+            let referenceDraft = liveView == "references"
+                ? "@\(liveReferenceQuery)"
+                : "@Sou"
+            _draft = State(initialValue: referenceDraft)
+            _composerSelection = State(initialValue: NSRange(
+                location: (referenceDraft as NSString).length,
+                length: 0
+            ))
+            _showsReferenceSuggestions = State(initialValue: true)
+        }
+        if scenario == "image-draft", let image = Self.debugDraftImage {
+            _draftImages = State(initialValue: [image])
+        }
+        if scenario == "subagents" || liveView == "subagents" {
+            _showsSubagents = State(initialValue: true)
+        }
+        if scenario == "live-acceptance",
+           liveView == "subagent",
+           let childID = ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_SUBAGENT_ID"],
+           !childID.isEmpty {
+            let activity = RemoteSubagentEntry.Activity(
+                rawValue: ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_SUBAGENT_ACTIVITY"] ?? "inactive"
+            ) ?? .inactive
+            _debugSubagent = State(initialValue: RemoteSubagentEntry(
+                id: childID,
+                mode: .continuable,
+                activity: activity,
+                hasChildren: ProcessInfo.processInfo.environment[
+                    "DSH_REMOTE_LIVE_SUBAGENT_HAS_CHILDREN"
+                ] == "true",
+                label: ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_SUBAGENT_LABEL"] ?? "remote-acceptance",
+                diagnosticReason: nil
+            ))
         }
         #endif
     }
@@ -156,7 +231,15 @@ struct RemoteConversationView: View {
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
                         withTransaction(transaction) {
+                            #if DEBUG
+                            if let target = debugInitialScrollTarget {
+                                proxy.scrollTo(target, anchor: .top)
+                            } else {
+                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            }
+                            #else
                             proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            #endif
                         }
                         lastItemCount = viewModel.items.count
                         didInitialPosition = true
@@ -220,11 +303,40 @@ struct RemoteConversationView: View {
                     title: viewModel.session.title,
                     subtitle: viewModel.session.projectName ?? "Harness 会话"
                 ) {
-                    RemoteStatusPill(
-                        text: viewModel.session.running ? "执行中" : "待命",
-                        color: viewModel.session.running ? RemoteTheme.accent : RemoteTheme.success,
-                        icon: viewModel.session.running ? "waveform" : "checkmark"
-                    )
+                    HStack(spacing: 6) {
+                        Button {
+                            showsSubagents = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                if viewModel.isLoadingSubagents,
+                                   viewModel.subagentCatalog == nil {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Image(systemName: "person.2")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                if subagentCount > 0 {
+                                    Text("\(subagentCount)")
+                                        .font(.caption2.monospacedDigit().weight(.bold))
+                                }
+                            }
+                            .foregroundStyle(subagentCount > 0 ? RemoteTheme.accent : Color.secondary)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 34)
+                            .background(RemoteTheme.mutedSurface, in: Capsule())
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("子代理")
+                        .accessibilityValue(subagentCount > 0 ? "\(subagentCount) 个" : "暂无")
+
+                        RemoteStatusPill(
+                            text: viewModel.session.running ? "执行中" : "待命",
+                            color: viewModel.session.running ? RemoteTheme.accent : RemoteTheme.success,
+                            icon: viewModel.session.running ? "waveform" : "checkmark"
+                        )
+                    }
                 }
                 sessionSummaryLine
                 DSHConversationTabBar(selection: $viewMode)
@@ -268,8 +380,25 @@ struct RemoteConversationView: View {
         }
         .remoteNavigationChromeHidden()
         .task { await viewModel.monitor() }
+        #if DEBUG
+        .task { await runLiveAcceptanceIfRequested() }
+        #endif
         .onChange(of: viewModel.session.running) { wasRunning, isRunning in
             if !wasRunning && isRunning { busyDelivery = .queue }
+        }
+        .onChange(of: selectedPhotoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task { await preparePhotoItems(items) }
+        }
+        .onChange(of: draft) { _, _ in
+            updateReferenceSuggestionVisibility()
+        }
+        .onChange(of: composerSelection) { _, _ in
+            updateReferenceSuggestionVisibility()
+        }
+        .onChange(of: composerNotice) { _, notice in
+            guard let notice, !notice.isEmpty else { return }
+            UIAccessibility.post(notification: .announcement, argument: notice)
         }
         .sheet(item: $selectedDetail) { item in
             ConversationDetailSheet(
@@ -288,10 +417,118 @@ struct RemoteConversationView: View {
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(RemoteTheme.canvas)
         }
+        .sheet(isPresented: $showsSubagents, onDismiss: {
+            Task { await viewModel.refreshSubagents() }
+        }) {
+            RemoteSubagentBrowserView(viewModel: viewModel)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(RemoteTheme.canvas)
+        }
+        #if DEBUG
+        .sheet(item: $debugSubagent) { child in
+            NavigationStack {
+                RemoteSubagentConversationView(
+                    parentViewModel: viewModel,
+                    parentSessionID: viewModel.session.id,
+                    parentAvailable: true,
+                    child: child
+                )
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(RemoteTheme.canvas)
+        }
+        #endif
     }
 
     private var contentIsPositioned: Bool {
         !viewModel.hasLoadedInitialSnapshot || viewModel.items.isEmpty || didInitialPosition
+    }
+
+    #if DEBUG
+    private var debugInitialScrollTarget: String? {
+        guard ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "live-acceptance",
+              ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_VIEW"] == "image-history" else {
+            return nil
+        }
+        return viewModel.items.last(where: { !$0.attachments.isEmpty })?.id
+    }
+    #endif
+
+    #if DEBUG
+    @MainActor
+    private func runLiveAcceptanceIfRequested() async {
+        guard !didRunLiveAcceptance,
+              ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "live-acceptance",
+              let action = ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_ACTION"],
+              ["send-deepseek-references", "send-openrouter-image"].contains(action) else {
+            return
+        }
+        didRunLiveAcceptance = true
+
+        for _ in 0..<100 where !viewModel.hasLoadedConversationSnapshot {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return }
+        }
+        guard viewModel.hasLoadedConversationSnapshot else {
+            composerNotice = "真实验收未能读取会话。"
+            return
+        }
+
+        do {
+            let files = try await viewModel.fileReferences(query: "README")
+            let sessions = try await viewModel.sessionReferences(query: "Tauri")
+            let fileMention = files
+                .first(where: { $0.kind == .file })
+                .flatMap { Self.formattedFileMention($0, preserveQuote: false) }
+                ?? "@README.md"
+            let sessionMention = sessions.first?.mention
+            let context = [fileMention, sessionMention]
+                .compactMap { $0 }
+                .joined(separator: " ")
+            let sent: Bool
+            if action == "send-deepseek-references" {
+                _ = await viewModel.selectModel(RemoteModelSelection(
+                    provider: "deepseek-official",
+                    model: "deepseek-v4-flash",
+                    reasoningEffort: "off"
+                ))
+                let prompt = """
+                DSH Remote v0.3 端到端验收。请读取并引用 \(context)，随后使用 subagent 工具创建一个名为 remote-acceptance 的 continuable 子代理，让它检查本项目 Remote 的安全边界并返回一句结论。最后简短汇总。
+                """
+                sent = await viewModel.send(prompt, images: [], steer: false)
+            } else {
+                _ = await viewModel.selectModel(RemoteModelSelection(
+                    provider: "openrouter",
+                    model: "google/gemini-2.5-flash-lite",
+                    reasoningEffort: nil
+                ))
+                guard let sourceImage = Self.debugDraftImage else {
+                    throw RemoteImagePreparationError.unreadable
+                }
+                let image = try await RemoteImagePreparer.prepare(
+                    data: sourceImage.data,
+                    declaredMediaType: sourceImage.mediaType,
+                    name: "remote-acceptance.png",
+                    limits: effectiveImageLimits
+                )
+                let prompt = """
+                图片与引用回归验收。请读取 \(context)，并用一句话说明附图的主要形状与配色。
+                """
+                sent = await viewModel.send(prompt, images: [image], steer: false)
+            }
+            if !sent {
+                composerNotice = viewModel.errorMessage ?? "真实验收消息发送失败。"
+            }
+        } catch {
+            composerNotice = error.localizedDescription
+        }
+    }
+    #endif
+
+    private var subagentCount: Int {
+        viewModel.subagentCatalog?.entries.lazy.filter { !$0.isDiagnostic }.count ?? 0
     }
 
     private func bottomDock(bottomSafeArea: CGFloat) -> some View {
@@ -398,11 +635,58 @@ struct RemoteConversationView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("告诉 Harness 接下来要做什么", text: $draft, axis: .vertical)
-                .lineLimit(1...6)
-                .font(.body)
-                .focused($composerFocused)
-                .disabled(viewModel.interaction != nil || !modelIsRoutable)
+            if showsReferenceSuggestions, let token = activeReferenceToken {
+                RemoteReferenceSuggestions(
+                    token: token,
+                    fileLoader: { query in
+                        try await viewModel.fileReferences(query: query)
+                    },
+                    sessionLoader: { query in
+                        try await viewModel.sessionReferences(query: query)
+                    },
+                    onSelectFile: insertFileReference,
+                    onSelectSession: insertSessionReference,
+                    onDismiss: { showsReferenceSuggestions = false }
+                )
+            }
+
+            if !draftImages.isEmpty || isPreparingImages {
+                RemoteDraftImageRail(
+                    images: draftImages,
+                    isPreparing: isPreparingImages,
+                    onRemove: removeDraftImage
+                )
+            }
+
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text("告诉 Harness 接下来要做什么")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                RemoteComposerTextView(
+                    text: $draft,
+                    references: $draftReferences,
+                    selection: $composerSelection,
+                    measuredHeight: $composerTextHeight,
+                    isFocused: Binding(
+                        get: { composerFocused },
+                        set: { composerFocused = $0 }
+                    ),
+                    isEnabled: viewModel.interaction == nil && modelIsRoutable
+                )
+                .frame(height: composerTextHeight)
+            }
+
+            if let composerNotice {
+                Label(composerNotice, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(RemoteTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if !modelIsRoutable {
                 Label("当前模型不可用，请重新选择", systemImage: "exclamationmark.triangle.fill")
@@ -427,6 +711,7 @@ struct RemoteConversationView: View {
             && (viewModel.session.running || planStatusVisible) {
             VStack(spacing: 2) {
                 HStack(spacing: 8) {
+                    composerAddMenu
                     if viewModel.session.running {
                         deliverySelector
                     }
@@ -443,6 +728,7 @@ struct RemoteConversationView: View {
             }
         } else {
             HStack(spacing: 7) {
+                composerAddMenu
                 if viewModel.session.running {
                     deliverySelector
                 }
@@ -489,6 +775,46 @@ struct RemoteConversationView: View {
         }
         .accessibilityLabel("发送方式")
         .accessibilityValue(busyDelivery == .queue ? "排队发送" : "插话发送")
+    }
+
+    private var composerAddMenu: some View {
+        Menu {
+            PhotosPicker(
+                selection: $selectedPhotoItems,
+                maxSelectionCount: max(remainingImageSlots, 1),
+                matching: .images
+            ) {
+                Label("从照片中选择", systemImage: "photo.on.rectangle")
+            }
+            .disabled(remainingImageSlots == 0)
+
+            Button {
+                pasteImage()
+            } label: {
+                Label("粘贴图片", systemImage: "doc.on.clipboard")
+            }
+
+            Button {
+                beginReferenceInsertion()
+            } label: {
+                Label(
+                    viewModel.supportsReferences == false
+                        ? "引用需要 Desktop v0.3.0"
+                        : "引用文件或会话",
+                    systemImage: "at"
+                )
+            }
+            .disabled(viewModel.supportsReferences == false)
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(RemoteTheme.mutedSurface, in: Circle())
+                .frame(width: 44, height: 44)
+        }
+        .disabled(isPreparingImages || viewModel.interaction != nil)
+        .accessibilityLabel("添加图片或引用")
     }
 
     private var modelSelector: some View {
@@ -568,16 +894,27 @@ struct RemoteConversationView: View {
                     .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.isCancelling)
+                .disabled(viewModel.isCancelling || viewModel.isSending)
                 .accessibilityLabel(viewModel.isCancelling ? "正在停止任务" : "停止任务")
             }
 
             Button {
-                let outgoing = draft
+                let outgoing = submissionText
+                let outgoingImages = draftImages
                 shouldFollowNextSend = true
                 Task {
-                    if await viewModel.send(outgoing, steer: busyDelivery == .steer) {
+                    if await viewModel.send(
+                        outgoing,
+                        images: outgoingImages,
+                        steer: busyDelivery == .steer
+                    ) {
                         draft = ""
+                        draftReferences = []
+                        composerSelection = NSRange(location: 0, length: 0)
+                        draftImages = []
+                        selectedPhotoItems = []
+                        composerNotice = nil
+                        showsReferenceSuggestions = false
                     } else {
                         shouldFollowNextSend = false
                     }
@@ -606,11 +943,284 @@ struct RemoteConversationView: View {
     }
 
     private var canSendDraft: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftImages.isEmpty)
             && !viewModel.isSending
+            && !viewModel.isCancelling
+            && !isPreparingImages
             && !viewModel.isSelectingModel
             && viewModel.interaction == nil
             && modelIsRoutable
+    }
+
+    private var effectiveImageLimits: RemoteImageLimits {
+        viewModel.imageLimits ?? RemoteImageLimits(
+            maxImageBytes: 3_670_016,
+            maxImagesPerMessage: 20,
+            maxMessageImageBytes: 100 * 1_024 * 1_024,
+            maxImagePixels: 40_000_000,
+            maxImageDimension: nil,
+            mediaTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"]
+        )
+    }
+
+    private var remainingImageSlots: Int {
+        max(effectiveImageLimits.maxImagesPerMessage - draftImages.count, 0)
+    }
+
+    private var submissionText: String {
+        var value = draft as NSString
+        for reference in draftReferences.sorted(by: { $0.range.location > $1.range.location }) {
+            guard NSMaxRange(reference.range) <= value.length else { continue }
+            value = value.replacingCharacters(
+                in: reference.range,
+                with: reference.submissionText
+            ) as NSString
+        }
+        return value as String
+    }
+
+    private var activeReferenceToken: RemoteActiveReferenceToken? {
+        guard let token = Self.activeReferenceToken(
+            in: draft,
+            selection: composerSelection
+        ), !draftReferences.contains(where: {
+            NSIntersectionRange($0.range, token.range).length > 0
+        }) else { return nil }
+        return token
+    }
+
+    private func preparePhotoItems(_ items: [PhotosPickerItem]) async {
+        guard !isPreparingImages else { return }
+        isPreparingImages = true
+        composerNotice = nil
+        defer {
+            isPreparingImages = false
+            selectedPhotoItems = []
+        }
+        let limits = effectiveImageLimits
+        guard items.count <= remainingImageSlots else {
+            composerNotice = RemoteImagePreparationError
+                .tooMany(limits.maxImagesPerMessage)
+                .localizedDescription
+            return
+        }
+        var preparedBatch: [RemotePromptImage] = []
+        var batchBytes = draftImages.reduce(0) { $0 + $1.data.count }
+        for (index, item) in items.enumerated() {
+            do {
+                try Task.checkCancellation()
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw RemoteImagePreparationError.unreadable
+                }
+                let contentType = item.supportedContentTypes.first
+                let fileExtension = contentType?.preferredFilenameExtension ?? "jpg"
+                let image = try await RemoteImagePreparer.prepare(
+                    data: data,
+                    declaredMediaType: contentType?.preferredMIMEType,
+                    name: "照片-\(draftImages.count + index + 1).\(fileExtension)",
+                    limits: limits
+                )
+                batchBytes += image.data.count
+                guard batchBytes <= limits.maxMessageImageBytes else {
+                    throw RemoteImagePreparationError.totalTooLarge(
+                        limits.maxMessageImageBytes
+                    )
+                }
+                preparedBatch.append(image)
+            } catch {
+                guard !Task.isCancelled else { return }
+                composerNotice = error.localizedDescription
+                return
+            }
+        }
+        draftImages.append(contentsOf: preparedBatch)
+        if !preparedBatch.isEmpty {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+    }
+
+    private func pasteImage() {
+        guard let image = UIPasteboard.general.image else {
+            composerNotice = "剪贴板中没有可用图片。"
+            return
+        }
+        guard let data = image.pngData() else {
+            composerNotice = "无法读取剪贴板中的图片。"
+            return
+        }
+        isPreparingImages = true
+        composerNotice = nil
+        let limits = effectiveImageLimits
+        Task {
+            defer { isPreparingImages = false }
+            do {
+                let prepared = try await RemoteImagePreparer.prepare(
+                    data: data,
+                    declaredMediaType: "image/png",
+                    name: "粘贴图片.png",
+                    limits: limits
+                )
+                try appendPreparedImage(prepared, limits: limits)
+            } catch {
+                composerNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func appendPreparedImage(
+        _ image: RemotePromptImage,
+        limits: RemoteImageLimits
+    ) throws {
+        guard draftImages.count < limits.maxImagesPerMessage else {
+            throw RemoteImagePreparationError.tooMany(limits.maxImagesPerMessage)
+        }
+        let total = draftImages.reduce(0) { $0 + $1.data.count } + image.data.count
+        guard total <= limits.maxMessageImageBytes else {
+            throw RemoteImagePreparationError.totalTooLarge(limits.maxMessageImageBytes)
+        }
+        draftImages.append(image)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func removeDraftImage(_ id: UUID) {
+        draftImages.removeAll { $0.id == id }
+        if draftImages.isEmpty { composerNotice = nil }
+    }
+
+    private func beginReferenceInsertion() {
+        let insertion = draft.isEmpty || draft.last?.isWhitespace == true ? "@" : " @"
+        replaceDraftText(in: composerSelection, with: insertion)
+        composerFocused = true
+        showsReferenceSuggestions = true
+    }
+
+    private func insertFileReference(_ candidate: RemoteFileReferenceCandidate) {
+        guard let token = activeReferenceToken,
+              let formatted = Self.formattedFileMention(candidate, preserveQuote: token.quoted) else {
+            composerNotice = "这个路径无法安全插入提示词。"
+            return
+        }
+        if candidate.kind == .directory {
+            replaceDraftText(in: token.range, with: formatted)
+            showsReferenceSuggestions = true
+            return
+        }
+        insertReference(
+            displayText: formatted,
+            submissionText: formatted,
+            kind: .file,
+            replacing: token.range
+        )
+    }
+
+    private func insertSessionReference(_ candidate: RemoteSessionReferenceCandidate) {
+        guard draftReferences.filter({ $0.kind == .session }).count < 3 else {
+            composerNotice = "每条消息最多引用 3 个会话。"
+            return
+        }
+        guard let token = activeReferenceToken else { return }
+        insertReference(
+            displayText: "@\(candidate.label)",
+            submissionText: candidate.mention,
+            kind: .session,
+            replacing: token.range
+        )
+    }
+
+    private func insertReference(
+        displayText: String,
+        submissionText: String,
+        kind: RemoteDraftReference.Kind,
+        replacing range: NSRange
+    ) {
+        replaceDraftText(in: range, with: "\(displayText) ", adding: RemoteDraftReference(
+            id: UUID(),
+            range: NSRange(location: range.location, length: (displayText as NSString).length),
+            displayText: displayText,
+            submissionText: submissionText,
+            kind: kind
+        ))
+        showsReferenceSuggestions = false
+        composerNotice = nil
+    }
+
+    private func replaceDraftText(
+        in range: NSRange,
+        with replacement: String,
+        adding reference: RemoteDraftReference? = nil
+    ) {
+        let source = draft as NSString
+        let safeLocation = min(max(range.location, 0), source.length)
+        let safeLength = min(max(range.length, 0), source.length - safeLocation)
+        let safeRange = NSRange(location: safeLocation, length: safeLength)
+        let delta = (replacement as NSString).length - safeRange.length
+        draftReferences = draftReferences.compactMap { existing in
+            if NSIntersectionRange(existing.range, safeRange).length > 0 { return nil }
+            var shifted = existing
+            if existing.range.location >= NSMaxRange(safeRange) {
+                shifted.range.location += delta
+            }
+            return shifted
+        }
+        if let reference { draftReferences.append(reference) }
+        draft = source.replacingCharacters(in: safeRange, with: replacement)
+        composerSelection = NSRange(
+            location: safeRange.location + (replacement as NSString).length,
+            length: 0
+        )
+    }
+
+    private func updateReferenceSuggestionVisibility() {
+        if activeReferenceToken != nil {
+            showsReferenceSuggestions = true
+        } else if showsReferenceSuggestions {
+            showsReferenceSuggestions = false
+        }
+    }
+
+    private static func activeReferenceToken(
+        in text: String,
+        selection: NSRange
+    ) -> RemoteActiveReferenceToken? {
+        guard selection.length == 0 else { return nil }
+        let source = text as NSString
+        guard selection.location >= 0, selection.location <= source.length else { return nil }
+        let beforeCursor = source.substring(to: selection.location) as NSString
+        let lineRange = beforeCursor.range(of: "\n", options: .backwards)
+        let lineStart = lineRange.location == NSNotFound ? 0 : NSMaxRange(lineRange)
+        let line = beforeCursor.substring(from: lineStart)
+        let regex = try! NSRegularExpression(pattern: #"(?:^|\s)(@"([^"]*)|@([^\s]*))$"#)
+        guard let match = regex.firstMatch(
+            in: line,
+            range: NSRange(location: 0, length: (line as NSString).length)
+        ) else { return nil }
+        let tokenRange = match.range(at: 1)
+        let quotedRange = match.range(at: 2)
+        let plainRange = match.range(at: 3)
+        let queryRange = quotedRange.location != NSNotFound ? quotedRange : plainRange
+        guard queryRange.location != NSNotFound else { return nil }
+        return RemoteActiveReferenceToken(
+            range: NSRange(location: lineStart + tokenRange.location, length: tokenRange.length),
+            query: (line as NSString).substring(with: queryRange),
+            quoted: quotedRange.location != NSNotFound
+        )
+    }
+
+    private static func formattedFileMention(
+        _ candidate: RemoteFileReferenceCandidate,
+        preserveQuote: Bool
+    ) -> String? {
+        var path = candidate.path
+        if candidate.kind == .directory,
+           !path.hasSuffix("/"),
+           !path.hasSuffix("\\") {
+            path.append("/")
+        }
+        guard path.rangeOfCharacter(from: CharacterSet.controlCharacters) == nil,
+              !path.contains("\"") else { return nil }
+        let quoted = preserveQuote || path.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+        guard quoted else { return "@\(path)" }
+        return candidate.kind == .directory ? "@\"\(path)" : "@\"\(path)\""
     }
 
     private var modelIsRoutable: Bool {
@@ -688,6 +1298,28 @@ struct RemoteConversationView: View {
     }
 
     #if DEBUG
+    private static var debugDraftImage: RemotePromptImage? {
+        let size = CGSize(width: 320, height: 180)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor(red: 0.11, green: 0.18, blue: 0.28, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.40, green: 0.62, blue: 1, alpha: 1).setStroke()
+            context.cgContext.setLineWidth(16)
+            context.cgContext.move(to: CGPoint(x: 54, y: 126))
+            context.cgContext.addLine(to: CGPoint(x: 140, y: 54))
+            context.cgContext.addLine(to: CGPoint(x: 262, y: 110))
+            context.cgContext.strokePath()
+        }
+        guard let data = image.pngData() else { return nil }
+        return RemotePromptImage(
+            data: data,
+            mediaType: "image/png",
+            name: "界面草稿.png",
+            width: 320,
+            height: 180
+        )
+    }
+
     private static var debugDetailItem: RemoteConversationItem {
         RemoteConversationItem(
             id: "debug-instruction-detail",
@@ -814,6 +1446,1690 @@ struct RemoteConversationView: View {
         value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
     }
 
+}
+
+private struct RemoteComposerTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var references: [RemoteDraftReference]
+    @Binding var selection: NSRange
+    @Binding var measuredHeight: CGFloat
+    @Binding var isFocused: Bool
+    let isEnabled: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        view.font = .preferredFont(forTextStyle: .body)
+        view.keyboardDismissMode = .interactive
+        view.returnKeyType = .default
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.autocorrectionType = .yes
+        view.spellCheckingType = .yes
+        view.showsVerticalScrollIndicator = false
+        view.tintColor = UIColor(RemoteTheme.accent)
+        view.accessibilityLabel = "消息"
+        view.accessibilityHint = "输入发送给 Harness 的内容"
+        context.coordinator.render(view, force: true)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.parent = self
+        view.isEditable = isEnabled
+        view.isSelectable = isEnabled
+        view.alpha = isEnabled ? 1 : 0.62
+        view.tintColor = UIColor(RemoteTheme.accent)
+        context.coordinator.render(view)
+        context.coordinator.updateMeasuredHeight(view)
+
+        let textLength = (text as NSString).length
+        let safeLocation = min(max(selection.location, 0), textLength)
+        let safeSelection = NSRange(
+            location: safeLocation,
+            length: min(max(selection.length, 0), textLength - safeLocation)
+        )
+        if view.selectedRange != safeSelection, !context.coordinator.isApplyingChange {
+            context.coordinator.isApplyingChange = true
+            view.selectedRange = safeSelection
+            context.coordinator.isApplyingChange = false
+        }
+
+        if isFocused, !view.isFirstResponder {
+            DispatchQueue.main.async { view.becomeFirstResponder() }
+        } else if !isFocused, view.isFirstResponder {
+            DispatchQueue.main.async { view.resignFirstResponder() }
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width else { return nil }
+        let measured = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: min(max(measured.height, 38), 142))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: RemoteComposerTextView
+        var isApplyingChange = false
+        private var pendingEdit: (range: NSRange, replacementLength: Int)?
+        private var renderedText = ""
+        private var renderedReferences: [RemoteDraftReference] = []
+
+        init(parent: RemoteComposerTextView) {
+            self.parent = parent
+        }
+
+        func render(_ view: UITextView, force: Bool = false) {
+            guard force || renderedText != parent.text || renderedReferences != parent.references else {
+                return
+            }
+            guard view.markedTextRange == nil else { return }
+            let selected = view.selectedRange
+            isApplyingChange = true
+            if view.text != parent.text {
+                view.textStorage.replaceCharacters(
+                    in: NSRange(location: 0, length: view.textStorage.length),
+                    with: parent.text
+                )
+            }
+            let fullRange = NSRange(location: 0, length: view.textStorage.length)
+            view.textStorage.beginEditing()
+            view.textStorage.setAttributes(
+                [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .foregroundColor: UIColor.label,
+                ],
+                range: fullRange
+            )
+            for reference in parent.references {
+                guard NSMaxRange(reference.range) <= view.textStorage.length else { continue }
+                view.textStorage.addAttributes(
+                    [
+                        .foregroundColor: UIColor(RemoteTheme.accent),
+                        .backgroundColor: UIColor(RemoteTheme.accent).withAlphaComponent(0.11),
+                    ],
+                    range: reference.range
+                )
+            }
+            view.textStorage.endEditing()
+            view.selectedRange = NSRange(
+                location: min(selected.location, view.textStorage.length),
+                length: min(
+                    selected.length,
+                    max(view.textStorage.length - min(selected.location, view.textStorage.length), 0)
+                )
+            )
+            isApplyingChange = false
+            renderedText = parent.text
+            renderedReferences = parent.references
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText replacement: String
+        ) -> Bool {
+            let references = parent.references
+            if range.length == 0,
+               let reference = references.first(where: {
+                   range.location > $0.range.location && range.location < NSMaxRange($0.range)
+               }) {
+                textView.selectedRange = NSRange(location: NSMaxRange(reference.range), length: 0)
+                parent.selection = textView.selectedRange
+                return false
+            }
+
+            let intersecting = references.filter {
+                NSIntersectionRange($0.range, range).length > 0
+            }
+            if !intersecting.isEmpty {
+                var expanded = range
+                for reference in intersecting {
+                    expanded = NSUnionRange(expanded, reference.range)
+                }
+                applyAtomicReplacement(
+                    in: textView,
+                    range: expanded,
+                    replacement: replacement
+                )
+                return false
+            }
+
+            pendingEdit = (range, (replacement as NSString).length)
+            return true
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            guard !isApplyingChange else { return }
+            let nextText = textView.text ?? ""
+            if let edit = pendingEdit {
+                let delta = edit.replacementLength - edit.range.length
+                parent.references = parent.references.compactMap { reference in
+                    if NSIntersectionRange(reference.range, edit.range).length > 0 { return nil }
+                    var shifted = reference
+                    if reference.range.location >= NSMaxRange(edit.range) {
+                        shifted.range.location += delta
+                    }
+                    return shifted
+                }
+            }
+            pendingEdit = nil
+            parent.text = nextText
+            parent.selection = textView.selectedRange
+            render(textView, force: true)
+            updateMeasuredHeight(textView)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard !isApplyingChange else { return }
+            var next = textView.selectedRange
+            if next.length == 0,
+               let reference = parent.references.first(where: {
+                   next.location > $0.range.location && next.location < NSMaxRange($0.range)
+               }) {
+                next = NSRange(location: NSMaxRange(reference.range), length: 0)
+                isApplyingChange = true
+                textView.selectedRange = next
+                isApplyingChange = false
+            }
+            parent.selection = next
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+        }
+
+        private func applyAtomicReplacement(
+            in textView: UITextView,
+            range: NSRange,
+            replacement: String
+        ) {
+            let source = parent.text as NSString
+            guard NSMaxRange(range) <= source.length else { return }
+            let delta = (replacement as NSString).length - range.length
+            parent.references = parent.references.compactMap { reference in
+                if NSIntersectionRange(reference.range, range).length > 0 { return nil }
+                var shifted = reference
+                if reference.range.location >= NSMaxRange(range) {
+                    shifted.range.location += delta
+                }
+                return shifted
+            }
+            parent.text = source.replacingCharacters(in: range, with: replacement)
+            parent.selection = NSRange(
+                location: range.location + (replacement as NSString).length,
+                length: 0
+            )
+            renderedText = ""
+            render(textView, force: true)
+            textView.selectedRange = parent.selection
+            updateMeasuredHeight(textView)
+        }
+
+        func updateMeasuredHeight(_ view: UITextView) {
+            let width = view.bounds.width
+            guard width > 1 else { return }
+            let fitting = view.sizeThatFits(
+                CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
+            let next = min(max(ceil(fitting), 38), 142)
+            view.isScrollEnabled = fitting > 142
+            guard abs(parent.measuredHeight - next) > 0.5 else { return }
+            DispatchQueue.main.async {
+                if abs(self.parent.measuredHeight - next) > 0.5 {
+                    self.parent.measuredHeight = next
+                }
+            }
+        }
+    }
+}
+
+private struct RemoteReferenceSuggestions: View {
+    private struct LoadKey: Hashable {
+        let token: RemoteActiveReferenceToken
+        let revision: Int
+    }
+
+    let token: RemoteActiveReferenceToken
+    let fileLoader: (String) async throws -> [RemoteFileReferenceCandidate]
+    let sessionLoader: (String) async throws -> [RemoteSessionReferenceCandidate]
+    let onSelectFile: (RemoteFileReferenceCandidate) -> Void
+    let onSelectSession: (RemoteSessionReferenceCandidate) -> Void
+    let onDismiss: () -> Void
+
+    @State private var files: [RemoteFileReferenceCandidate] = []
+    @State private var sessions: [RemoteSessionReferenceCandidate] = []
+    @State private var isLoading = true
+    @State private var errorMessages: [String] = []
+    @State private var revision = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "at")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(RemoteTheme.accent)
+                Text(token.quoted ? "引用项目文件" : "引用文件或会话")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                if isLoading { ProgressView().controlSize(.mini) }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("关闭引用建议")
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .frame(minHeight: 40)
+
+            Rectangle().fill(RemoteTheme.hairline).frame(height: 0.5)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(files.prefix(8))) { candidate in
+                        suggestionRow(
+                            icon: candidate.kind == .directory ? "folder" : "doc.text",
+                            title: fileCandidateTitle(candidate),
+                            subtitle: fileCandidateSubtitle(candidate)
+                        ) {
+                            onSelectFile(candidate)
+                        }
+                    }
+
+                    if !token.quoted, !files.isEmpty, !sessions.isEmpty {
+                        Rectangle()
+                            .fill(RemoteTheme.hairline)
+                            .frame(height: 0.5)
+                            .padding(.vertical, 4)
+                    }
+
+                    if !token.quoted {
+                        ForEach(Array(sessions.prefix(5))) { candidate in
+                            suggestionRow(
+                                icon: "bubble.left.and.bubble.right",
+                                title: candidate.label,
+                                subtitle: candidate.cwd ?? "Harness 会话"
+                            ) {
+                                onSelectSession(candidate)
+                            }
+                        }
+                    }
+
+                    if !isLoading, files.isEmpty, sessions.isEmpty {
+                        VStack(spacing: 7) {
+                            Image(systemName: errorMessages.isEmpty ? "magnifyingglass" : "wifi.exclamationmark")
+                                .foregroundStyle(.tertiary)
+                            Text(errorMessages.isEmpty ? "没有匹配的引用" : "暂时无法读取引用")
+                                .font(.caption.weight(.medium))
+                            if !errorMessages.isEmpty {
+                                Button("重试") { revision += 1 }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(RemoteTheme.accent)
+                                    .frame(minHeight: 44)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+
+                    if !isLoading,
+                       !errorMessages.isEmpty,
+                       (!files.isEmpty || !sessions.isEmpty) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(RemoteTheme.warning)
+                            Text("部分引用未加载")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("重试") { revision += 1 }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(RemoteTheme.accent)
+                                .frame(minHeight: 44)
+                                .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 10)
+                    }
+                }
+            }
+            .frame(height: suggestionListHeight)
+        }
+        .background(RemoteTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
+        }
+        .task(id: LoadKey(token: token, revision: revision)) {
+            await load()
+        }
+    }
+
+    private func suggestionRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(RemoteTheme.accent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func fileCandidateTitle(_ candidate: RemoteFileReferenceCandidate) -> String {
+        pathComponents(candidate.path).last ?? candidate.path
+    }
+
+    private func fileCandidateSubtitle(_ candidate: RemoteFileReferenceCandidate) -> String {
+        let components = pathComponents(candidate.path)
+        let parent = components.dropLast().joined(separator: "/")
+        let location = parent.isEmpty ? "项目根目录" : parent
+        return candidate.kind == .directory ? "\(location) · 继续浏览" : location
+    }
+
+    private func pathComponents(_ path: String) -> [String] {
+        path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).map(String.init)
+    }
+
+    private var suggestionListHeight: CGFloat {
+        if isLoading, files.isEmpty, sessions.isEmpty { return 64 }
+        let fileCount = min(files.count, 8)
+        let sessionCount = token.quoted ? 0 : min(sessions.count, 5)
+        if fileCount + sessionCount == 0 { return 92 }
+        let divider: CGFloat = fileCount > 0 && sessionCount > 0 ? 9 : 0
+        let errorRow: CGFloat = errorMessages.isEmpty ? 0 : 44
+        return min(CGFloat(fileCount + sessionCount) * 48 + divider + errorRow, 220)
+    }
+
+    private func load() async {
+        isLoading = true
+        errorMessages = []
+        try? await Task.sleep(for: .milliseconds(120))
+        guard !Task.isCancelled else { return }
+
+        async let fileResult = Self.capture { try await fileLoader(token.query) }
+        async let sessionResult = Self.capture {
+            token.quoted ? [] : try await sessionLoader(token.query)
+        }
+        let (nextFiles, nextSessions) = await (fileResult, sessionResult)
+        guard !Task.isCancelled else { return }
+
+        switch nextFiles {
+        case .success(let values): files = values
+        case .failure(let error):
+            files = []
+            errorMessages.append(error.localizedDescription)
+        }
+        switch nextSessions {
+        case .success(let values): sessions = values
+        case .failure(let error):
+            sessions = []
+            errorMessages.append(error.localizedDescription)
+        }
+        isLoading = false
+    }
+
+    private static func capture<Value>(
+        _ operation: () async throws -> Value
+    ) async -> Result<Value, Error> {
+        do { return .success(try await operation()) }
+        catch { return .failure(error) }
+    }
+}
+
+private struct RemoteDraftImageRail: View {
+    let images: [RemotePromptImage]
+    let isPreparing: Bool
+    let onRemove: (UUID) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 9) {
+                ForEach(images) { image in
+                    ZStack(alignment: .topTrailing) {
+                        Group {
+                            if let preview = UIImage(data: image.thumbnailData) {
+                                Image(uiImage: preview)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(width: 64, height: 64)
+                        .background(RemoteTheme.mutedSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                        Button { onRemove(image.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(.black.opacity(0.68), in: Circle())
+                                .frame(width: 44, height: 44, alignment: .topTrailing)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 8, y: -8)
+                        .accessibilityLabel("移除\(image.name ?? "图片")")
+                    }
+                    .padding(.top, 8)
+                    .accessibilityElement(children: .contain)
+                }
+
+                if isPreparing {
+                    VStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("处理图片")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(width: 64, height: 64)
+                    .background(RemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 8)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(height: 80)
+    }
+}
+
+private enum RemoteImagePreparationError: LocalizedError {
+    case unreadable
+    case unsupported
+    case tooLarge(Int)
+    case tooMany(Int)
+    case totalTooLarge(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadable:
+            "无法读取这张图片。"
+        case .unsupported:
+            "电脑当前不支持可安全转换的图片格式。"
+        case .tooLarge(let bytes):
+            "图片处理后仍超过单张 \(Self.byteText(bytes)) 的限制。"
+        case .tooMany(let count):
+            "每条消息最多添加 \(count) 张图片。"
+        case .totalTooLarge(let bytes):
+            "这些图片合计超过 \(Self.byteText(bytes)) 的限制。"
+        }
+    }
+
+    private static func byteText(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+private enum RemoteImagePreparer {
+    static func prepare(
+        data: Data,
+        declaredMediaType: String?,
+        name: String?,
+        limits: RemoteImageLimits
+    ) async throws -> RemotePromptImage {
+        try await Task.detached(priority: .userInitiated) {
+            try prepareSynchronously(
+                data: data,
+                declaredMediaType: declaredMediaType,
+                name: name,
+                limits: limits
+            )
+        }.value
+    }
+
+    private static func prepareSynchronously(
+        data: Data,
+        declaredMediaType: String?,
+        name: String?,
+        limits: RemoteImageLimits
+    ) throws -> RemotePromptImage {
+        guard !data.isEmpty,
+              let source = CGImageSourceCreateWithData(data as CFData, [
+                  kCGImageSourceShouldCache: false,
+              ] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = number(properties[kCGImagePropertyPixelWidth]),
+              let height = number(properties[kCGImagePropertyPixelHeight]),
+              width > 0,
+              height > 0 else {
+            throw RemoteImagePreparationError.unreadable
+        }
+
+        let allowed = Set(limits.mediaTypes.map { $0.lowercased() })
+        let supportsJPEG = allowed.isEmpty || allowed.contains("image/jpeg") || allowed.contains("image/jpg")
+        let supportsPNG = allowed.isEmpty || allowed.contains("image/png")
+        guard supportsJPEG || supportsPNG else {
+            throw RemoteImagePreparationError.unsupported
+        }
+
+        let originalMax = max(width, height)
+        var targetMax = min(originalMax, max(limits.maxImageDimension ?? originalMax, 1), 6_000)
+        let originalPixels = Int64(width) * Int64(height)
+        if originalPixels > Int64(max(limits.maxImagePixels, 1)) {
+            let pixelScale = sqrt(Double(max(limits.maxImagePixels, 1)) / Double(originalPixels))
+            targetMax = min(targetMax, max(Int(floor(Double(originalMax) * pixelScale)), 1))
+        }
+
+        var currentMax = max(targetMax, 1)
+        while currentMax >= 1 {
+            guard let image = thumbnail(from: source, maxDimension: currentMax) else {
+                throw RemoteImagePreparationError.unreadable
+            }
+
+            if supportsPNG, hasAlpha(image),
+               let encoded = encode(image, type: UTType.png.identifier, quality: nil),
+               encoded.count <= limits.maxImageBytes {
+                return promptImage(
+                    data: encoded,
+                    mediaType: "image/png",
+                    name: normalizedName(name, extension: "png"),
+                    image: image
+                )
+            }
+
+            if supportsJPEG {
+                let flattened = hasAlpha(image) ? flattenOnWhite(image) ?? image : image
+                for quality in stride(from: 0.90, through: 0.42, by: -0.08) {
+                    if let encoded = encode(
+                        flattened,
+                        type: UTType.jpeg.identifier,
+                        quality: quality
+                    ), encoded.count <= limits.maxImageBytes {
+                        return promptImage(
+                            data: encoded,
+                            mediaType: "image/jpeg",
+                            name: normalizedName(name, extension: "jpg"),
+                            image: flattened
+                        )
+                    }
+                }
+            } else if supportsPNG,
+                      let encoded = encode(image, type: UTType.png.identifier, quality: nil),
+                      encoded.count <= limits.maxImageBytes {
+                return promptImage(
+                    data: encoded,
+                    mediaType: "image/png",
+                    name: normalizedName(name, extension: "png"),
+                    image: image
+                )
+            }
+
+            guard currentMax > 1 else { break }
+            let next = max(Int(floor(Double(currentMax) * 0.80)), 1)
+            currentMax = next < currentMax ? next : currentMax - 1
+        }
+
+        throw RemoteImagePreparationError.tooLarge(limits.maxImageBytes)
+    }
+
+    private static func number(_ value: Any?) -> Int? {
+        (value as? NSNumber)?.intValue
+    }
+
+    private static func thumbnail(
+        from source: CGImageSource,
+        maxDimension: Int
+    ) -> CGImage? {
+        CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary)
+    }
+
+    private static func hasAlpha(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func flattenOnWhite(_ image: CGImage) -> CGImage? {
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
+    }
+
+    private static func encode(
+        _ image: CGImage,
+        type: String,
+        quality: Double?
+    ) -> Data? {
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            type as CFString,
+            1,
+            nil
+        ) else { return nil }
+        var properties: [CFString: Any] = [:]
+        if let quality {
+            properties[kCGImageDestinationLossyCompressionQuality] = quality
+        }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    private static func promptImage(
+        data: Data,
+        mediaType: String,
+        name: String?,
+        image: CGImage
+    ) -> RemotePromptImage {
+        RemotePromptImage(
+            data: data,
+            thumbnailData: previewData(for: image),
+            mediaType: mediaType,
+            name: name,
+            width: image.width,
+            height: image.height
+        )
+    }
+
+    private static func normalizedName(_ name: String?, extension fileExtension: String) -> String? {
+        guard let name, !name.isEmpty else { return nil }
+        let base = (name as NSString).deletingPathExtension
+        return "\(base.isEmpty ? "图片" : base).\(fileExtension)"
+    }
+
+    private static func previewData(for image: CGImage) -> Data? {
+        let maxPreviewDimension = 192
+        let scale = min(
+            1,
+            Double(maxPreviewDimension) / Double(max(image.width, image.height))
+        )
+        let width = max(Int((Double(image.width) * scale).rounded()), 1)
+        let height = max(Int((Double(image.height) * scale).rounded()), 1)
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .medium
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let preview = context.makeImage() else { return nil }
+        return encode(
+            preview,
+            type: UTType.jpeg.identifier,
+            quality: 0.72
+        )
+    }
+}
+
+private extension RemoteSubagentEntry {
+    var remoteActivityLabel: String {
+        switch activity {
+        case .running: "运行中"
+        case .inactive: mode == .continuable ? "未运行" : "已结束"
+        case nil: "不可用"
+        }
+    }
+
+    var remoteActivityColor: Color {
+        switch activity {
+        case .running: RemoteTheme.accent
+        case .inactive: Color.secondary
+        case nil: RemoteTheme.warning
+        }
+    }
+
+    var remoteActivityIcon: String {
+        switch activity {
+        case .running: "waveform"
+        case .inactive: mode == .continuable ? "pause" : "checkmark"
+        case nil: "exclamationmark"
+        }
+    }
+}
+
+private struct RemoteSubagentBrowserView: View {
+    @ObservedObject var viewModel: RemoteConversationViewModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                RemoteSheetHeader(
+                    title: "子代理",
+                    subtitle: "查看由这个会话派出的工作，并在支持时继续跟进"
+                ) {
+                    Button {
+                        Task { await viewModel.refreshSubagents() }
+                    } label: {
+                        Group {
+                            if viewModel.isLoadingSubagents {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                    }
+                    .buttonStyle(RemoteToolbarButtonStyle())
+                    .disabled(viewModel.isLoadingSubagents)
+                    .accessibilityLabel("刷新子代理")
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        if let catalog = viewModel.subagentCatalog,
+                           !catalog.parentAvailable {
+                            RemoteInlineNotice(
+                                title: "父会话暂时不可用",
+                                message: "已保存的子代理仍可查看，但部分操作可能失败。",
+                                icon: "exclamationmark.triangle.fill",
+                                tone: .warning
+                            )
+                        }
+
+                        if let error = viewModel.subagentErrorMessage {
+                            RemoteInlineNotice(
+                                title: "无法读取子代理",
+                                message: error,
+                                icon: "wifi.exclamationmark",
+                                tone: .danger,
+                                actionTitle: "重试",
+                                action: { Task { await viewModel.refreshSubagents() } }
+                            )
+                        }
+
+                        let entries = viewModel.subagentCatalog?.entries ?? []
+                        if viewModel.isLoadingSubagents, entries.isEmpty {
+                            RemoteLoadingState(
+                                icon: "person.2",
+                                title: "正在读取子代理",
+                                message: "从你的电脑同步派出的工作"
+                            )
+                            .padding(.top, 42)
+                        } else if entries.isEmpty, viewModel.subagentErrorMessage == nil {
+                            RemoteEmptyState(
+                                icon: "person.2",
+                                title: "还没有子代理",
+                                message: "当 Harness 将工作交给子代理后，会在这里出现。"
+                            )
+                            .padding(.top, 42)
+                        } else {
+                            RemoteSectionHeader(
+                                title: "派出的工作",
+                                detail: "\(entries.filter { !$0.isDiagnostic }.count) 个"
+                            )
+                            VStack(spacing: 0) {
+                                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                                    if entry.isDiagnostic {
+                                        diagnosticRow(entry)
+                                    } else {
+                                        NavigationLink {
+                                            RemoteSubagentConversationView(
+                                                parentViewModel: viewModel,
+                                                parentSessionID: viewModel.session.id,
+                                                parentAvailable: viewModel.subagentCatalog?.parentAvailable ?? true,
+                                                child: entry
+                                            )
+                                        } label: {
+                                            subagentRow(entry)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    if index < entries.count - 1 {
+                                        Rectangle()
+                                            .fill(RemoteTheme.hairline)
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 42)
+                                    }
+                                }
+                            }
+                            .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(RemoteTheme.hairline, lineWidth: 1)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 30)
+                }
+                .refreshable { await viewModel.refreshSubagents() }
+            }
+            .background(RemoteTheme.canvas)
+            .remoteNavigationChromeHidden()
+        }
+    }
+
+    @ViewBuilder
+    private func subagentRow(_ entry: RemoteSubagentEntry) -> some View {
+        let title = entry.label ?? shortIdentifier(entry.id)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .top, spacing: 11) {
+                        subagentIcon(entry)
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .frame(minWidth: 24, minHeight: 32)
+                    }
+                    HStack(alignment: .center, spacing: 8) {
+                        subagentMode(entry)
+                        Spacer(minLength: 8)
+                        RemoteStatusPill(
+                            text: entry.remoteActivityLabel,
+                            color: entry.remoteActivityColor,
+                            icon: entry.remoteActivityIcon
+                        )
+                    }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    subagentIcon(entry)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                        subagentMode(entry)
+                    }
+                    Spacer(minLength: 8)
+                    RemoteStatusPill(
+                        text: entry.remoteActivityLabel,
+                        color: entry.remoteActivityColor,
+                        icon: entry.remoteActivityIcon
+                    )
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 11 : 8)
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+        .background(
+            entry.activity == .running ? RemoteTheme.accent.opacity(0.05) : Color.clear
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("打开子代理对话")
+    }
+
+    private func subagentIcon(_ entry: RemoteSubagentEntry) -> some View {
+        Image(systemName: entry.activity == .running ? "waveform" : "person.crop.circle")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(entry.activity == .running ? RemoteTheme.accent : Color.secondary)
+            .frame(width: 30, height: 30)
+            .background(
+                (entry.activity == .running ? RemoteTheme.accent : Color.secondary)
+                    .opacity(0.10),
+                in: Circle()
+            )
+    }
+
+    private func subagentMode(_ entry: RemoteSubagentEntry) -> some View {
+        HStack(spacing: 6) {
+            Text(entry.mode == .continuable ? "可继续" : "一次性")
+            if entry.hasChildren {
+                Text("·")
+                Label("包含子任务", systemImage: "arrow.triangle.branch")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func diagnosticRow(_ entry: RemoteSubagentEntry) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(RemoteTheme.warning)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("无法读取一个子代理")
+                    .font(.subheadline.weight(.semibold))
+                Text(diagnosticLabel(entry.diagnosticReason))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(minHeight: 58)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func diagnosticLabel(_ reason: RemoteSubagentEntry.DiagnosticReason?) -> String {
+        switch reason {
+        case .corrupt: "本地记录已损坏"
+        case .unsupported: "记录格式暂不支持"
+        case .unavailable: "记录暂时不可用"
+        case nil: "记录暂时不可用"
+        }
+    }
+
+    private func shortIdentifier(_ value: String) -> String {
+        let compact = value.replacingOccurrences(of: "-", with: "")
+        return "子代理 \(compact.prefix(8))"
+    }
+}
+
+private struct RemoteNestedSubagentCatalogView: View {
+    @ObservedObject var parentViewModel: RemoteConversationViewModel
+    let parentSessionID: String
+    let title: String
+
+    @State private var catalog: RemoteSubagentCatalog?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(spacing: 0) {
+            RemotePageHeader(
+                title: "下级子代理",
+                subtitle: title
+            ) {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Group {
+                        if isLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                }
+                .buttonStyle(RemoteToolbarButtonStyle())
+                .disabled(isLoading)
+                .accessibilityLabel("刷新下级子代理")
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if catalog?.parentAvailable == false {
+                        RemoteInlineNotice(
+                            title: "这个子代理暂时不可用",
+                            message: "已保存的下级工作仍可查看。",
+                            icon: "exclamationmark.triangle.fill",
+                            tone: .warning
+                        )
+                    }
+                    if let errorMessage {
+                        RemoteInlineNotice(
+                            title: "无法读取下级子代理",
+                            message: errorMessage,
+                            icon: "wifi.exclamationmark",
+                            tone: .danger,
+                            actionTitle: "重试",
+                            action: { Task { await refresh() } }
+                        )
+                    }
+
+                    let entries = catalog?.entries ?? []
+                    if isLoading, entries.isEmpty {
+                        RemoteLoadingState(
+                            icon: "arrow.triangle.branch",
+                            title: "正在读取下级工作",
+                            message: "从电脑同步子代理树"
+                        )
+                        .padding(.top, 42)
+                    } else if entries.isEmpty, errorMessage == nil {
+                        RemoteEmptyState(
+                            icon: "arrow.triangle.branch",
+                            title: "没有下级子代理",
+                            message: "这项工作没有继续派出其他任务。"
+                        )
+                        .padding(.top, 42)
+                    } else {
+                        RemoteSectionHeader(
+                            title: "下级工作",
+                            detail: "\(entries.filter { !$0.isDiagnostic }.count) 个"
+                        )
+                        VStack(spacing: 0) {
+                            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                                if entry.isDiagnostic {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .foregroundStyle(RemoteTheme.warning)
+                                            .frame(width: 30)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(entry.id)
+                                                .font(.subheadline.weight(.semibold))
+                                                .lineLimit(1)
+                                            Text("这条子代理记录暂时无法读取")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 11)
+                                    .frame(minHeight: 58)
+                                    .accessibilityElement(children: .combine)
+                                } else {
+                                    NavigationLink {
+                                        RemoteSubagentConversationView(
+                                            parentViewModel: parentViewModel,
+                                            parentSessionID: parentSessionID,
+                                            parentAvailable: catalog?.parentAvailable ?? true,
+                                            child: entry
+                                        )
+                                    } label: {
+                                        nestedSubagentRow(entry)
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 11 : 8)
+                                        .frame(minHeight: 58)
+                                        .contentShape(Rectangle())
+                                        .accessibilityElement(children: .combine)
+                                        .accessibilityHint("打开子代理对话")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+
+                                if index < entries.count - 1 {
+                                    Rectangle()
+                                        .fill(RemoteTheme.hairline)
+                                        .frame(height: 0.5)
+                                        .padding(.leading, 42)
+                                }
+                            }
+                        }
+                        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(RemoteTheme.hairline, lineWidth: 1)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 30)
+            }
+            .refreshable { await refresh() }
+        }
+        .background(RemoteTheme.canvas)
+        .remoteNavigationChromeHidden()
+        .task { await monitor() }
+    }
+
+    private func monitor() async {
+        await refresh()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await refresh(silently: true)
+        }
+    }
+
+    private func refresh(silently: Bool = false) async {
+        if !silently { isLoading = true }
+        do {
+            catalog = try await parentViewModel.client.subagents(
+                parentSessionID: parentSessionID
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func subtitle(for entry: RemoteSubagentEntry) -> String {
+        var parts = [entry.mode == .continuable ? "可继续" : "一次性"]
+        parts.append(entry.remoteActivityLabel)
+        if entry.hasChildren { parts.append("包含下级工作") }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func nestedSubagentRow(_ entry: RemoteSubagentEntry) -> some View {
+        let title = entry.label ?? entry.id
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top, spacing: 11) {
+                    nestedIcon(entry)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(minWidth: 24, minHeight: 32)
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Text(capabilitySubtitle(for: entry))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Text(entry.remoteActivityLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(entry.remoteActivityColor)
+                }
+            }
+        } else {
+            HStack(spacing: 11) {
+                nestedIcon(entry)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    Text(subtitle(for: entry))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if entry.activity == .running {
+                    Circle()
+                        .fill(RemoteTheme.accent)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func nestedIcon(_ entry: RemoteSubagentEntry) -> some View {
+        Image(systemName: entry.activity == .running ? "waveform" : "person.crop.circle")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(entry.activity == .running ? RemoteTheme.accent : Color.secondary)
+            .frame(width: 30, height: 30)
+            .background(
+                (entry.activity == .running ? RemoteTheme.accent : Color.secondary)
+                    .opacity(0.10),
+                in: Circle()
+            )
+    }
+
+    private func capabilitySubtitle(for entry: RemoteSubagentEntry) -> String {
+        var parts = [entry.mode == .continuable ? "可继续" : "一次性"]
+        if entry.hasChildren { parts.append("包含下级工作") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct RemoteSubagentConversationView: View {
+    @ObservedObject private var parentViewModel: RemoteConversationViewModel
+    @StateObject private var viewModel: RemoteSubagentConversationViewModel
+    @State private var draft = ""
+    @State private var didInitialPosition = false
+    @State private var isNearBottom = true
+    @State private var unseenUpdates = 0
+    @State private var lastItemCount = 0
+    @State private var shouldFollowNextSend = false
+    @State private var selectedDetail: RemoteConversationItem?
+    @FocusState private var composerFocused: Bool
+    #if DEBUG
+    @State private var didRunLiveSubagentAction = false
+    #endif
+
+    init(
+        parentViewModel: RemoteConversationViewModel,
+        parentSessionID: String,
+        parentAvailable: Bool,
+        child: RemoteSubagentEntry
+    ) {
+        self.parentViewModel = parentViewModel
+        _viewModel = StateObject(wrappedValue: RemoteSubagentConversationViewModel(
+            client: parentViewModel.client,
+            parentSessionID: parentSessionID,
+            parentAvailable: parentAvailable,
+            child: child
+        ))
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            GeometryReader { viewport in
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        if viewModel.hasMoreHistory {
+                            Button {
+                                let anchor = viewModel.items.first?.id
+                                Task {
+                                    await viewModel.loadOlderHistory()
+                                    guard let anchor else { return }
+                                    var transaction = Transaction()
+                                    transaction.disablesAnimations = true
+                                    withTransaction(transaction) {
+                                        proxy.scrollTo(anchor, anchor: .top)
+                                    }
+                                }
+                            } label: {
+                                if viewModel.isLoadingOlder {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("加载更早记录", systemImage: "clock.arrow.circlepath")
+                                }
+                            }
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(RemoteTheme.accent)
+                            .frame(minHeight: 44)
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.isLoadingOlder)
+                        }
+
+                        if viewModel.isLoading, viewModel.items.isEmpty {
+                            RemoteLoadingState(
+                                icon: "arrow.triangle.2.circlepath",
+                                title: "正在同步子代理",
+                                message: "读取这项工作的对话记录"
+                            )
+                            .padding(.top, 42)
+                        } else if viewModel.items.isEmpty, let error = viewModel.errorMessage {
+                            RemoteEmptyState(
+                                icon: "wifi.exclamationmark",
+                                title: "暂时无法读取",
+                                message: error,
+                                action: { Task { await viewModel.refresh() } }
+                            ) {
+                                Label("重试", systemImage: "arrow.clockwise")
+                            }
+                            .padding(.top, 38)
+                        } else if viewModel.items.isEmpty {
+                            RemoteEmptyState(
+                                icon: "bubble.left.and.bubble.right",
+                                title: "还没有对话记录",
+                                message: viewModel.child.mode == .continuable
+                                    ? "可以从下方给这个子代理补充信息。"
+                                    : "这项一次性工作尚未留下可展示的消息。"
+                            )
+                            .padding(.top, 38)
+                        } else {
+                            ForEach(viewModel.items) { item in
+                                ConversationItemView(
+                                    item: item,
+                                    loadAttachment: { attachment in
+                                        try await parentViewModel.attachmentData(
+                                            for: attachment,
+                                            sessionID: viewModel.child.id
+                                        )
+                                    },
+                                    onOpenDetails: { selectedDetail = item }
+                                )
+                                .id(item.id)
+                            }
+                        }
+
+                        GeometryReader { marker in
+                            Color.clear.preference(
+                                key: SubagentBottomOffsetKey.self,
+                                value: marker.frame(in: .named("subagent-scroll")).minY
+                            )
+                        }
+                        .frame(height: 1)
+                        .id("subagent-bottom")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 20)
+                    .opacity(contentIsPositioned ? 1 : 0)
+                }
+                .coordinateSpace(name: "subagent-scroll")
+                .scrollDismissesKeyboard(.interactively)
+                .onPreferenceChange(SubagentBottomOffsetKey.self) { bottom in
+                    isNearBottom = bottom <= viewport.size.height + 140
+                    if isNearBottom { unseenUpdates = 0 }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if unseenUpdates > 0 {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                            }
+                            unseenUpdates = 0
+                        } label: {
+                            Label("\(unseenUpdates) 条更新", systemImage: "arrow.down")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 44)
+                                .foregroundStyle(.primary)
+                                .background(RemoteTheme.surface, in: Capsule())
+                                .overlay { Capsule().stroke(RemoteTheme.hairline) }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(14)
+                    }
+                }
+                .onChange(of: viewModel.isLoading) { _, loading in
+                    guard !loading, !didInitialPosition else { return }
+                    DispatchQueue.main.async {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                        }
+                        lastItemCount = viewModel.items.count
+                        didInitialPosition = true
+                    }
+                }
+                .onChange(of: viewModel.items.last) { _, _ in
+                    guard didInitialPosition else { return }
+                    let added = max(viewModel.items.count - lastItemCount, 1)
+                    lastItemCount = viewModel.items.count
+                    if isNearBottom || shouldFollowNextSend {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("subagent-bottom", anchor: .bottom)
+                        }
+                        shouldFollowNextSend = false
+                    } else {
+                        unseenUpdates += added
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if viewModel.child.mode == .continuable,
+                       viewModel.parentAvailable || viewModel.child.activity == .running {
+                        subagentComposer
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, composerFocused ? 2 : 6)
+                            .background(
+                                LinearGradient(
+                                    colors: [RemoteTheme.canvas.opacity(0), RemoteTheme.canvas],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                )
+                                .ignoresSafeArea()
+                            )
+                    }
+                }
+            }
+        }
+        .background(RemoteTheme.canvas)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                RemotePageHeader(
+                    title: viewModel.child.label ?? "子代理",
+                    subtitle: viewModel.child.mode == .continuable ? "可继续对话" : "一次性工作"
+                ) {
+                    HStack(spacing: 6) {
+                        if viewModel.child.hasChildren {
+                            NavigationLink {
+                                RemoteNestedSubagentCatalogView(
+                                    parentViewModel: parentViewModel,
+                                    parentSessionID: viewModel.child.id,
+                                    title: viewModel.child.label ?? "子代理"
+                                )
+                            } label: {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(RemoteTheme.accent)
+                                    .frame(width: 34, height: 34)
+                                    .background(RemoteTheme.accent.opacity(0.10), in: Circle())
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("查看下级子代理")
+                        }
+                        RemoteStatusPill(
+                            text: viewModel.child.remoteActivityLabel,
+                            color: viewModel.child.remoteActivityColor,
+                            icon: viewModel.child.remoteActivityIcon
+                        )
+                    }
+                }
+                if let error = viewModel.errorMessage, !viewModel.items.isEmpty {
+                    RemoteInlineNotice(
+                        title: "操作没有完成",
+                        message: error,
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .danger,
+                        actionTitle: "关闭",
+                        action: viewModel.dismissError
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                }
+                if !viewModel.parentAvailable {
+                    RemoteInlineNotice(
+                        title: "父会话暂时不可用",
+                        message: viewModel.child.activity == .running
+                            ? "不能继续补充，但仍可停止正在运行的子代理。"
+                            : (viewModel.child.mode == .continuable
+                                ? "历史仍可阅读，恢复父会话后才能继续这项工作。"
+                                : "历史仍可阅读；这项一次性工作不支持继续。"),
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .warning
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                }
+            }
+            .background(RemoteTheme.canvas)
+        }
+        .remoteNavigationChromeHidden()
+        .task { await viewModel.monitor() }
+        #if DEBUG
+        .task { await runLiveSubagentActionIfRequested() }
+        #endif
+        .onDisappear {
+            Task { await parentViewModel.refreshSubagents() }
+        }
+        .sheet(item: $selectedDetail) { item in
+            ConversationDetailSheet(
+                item: item,
+                loadAttachment: { attachment in
+                    try await parentViewModel.attachmentData(
+                        for: attachment,
+                        sessionID: viewModel.child.id
+                    )
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(RemoteTheme.canvas)
+        }
+    }
+
+    private var contentIsPositioned: Bool {
+        viewModel.isLoading || viewModel.items.isEmpty || didInitialPosition
+    }
+
+    #if DEBUG
+    @MainActor
+    private func runLiveSubagentActionIfRequested() async {
+        guard !didRunLiveSubagentAction,
+              ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "live-acceptance",
+              let action = ProcessInfo.processInfo.environment["DSH_REMOTE_LIVE_SUBAGENT_ACTION"] else {
+            return
+        }
+        didRunLiveSubagentAction = true
+        for _ in 0..<100 where viewModel.isLoading {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return }
+        }
+        switch action {
+        case "followup":
+            _ = await viewModel.send("请再补充一句：移动端只开放了哪些最小 Remote 能力？")
+        case "long-running":
+            _ = await viewModel.send("请运行 sleep 45，然后只回复 done。")
+        case "spawn-grandchild":
+            _ = await viewModel.send(
+                "请使用 subagent 工具创建一个名为 nested-remote-acceptance 的 continuable 子代理，让它只回复 nested ok；等待它返回后再结束。"
+            )
+        case "interrupt":
+            for _ in 0..<100 where viewModel.child.activity != .running {
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { return }
+            }
+            await viewModel.interrupt()
+        default:
+            break
+        }
+    }
+    #endif
+
+    private var subagentComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.parentAvailable {
+                TextField("给子代理补充信息", text: $draft, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .focused($composerFocused)
+                    .disabled(viewModel.isSending)
+            } else {
+                Label("父会话不可用，暂时不能补充", systemImage: "pause.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 38)
+            }
+
+            HStack(spacing: 4) {
+                Text(viewModel.child.activity == .running ? "子代理正在执行" : "继续这项工作")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if viewModel.child.activity == .running {
+                    Button {
+                        Task { await viewModel.interrupt() }
+                    } label: {
+                        Group {
+                            if viewModel.isInterrupting {
+                                ProgressView().controlSize(.small).tint(RemoteTheme.danger)
+                            } else {
+                                Image(systemName: "stop.fill")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(RemoteTheme.danger)
+                            }
+                        }
+                        .frame(width: 34, height: 34)
+                        .background(RemoteTheme.danger.opacity(0.10), in: Circle())
+                        .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isInterrupting || viewModel.isSending)
+                    .accessibilityLabel("停止子代理")
+                }
+                if viewModel.parentAvailable {
+                    Button {
+                        let outgoing = draft
+                        shouldFollowNextSend = true
+                        Task {
+                            if await viewModel.send(outgoing) {
+                                draft = ""
+                            } else {
+                                shouldFollowNextSend = false
+                            }
+                        }
+                    } label: {
+                        Group {
+                            if viewModel.isSending {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else {
+                                Image(systemName: "arrow.up")
+                                    .font(.caption.weight(.bold))
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(RemoteTheme.accent, in: Circle())
+                        .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(
+                        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || viewModel.isSending
+                            || viewModel.isInterrupting
+                    )
+                    .opacity(
+                        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1
+                    )
+                    .accessibilityLabel("发送给子代理")
+                }
+            }
+        }
+        .padding(12)
+        .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
+    }
+}
+
+private struct SubagentBottomOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 private struct RemoteModelSelectionSheet: View {

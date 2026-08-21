@@ -16,6 +16,7 @@ No login or review credentials are required.
 4. Inspect the native conversation and tool-summary cards.
 5. Answer the visible confirmation question.
 6. Send a prompt; the demo simulates running and completion without network access or an LLM.
+7. The `@` picker and subagent catalog/history use offline demo data. The image draft can be exercised with any image explicitly chosen in the system picker or pasted from the clipboard; the demo still makes no network or model call and requests no broad photo-library access.
 
 The offline experience is presented as an explicit secondary action when no computer has been saved and contains no hidden gestures.
 
@@ -28,6 +29,7 @@ Live mode connects directly to the user's Harness computer through Tailscale Ser
 - The maintainer receives no prompts, code, credentials, diagnostics, analytics, or account data from the iOS app.
 - Saved computer names, URLs, and LAN pairing credentials use `UserDefaults` only for app functionality; the privacy manifest declares reason `CA92.1`.
 - Camera access occurs only after the user chooses QR scanning.
+- Image access occurs only after the user chooses the system photo picker or explicitly pastes an image. Selected images are processed in memory and sent directly to the user's computer; the app has no photo library, relay, or maintainer-operated upload service.
 - Local notifications report task completion or an interaction waiting while monitoring is active.
 - Prompts can be sent by the user's computer to the model provider configured on that computer. App Store privacy answers and review notes must disclose this user-directed flow without claiming that no third party ever processes content.
 

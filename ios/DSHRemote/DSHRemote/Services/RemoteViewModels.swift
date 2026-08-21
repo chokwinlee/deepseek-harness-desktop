@@ -164,6 +164,12 @@ final class RemoteConversationViewModel: ObservableObject {
     @Published private(set) var stats: RemoteConversationStats?
     @Published private(set) var goal: RemoteGoalState?
     @Published private(set) var plan: RemotePlanState?
+    @Published private(set) var imageLimits: RemoteImageLimits?
+    @Published private(set) var fileReferencesSupported: Bool?
+    @Published private(set) var sessionReferencesSupported: Bool?
+    @Published private(set) var subagentCatalog: RemoteSubagentCatalog?
+    @Published private(set) var isLoadingSubagents = false
+    @Published private(set) var subagentErrorMessage: String?
     @Published private(set) var modelDirectory: RemoteModelDirectory?
     @Published private(set) var isLoadingModels = false
     @Published private(set) var isSelectingModel = false
@@ -182,16 +188,24 @@ final class RemoteConversationViewModel: ObservableObject {
     let client: any HarnessRemoteClient
     private var lastRunning: Bool?
     private var historyMessageLimit = 80
+    private var refreshGeneration = 0
     private var modelGeneration = 0
-    private var attachmentCache: [String: CachedAttachment] = [:]
-    private var attachmentTasks: [String: Task<RemoteImageAttachmentPayload, Error>] = [:]
+    private var attachmentCache: [AttachmentKey: CachedAttachment] = [:]
+    private var attachmentTasks: [AttachmentKey: Task<RemoteImageAttachmentPayload, Error>] = [:]
     private var attachmentAccessCounter = 0
     private var attachmentCacheBytes = 0
     private let attachmentLimiter = RemoteAttachmentLimiter(limit: 3)
+    private var subagentRefreshGeneration = 0
+    private var subagentRefreshTask: Task<Void, Never>?
 
     private struct CachedAttachment {
         let data: Data
         var lastAccess: Int
+    }
+
+    private struct AttachmentKey: Hashable {
+        let sessionID: String
+        let attachmentID: String
     }
 
     private static let attachmentCacheLimit = 32 * 1_024 * 1_024
@@ -199,6 +213,12 @@ final class RemoteConversationViewModel: ObservableObject {
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         self.client = client
         self.session = session
+    }
+
+    var supportsReferences: Bool? {
+        if fileReferencesSupported == true || sessionReferencesSupported == true { return true }
+        if fileReferencesSupported == false && sessionReferencesSupported == false { return false }
+        return nil
     }
 
     func monitor() async {
@@ -217,6 +237,9 @@ final class RemoteConversationViewModel: ObservableObject {
             eventsTask.cancel()
             attachmentTasks.values.forEach { $0.cancel() }
             attachmentTasks.removeAll()
+            subagentRefreshGeneration += 1
+            subagentRefreshTask?.cancel()
+            subagentRefreshTask = nil
         }
 
         await refresh()
@@ -228,6 +251,8 @@ final class RemoteConversationViewModel: ObservableObject {
     }
 
     func refresh(silently: Bool = false) async {
+        refreshGeneration += 1
+        let generation = refreshGeneration
         if !silently && items.isEmpty { isLoading = true }
         do {
             async let latestSnapshot = client.conversation(
@@ -236,20 +261,25 @@ final class RemoteConversationViewModel: ObservableObject {
             )
             async let latestSessions = client.sessions()
             let (snapshot, sessions) = try await (latestSnapshot, latestSessions)
+            guard generation == refreshGeneration, !Task.isCancelled else { return }
             items = snapshot.items
             trajectory = snapshot.trajectory
             stats = snapshot.stats
             goal = snapshot.goal
             plan = snapshot.plan
+            imageLimits = snapshot.imageLimits
             hasMoreHistory = snapshot.hasMore
             hasLoadedConversationSnapshot = true
             if let latest = sessions.first(where: { $0.id == session.id }) {
                 apply(latest)
             }
             errorMessage = nil
+            requestSubagentRefresh()
         } catch {
+            guard generation == refreshGeneration, !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
         }
+        guard generation == refreshGeneration else { return }
         isLoading = false
         hasLoadedInitialSnapshot = true
     }
@@ -320,13 +350,24 @@ final class RemoteConversationViewModel: ObservableObject {
         }
     }
 
-    func send(_ text: String, steer: Bool) async -> Bool {
+    func send(
+        _ text: String,
+        images: [RemotePromptImage],
+        steer: Bool
+    ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSending else { return false }
+        guard (!trimmed.isEmpty || !images.isEmpty),
+              !isSending,
+              !isCancelling else { return false }
         isSending = true
         defer { isSending = false }
         do {
-            try await client.send(trimmed, to: session.id, steer: session.running && steer)
+            try await client.send(
+                trimmed,
+                images: images,
+                to: session.id,
+                steer: session.running && steer
+            )
             await refresh(silently: true)
             return true
         } catch {
@@ -335,53 +376,88 @@ final class RemoteConversationViewModel: ObservableObject {
         }
     }
 
-    func attachmentData(for attachment: RemoteImageAttachment) async throws -> Data {
+    func fileReferences(query: String) async throws -> [RemoteFileReferenceCandidate] {
+        do {
+            let values = try await client.fileReferences(sessionID: session.id, query: query)
+            fileReferencesSupported = true
+            return values
+        } catch {
+            return try handleReferenceError(error, domain: .file)
+        }
+    }
+
+    func sessionReferences(query: String) async throws -> [RemoteSessionReferenceCandidate] {
+        do {
+            let values = try await client.sessionReferences(sessionID: session.id, query: query)
+            sessionReferencesSupported = true
+            return values
+        } catch {
+            return try handleReferenceError(error, domain: .session)
+        }
+    }
+
+    func refreshSubagents() async {
+        subagentRefreshGeneration += 1
+        subagentRefreshTask?.cancel()
+        subagentRefreshTask = nil
+        requestSubagentRefresh()
+        await subagentRefreshTask?.value
+    }
+
+    func attachmentData(
+        for attachment: RemoteImageAttachment,
+        sessionID: String? = nil
+    ) async throws -> Data {
+        let resolvedSessionID = sessionID ?? session.id
+        let key = AttachmentKey(
+            sessionID: resolvedSessionID,
+            attachmentID: attachment.attachmentID
+        )
         attachmentAccessCounter += 1
-        if var cached = attachmentCache[attachment.attachmentID] {
+        if var cached = attachmentCache[key] {
             cached.lastAccess = attachmentAccessCounter
-            attachmentCache[attachment.attachmentID] = cached
+            attachmentCache[key] = cached
             return cached.data
         }
 
         let task: Task<RemoteImageAttachmentPayload, Error>
-        if let existing = attachmentTasks[attachment.attachmentID] {
+        if let existing = attachmentTasks[key] {
             task = existing
         } else {
             let client = client
-            let sessionID = session.id
             let limiter = attachmentLimiter
             task = Task {
                 try await limiter.run {
                     try await client.attachment(
-                        sessionID: sessionID,
+                        sessionID: resolvedSessionID,
                         attachmentID: attachment.attachmentID
                     )
                 }
             }
-            attachmentTasks[attachment.attachmentID] = task
+            attachmentTasks[key] = task
         }
 
         do {
             let payload = try await task.value
-            attachmentTasks[attachment.attachmentID] = nil
+            attachmentTasks[key] = nil
             guard payload.attachment == attachment else {
                 throw HarnessRemoteClientError.mismatchedResponse
             }
             attachmentAccessCounter += 1
-            if var cached = attachmentCache[attachment.attachmentID] {
+            if var cached = attachmentCache[key] {
                 cached.lastAccess = attachmentAccessCounter
-                attachmentCache[attachment.attachmentID] = cached
+                attachmentCache[key] = cached
                 return cached.data
             }
-            attachmentCache[attachment.attachmentID] = CachedAttachment(
+            attachmentCache[key] = CachedAttachment(
                 data: payload.data,
                 lastAccess: attachmentAccessCounter
             )
             attachmentCacheBytes += payload.data.count
-            trimAttachmentCache(protecting: attachment.attachmentID)
+            trimAttachmentCache(protecting: key)
             return payload.data
         } catch {
-            attachmentTasks[attachment.attachmentID] = nil
+            attachmentTasks[key] = nil
             throw error
         }
     }
@@ -413,7 +489,7 @@ final class RemoteConversationViewModel: ObservableObject {
     }
 
     func cancel() async {
-        guard session.running, !isCancelling else { return }
+        guard session.running, !isCancelling, !isSending else { return }
         isCancelling = true
         defer { isCancelling = false }
         do {
@@ -473,13 +549,221 @@ final class RemoteConversationViewModel: ObservableObject {
         ))
     }
 
-    private func trimAttachmentCache(protecting protectedID: String) {
+    private func requestSubagentRefresh() {
+        guard subagentRefreshTask == nil else { return }
+        isLoadingSubagents = true
+        subagentRefreshGeneration += 1
+        let generation = subagentRefreshGeneration
+        let client = client
+        let parentSessionID = session.id
+        subagentRefreshTask = Task { [weak self] in
+            let result: Result<RemoteSubagentCatalog, Error>
+            do {
+                result = .success(try await client.subagents(parentSessionID: parentSessionID))
+            } catch {
+                result = .failure(error)
+            }
+            guard let self,
+                  generation == self.subagentRefreshGeneration,
+                  !Task.isCancelled else { return }
+            self.subagentRefreshTask = nil
+            self.isLoadingSubagents = false
+            switch result {
+            case .success(let catalog):
+                self.subagentCatalog = catalog
+                self.subagentErrorMessage = nil
+            case .failure(let error):
+                self.subagentErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private enum ReferenceDomain {
+        case file
+        case session
+    }
+
+    private func handleReferenceError<Value>(
+        _ error: Error,
+        domain: ReferenceDomain
+    ) throws -> Value {
+        if let remoteError = error as? HarnessRemoteClientError,
+           case .server(404) = remoteError {
+            switch domain {
+            case .file: fileReferencesSupported = false
+            case .session: sessionReferencesSupported = false
+            }
+            throw HarnessRemoteClientError.api(
+                code: "references-unsupported",
+                message: "当前电脑版本不支持引用，请更新到 DSH Desktop v0.3.0 或更高版本。"
+            )
+        }
+        throw error
+    }
+
+    private func trimAttachmentCache(protecting protectedKey: AttachmentKey) {
         while attachmentCacheBytes > Self.attachmentCacheLimit,
               let candidate = attachmentCache
-                .filter({ $0.key != protectedID })
+                .filter({ $0.key != protectedKey })
                 .min(by: { $0.value.lastAccess < $1.value.lastAccess }) {
             attachmentCacheBytes -= candidate.value.data.count
             attachmentCache[candidate.key] = nil
+        }
+    }
+}
+
+@MainActor
+final class RemoteSubagentConversationViewModel: ObservableObject {
+    @Published private(set) var child: RemoteSubagentEntry
+    @Published private(set) var parentAvailable: Bool
+    @Published private(set) var items: [RemoteConversationItem] = []
+    @Published private(set) var hasMoreHistory = false
+    @Published private(set) var isLoading = true
+    @Published private(set) var isLoadingOlder = false
+    @Published private(set) var isSending = false
+    @Published private(set) var isInterrupting = false
+    @Published private(set) var errorMessage: String?
+
+    let client: any HarnessRemoteClient
+    let parentSessionID: String
+    private var historyMessageLimit = 80
+    private var refreshGeneration = 0
+    private var catalogGeneration = 0
+    private var catalogTask: Task<Void, Never>?
+
+    init(
+        client: any HarnessRemoteClient,
+        parentSessionID: String,
+        parentAvailable: Bool,
+        child: RemoteSubagentEntry
+    ) {
+        self.client = client
+        self.parentSessionID = parentSessionID
+        self.parentAvailable = parentAvailable
+        self.child = child
+    }
+
+    func monitor() async {
+        defer {
+            catalogGeneration += 1
+            catalogTask?.cancel()
+            catalogTask = nil
+        }
+        await refresh()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(child.activity == .running ? 1 : 3))
+            guard !Task.isCancelled else { return }
+            await refresh(silently: true)
+        }
+    }
+
+    func refresh(silently: Bool = false) async {
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        if !silently && items.isEmpty { isLoading = true }
+        do {
+            let snapshot = try await client.subagentConversation(
+                parentSessionID: parentSessionID,
+                child: child,
+                maxMessages: historyMessageLimit
+            )
+            guard generation == refreshGeneration, !Task.isCancelled else { return }
+            items = snapshot.items
+            hasMoreHistory = snapshot.hasMore
+            errorMessage = nil
+            requestCatalogRefresh()
+        } catch {
+            guard generation == refreshGeneration, !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+        }
+        guard generation == refreshGeneration else { return }
+        isLoading = false
+    }
+
+    func loadOlderHistory() async {
+        guard hasMoreHistory, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        historyMessageLimit += 80
+        await refresh(silently: true)
+        isLoadingOlder = false
+    }
+
+    func send(_ text: String) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard child.mode == .continuable,
+              parentAvailable,
+              !trimmed.isEmpty,
+              !isSending,
+              !isInterrupting else { return false }
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await client.promptSubagent(
+                parentSessionID: parentSessionID,
+                child: child,
+                text: trimmed
+            )
+            child = replacingActivity(.running)
+            await refresh(silently: true)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func interrupt() async {
+        guard child.mode == .continuable,
+              child.activity == .running,
+              !isInterrupting,
+              !isSending else { return }
+        isInterrupting = true
+        defer { isInterrupting = false }
+        do {
+            try await client.interruptSubagent(
+                parentSessionID: parentSessionID,
+                child: child
+            )
+            await refresh(silently: true)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissError() {
+        errorMessage = nil
+    }
+
+    private func replacingActivity(
+        _ activity: RemoteSubagentEntry.Activity
+    ) -> RemoteSubagentEntry {
+        RemoteSubagentEntry(
+            id: child.id,
+            mode: child.mode,
+            activity: activity,
+            hasChildren: child.hasChildren,
+            label: child.label,
+            diagnosticReason: child.diagnosticReason
+        )
+    }
+
+    private func requestCatalogRefresh() {
+        guard catalogTask == nil else { return }
+        catalogGeneration += 1
+        let generation = catalogGeneration
+        let client = client
+        let parentSessionID = parentSessionID
+        let childID = child.id
+        catalogTask = Task { [weak self] in
+            let catalog = try? await client.subagents(parentSessionID: parentSessionID)
+            guard let self,
+                  generation == self.catalogGeneration,
+                  !Task.isCancelled else { return }
+            self.catalogTask = nil
+            if let catalog { self.parentAvailable = catalog.parentAvailable }
+            if let latest = catalog?.entries.first(where: { $0.id == childID }) {
+                self.child = latest
+            }
         }
     }
 }

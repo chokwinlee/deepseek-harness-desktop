@@ -19,11 +19,11 @@ flowchart LR
 
 ## 当前实现状态
 
-macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale HTTPS 路径完成真实 Harness、WebSocket、DeepSeek 模型调用与模拟器展示闭环。局域网路径实现独立开关、随机 256-bit 配对凭据、固定 API 白名单代理、二维码导入及 iOS HTTP/WebSocket 认证，并完成代理协议联调。物理 iPhone 的局域网权限弹窗、蜂窝网络和 Windows Host 仍需发布前验收。
+macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale HTTPS 路径完成真实 Harness、WebSocket、DeepSeek 模型调用与模拟器展示闭环。局域网路径实现独立开关、随机 256-bit 配对凭据、固定 API 白名单代理、二维码导入及 iOS HTTP/WebSocket 认证，并完成代理协议联调。基于本机 DSH Desktop v0.3.0 / Harness rc.8 的专用会话还完成了 DeepSeek 文本与引用、视觉模型图片、持久附件回读、多级子代理浏览，以及 continuable 子代理的历史/补充/停止真实闭环。物理 iPhone 的局域网权限弹窗、蜂窝网络和 Windows Host 仍需发布前验收。
 
 ## 为什么 iOS 使用原生 Remote UI
 
-手机端不复制 Desktop 网页，也不承载 Agent runtime。SwiftUI 只实现任务列表、对话、工具摘要、Prompt、Steer、Cancel、审批和用户问题等窄控制面；执行、代码访问和模型凭据仍全部留在电脑。这样能针对单手操作和小屏适配，同时避免把插件安装、终端、任意目录访问等桌面能力带入 App Store binary。
+手机端不复制 Desktop 网页，也不承载 Agent runtime。SwiftUI 只实现项目/会话、对话、工具摘要、图片提示词、文件/会话引用、子代理跟进、Prompt、Steer、Cancel、审批和用户问题等窄控制面；执行、代码访问和模型凭据仍全部留在电脑。这样能针对单手操作和小屏适配，同时避免把插件安装、终端、任意目录访问等桌面能力带入 App Store binary。
 
 ## Desktop 端需要增加的 Remote Host
 
@@ -82,7 +82,8 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 ### 局域网直连边界
 
 - Harness 本身仍只绑定 `127.0.0.1`；Desktop 另启 `:8765` 代理，不能把 Harness 直接绑定到 `0.0.0.0`。
-- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、持久图片附件读取、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
+- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、持久图片附件读取、文件/会话引用候选、子代理列表/历史/补充/停止、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
+- `session.prompt` 图片仍是 JSON 中的 base64 内容，不是独立上传端点。代理使用背压流式转发、`Content-Length` 预检和累计字节双限，线格式上限为 136 MiB；超限返回 413。
 - HTTP 与 WebSocket 都要求二维码中的 bearer，转发到 Harness 前会剥离认证头并重写 loopback Host。
 - 裸局域网 HTTP 地址不能在 iOS 手输；缺少凭据时客户端拒绝保存。
 - 该路径有认证但没有链路加密，只允许用户明确启用并用于受信任家庭/办公 Wi-Fi；不受信任网络使用 Tailscale HTTPS。
@@ -97,7 +98,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - Release 接受任意有效 HTTPS；局域网 HTTP 仅接受私有地址和有效配对凭据；
 - App 不包含 `WKWebView`、原始终端或模型凭据编辑。
 
-暂不包含：远程推送服务、后台常驻连接、多用户共享、文件上传优化、原始终端、自动审批危险操作、App Store 订阅。
+暂不包含：远程推送服务、后台常驻连接、多用户共享、任意文件上传、原始终端、自动审批危险操作、App Store 订阅。
 
 ## 已实现的原生会话控制面
 
@@ -113,6 +114,9 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 8. 只读工具视图与 diff。
 9. `session.attachment` 按需读取会话中的持久图片；图片引用留在消息模型，二进制数据由 session 级缓存去重，不随轮询重复下载；
 10. 从 history events 与 projections 只读折叠 Goal、Plan 当前状态及轨迹变化。
+11. `fileReferences/list` 与 `sessionReferenceResolver/candidates`，在电脑端当前会话范围内解析 `@` 文件和会话引用；
+12. `subagent.list`、`subagent.history`、`subagent.prompt` 与 `subagent.interrupt`，按父子 session address 浏览层级，并只允许 continuable 子代理接收补充和停止；
+13. `session.prompt` 的 image content block；客户端按 `imageLimits` 去元数据、缩放、压缩和预检，rc.6 缺少 `maxImageDimension` 时保持兼容。
 
 每次升级 `@deepseek-ai/dsh` 都必须重新核对 `dsh-host-apiproxy` 类型。当前协议属于开发预览，不能把 rc.8 的线格式复制成长期稳定的 iOS 公共 API；更稳妥的做法是在 Desktop 中增加一个版本化的窄 Remote Adapter，由它把上游变化隔离在电脑端。
 
@@ -123,6 +127,9 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - 同一 Wi-Fi 下扫码、认证并进入现有会话；
 - iPhone 切换到蜂窝网络后仍可连接；
 - Prompt → 流式事件 → Steer → Cancel 完整闭环；
+- 图片选择/粘贴 → 手机端预处理 → Prompt → 历史附件回读完整闭环；
+- 文件引用、会话引用候选与 canonical mention 发送闭环；
+- 创建 continuable 子代理 → 浏览历史 → 补充消息 → 停止 → 重连后继续读取完整闭环；
 - 手机上完成一次审批和一次用户问题回答；
 - App 前后台切换、网络中断后重连，不重复发送 Prompt；
 - 手机断开 Tailscale 后无法访问 Tailscale 入口；局域网入口关闭或凭据错误时返回 401/不可访问；
