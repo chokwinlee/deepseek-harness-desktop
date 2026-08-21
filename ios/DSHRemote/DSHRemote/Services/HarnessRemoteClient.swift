@@ -8,6 +8,7 @@ protocol HarnessRemoteClient: Sendable {
     func workspaces() async throws -> RemoteWorkspaceSnapshot
     func sessions() async throws -> [RemoteSessionSummary]
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
+    func attachment(sessionID: String, attachmentID: String) async throws -> RemoteImageAttachmentPayload
     func models(sessionID: String) async throws -> RemoteModelDirectory
     func selectModel(sessionID: String, selection: RemoteModelSelection) async throws -> RemoteModelSelection
     func send(_ text: String, to sessionID: String, steer: Bool) async throws
@@ -86,9 +87,15 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
     func sessions() async throws -> [RemoteSessionSummary] {
         let response: SessionListWire = try await call("session.list", payload: EmptyPayload())
         return response.items
-            .filter { !$0.blank && $0.origin != "subagent" }
+            .filter {
+                $0.origin != "subagent"
+                    && (!$0.blank || Self.hasVisibleCollaborationState($0.projections))
+            }
             .map { item in
                 let title = item.projections?.values["title"]?.stringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let goalTitle = item.projections?.values["goal"]?.objectValue?["goal"]?
+                    .objectValue?["objective"]?.stringValue?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let projectPath = item.cwd.flatMap { path in
                     path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : path
@@ -96,7 +103,10 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
                 let projectName = Self.projectName(from: projectPath)
                 return RemoteSessionSummary(
                     id: item.sessionId,
-                    title: title.flatMap { $0.isEmpty ? nil : $0 } ?? projectName ?? "未命名任务",
+                    title: title.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? goalTitle.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? projectName
+                        ?? "未命名任务",
                     updatedAt: Date(timeIntervalSince1970: item.updatedAt / 1_000),
                     running: item.running,
                     projectName: projectName,
@@ -111,6 +121,26 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
             payload: SessionHistoryPayload(sessionId: sessionID, maxMessages: maxMessages)
         )
         return ConversationFolder.fold(response)
+    }
+
+    func attachment(
+        sessionID: String,
+        attachmentID: String
+    ) async throws -> RemoteImageAttachmentPayload {
+        let response: SessionAttachmentWire = try await call(
+            "session.attachment",
+            payload: SessionAttachmentPayload(
+                sessionId: sessionID,
+                attachmentId: attachmentID
+            )
+        )
+        let attachment = try response.attachment.remoteValue()
+        guard attachment.attachmentID == attachmentID,
+              let data = Data(base64Encoded: response.data),
+              data.count == attachment.bytes else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return RemoteImageAttachmentPayload(attachment: attachment, data: data)
     }
 
     func models(sessionID: String) async throws -> RemoteModelDirectory {
@@ -354,6 +384,14 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         return components.last.map(String.init)
     }
 
+    private static func hasVisibleCollaborationState(
+        _ projections: SessionProjectionsWire?
+    ) -> Bool {
+        if projections?.values["goal"]?.objectValue != nil { return true }
+        let plan = projections?.values["plan"]?.objectValue
+        return plan?["active"]?.boolValue == true || plan?["pending"]?.boolValue == true
+    }
+
     private static func parseISO8601Date(_ value: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -388,6 +426,30 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     - Keep credentials and model calls on the user's computer.
     </system-reminder>
     """
+    private static let demoAttachment = RemoteImageAttachment(
+        attachmentID: "demo-image",
+        mediaType: "image/png",
+        bytes: 1_365,
+        width: 64,
+        height: 40,
+        name: "登录流程截图.png"
+    )
+    private static let demoAttachmentData = Data(base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAoCAYAAABOzvzpAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAQKADAAQAAAABAAAAKAAAAADM21wGAAAEy0lEQVRoBe1YW1NaVxT+EBTwBogXklSTqFXrXaOiNWrGGiczzTR96Exn+tif0af+hz70F/Spk2amM23STIyX1ssAjdp614hRC9F4QY2IGLB7HeAURZBzwEqUNQPs+97rW2t9a28kxV9+f4hLLAmXWHdO9TgAcQ+45AjEQ+CSOwDiHhCLHtBw+y4KisshkZy9fWSxBkBJWS2u5d7kPvkflmF8xADLsvnMjnn2EAs4ujZLh5LyWn5GapoK+pa7aO34DBptNt8ezULMAJCYJEf9x+2QJAQeiYC50/k56/8EySlp0dQf0szy+99GdUWRizUw5XxW3t93oOfpI7hcLmg0mTwo6eoM5BeWIjFRjs31VbjdLpG7/TctJgDILypDYUklfypD/zNsrK1g9fUylhbmoFAkg5QnIQ/RZuXgRkEJ3Awg28YaaxX/njt3AFRqLRqaO5Dgdf25qb8wPzvOKUtfBwdOWJbMWLEuIS1dzUIgleuTymTIuZqLD64XwGG3Y2fbxs8RUjhXAKRSGZrbP4VCmcydmaxpGOhiBg20qGNvF6/mp7G9tQG1JgtJcjk3J0mu4EDI1l1jfZugcUIkKgDoWzqRrtJgbdUiZG/UNLSCDk5Clu7v/gVOFv+hhCxtnp2A0+mAJiML5Akk5BkUFuQlBCStF45EDEBZVQO3cWb2FWRk5mDFssiR12mb594oRGllHT9s2NDLALTy9dCFQ44EF+YmucuSJsNDlFIJ8EWjFt98VYGv71dDk6aAccIC9wke5Vs/IgDybhahoqbRtxZS09KZOxZi/Y2VuaKdbz9eSElNR1PrPSRIpVzXq/kZTI+/OD7s1DplAX+iJOXvFEkgl0mgTJKitljHvCQDvX++DLpWYNINOvRoB1m7pr7laCOrkSu2djzgvCKgkzUQixPpyRITuW5y6VHTHycNDbvNvrsDI+OOipz9gDmdt64EtPk3iAJAmZyKRhb3Pgtuba6DUpfT6TmAlFmW4rtW38bY3WNl36blVXqomcuSUJ439nex33e+7oh+3YfugPlud2Cb/yDBABDpNLXdg1yh5NbZd+xhsO83/LM4j+4nP8G2SXnZI9fzi9HW+YC/vemu5rF8X+HrxtjIELZs63w90sKjnumAJU5q8x8kmAP0zH2J8EjIggO9j7HD0g8JMe+ieQZKZQpLVR4rU4ojriB2r6q7DZmXtS3LCxgbHuLmRevLNGmFTJqAPJ0KdscBfngyhu9+NIYkQYmQv8WJ8YtKq/nzmga72U1tlq/7FyglVd5qBoXDcdmzv0XX44c48IbM8f7/sx52CJAV/ZWfmRgJqjwpsPByCn3PfoZ99+0RfQ5ZTBoHnseE8nSwsAAgxq/2Y3wrc9/xUcMRxU6q2DbeMF54yK6xy3z31NgLliZf8/XzLpz6h4iP8X2uTIxvHHwe9rkpMwz0/IqPKurYI0aHKRH5PuzNRAwMCUAwxne9E562Jv82sVsbu6rFmIQMgfqmdqi8z1Bi/KHfn4IITKwchriSil0z0nnBAWDW2vN7WQ0b+rg3eqQbxtr84CHArDVq6se2bRPK5JSQjB9rSgk5T3AAvKuY5yaErPfejQ0eAu+dKuIOHAdAHG4XZ1bcAy6OLcVpEvcAcbhdnFmX3gP+BRGTk4HlIkDOAAAAAElFTkSuQmCC"
+    )!
+    private static let demoGoal = RemoteGoalState(
+        id: "demo-goal",
+        revision: 2,
+        objective: "完成登录态恢复并通过上线前回归验证",
+        phase: .active,
+        blockedReasonCode: nil,
+        blockedReasonMessage: nil,
+        maxRounds: 12,
+        roundsStarted: 3,
+        createdAt: Date().addingTimeInterval(-240),
+        updatedAt: Date().addingTimeInterval(-120)
+    )
+    private static let demoPlan = RemotePlanState(active: true, pending: false)
     private var items: [RemoteConversationItem] = [
         RemoteConversationItem(
             id: "demo-context",
@@ -415,7 +477,35 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             kind: .user,
             title: nil,
             text: "请检查登录流程，并给出上线前的风险清单。",
-            time: Date().addingTimeInterval(-180)
+            time: Date().addingTimeInterval(-180),
+            attachments: [DemoHarnessRemoteClient.demoAttachment]
+        ),
+        RemoteConversationItem(
+            id: "demo-goal-status",
+            sequence: 2,
+            kind: .status,
+            title: "目标已创建",
+            text: DemoHarnessRemoteClient.demoGoal.objective,
+            time: Date().addingTimeInterval(-178),
+            state: .running,
+            details: [RemoteDetailSection(
+                id: "goal-objective",
+                title: "目标",
+                content: DemoHarnessRemoteClient.demoGoal.objective,
+                kind: .text
+            )],
+            metadata: ["3/12 轮", "修订 2"],
+            symbolName: "target"
+        ),
+        RemoteConversationItem(
+            id: "demo-plan-status",
+            sequence: 3,
+            kind: .status,
+            title: "已进入计划模式",
+            text: "Harness 会先整理方案，再请求你确认是否执行。",
+            time: Date().addingTimeInterval(-176),
+            state: .running,
+            symbolName: "map"
         ),
         RemoteConversationItem(
             id: "demo-tool",
@@ -465,11 +555,23 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-input", sequence: 1, turn: 0, step: nil, kind: .input,
-            title: "用户消息", summary: "检查登录流程并给出风险清单", time: Date().addingTimeInterval(-180),
-            duration: nil, state: .succeeded
+            title: "用户消息", summary: "检查登录流程并给出风险清单 · 1 张图片", time: Date().addingTimeInterval(-180),
+            duration: nil,
+            state: .succeeded,
+            attachments: [DemoHarnessRemoteClient.demoAttachment]
         ),
         RemoteTrajectoryRecord(
-            id: "demo-trajectory-request", sequence: 2, turn: 0, step: 0, kind: .request,
+            id: "demo-trajectory-goal", sequence: 2, turn: nil, step: nil, kind: .goal,
+            title: "目标已创建", summary: DemoHarnessRemoteClient.demoGoal.objective,
+            time: Date().addingTimeInterval(-178), duration: nil, state: .running
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-plan", sequence: 3, turn: nil, step: nil, kind: .plan,
+            title: "计划模式已开启", summary: "先整理方案，再请求确认",
+            time: Date().addingTimeInterval(-176), duration: nil, state: .running
+        ),
+        RemoteTrajectoryRecord(
+            id: "demo-trajectory-request", sequence: 4, turn: 0, step: 0, kind: .request,
             title: "模型请求", summary: "整理上下文并请求分析", time: Date().addingTimeInterval(-174),
             duration: 0.12, state: .succeeded,
             details: [
@@ -480,12 +582,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             ]
         ),
         RemoteTrajectoryRecord(
-            id: "demo-trajectory-thinking", sequence: 3, turn: 0, step: 0, kind: .assistant,
+            id: "demo-trajectory-thinking", sequence: 5, turn: 0, step: 0, kind: .assistant,
             title: "模型思考", summary: "检查登录状态生命周期和错误恢复路径", time: Date().addingTimeInterval(-170),
             duration: 1.8, state: .succeeded
         ),
         RemoteTrajectoryRecord(
-            id: "demo-trajectory-tool", sequence: 4, turn: 0, step: 1, kind: .tool,
+            id: "demo-trajectory-tool", sequence: 6, turn: 0, step: 1, kind: .tool,
             title: "读取文件", summary: "读取 4 个项目文件", time: Date().addingTimeInterval(-160),
             duration: 0.32, state: .succeeded,
             details: [
@@ -496,12 +598,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             ]
         ),
         RemoteTrajectoryRecord(
-            id: "demo-trajectory-answer", sequence: 5, turn: 0, step: 2, kind: .assistant,
+            id: "demo-trajectory-answer", sequence: 7, turn: 0, step: 2, kind: .assistant,
             title: "模型回答", summary: "整理两个上线前风险和修复计划", time: Date().addingTimeInterval(-150),
             duration: 2.4, state: .succeeded
         ),
         RemoteTrajectoryRecord(
-            id: "demo-trajectory-end", sequence: 6, turn: 0, step: 2, kind: .lifecycle,
+            id: "demo-trajectory-end", sequence: 8, turn: 0, step: 2, kind: .lifecycle,
             title: "本轮完成", summary: "等待用户确认", time: Date().addingTimeInterval(-149),
             duration: 4.62, state: .succeeded
         ),
@@ -542,7 +644,20 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     }
 
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
-        RemoteConversationSnapshot(
+        #if DEBUG
+        if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"],
+           ["rc8", "rc8-trajectory", "rc8-image-failure"].contains(scenario) {
+            let snapshot = ConversationFolder.fold(DemoHarnessRemoteClient.rc8HistoryFixture())
+            assert(snapshot.items.contains {
+                $0.kind == .user && $0.text.isEmpty && $0.attachments.count == 1
+            })
+            assert(snapshot.goal?.id == DemoHarnessRemoteClient.demoGoal.id)
+            assert(snapshot.plan?.effectiveActive == true)
+            DemoHarnessRemoteClient.assertRC8ContractFixtures()
+            return snapshot
+        }
+        #endif
+        return RemoteConversationSnapshot(
             items: items,
             hasMore: false,
             stats: RemoteConversationStats(
@@ -553,7 +668,34 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                 inputTokens: 1_284,
                 outputTokens: 436
             ),
-            trajectory: demoTrajectory
+            trajectory: demoTrajectory,
+            goal: DemoHarnessRemoteClient.demoGoal,
+            plan: DemoHarnessRemoteClient.demoPlan
+        )
+    }
+
+    func attachment(
+        sessionID: String,
+        attachmentID: String
+    ) async throws -> RemoteImageAttachmentPayload {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "rc8-image-failure" {
+            throw HarnessRemoteClientError.api(
+                code: "attachment-unavailable",
+                message: "图片暂时不可用。"
+            )
+        }
+        #endif
+        guard sessionID == self.sessionID,
+              attachmentID == DemoHarnessRemoteClient.demoAttachment.attachmentID else {
+            throw HarnessRemoteClientError.api(
+                code: "attachment-not-found",
+                message: "找不到这张图片。"
+            )
+        }
+        return RemoteImageAttachmentPayload(
+            attachment: DemoHarnessRemoteClient.demoAttachment,
+            data: DemoHarnessRemoteClient.demoAttachmentData
         )
     }
 
@@ -674,7 +816,8 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
 
     nonisolated func liveEvents() -> AsyncStream<RemoteLiveEvent> {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "trajectory" {
+        if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"],
+           ["trajectory", "rc8", "rc8-trajectory", "rc8-image-failure"].contains(scenario) {
             return AsyncStream { continuation in continuation.finish() }
         }
         #endif
@@ -716,6 +859,266 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             time: Date()
         ))
     }
+
+    #if DEBUG
+    private static func rc8HistoryFixture() -> SessionHistoryWire {
+        let now = Date().timeIntervalSince1970 * 1_000
+        let attachment: JSONValue = .object([
+            "attachmentId": .string(demoAttachment.attachmentID),
+            "mediaType": .string(demoAttachment.mediaType),
+            "bytes": .number(Double(demoAttachment.bytes)),
+            "width": .number(Double(demoAttachment.width)),
+            "height": .number(Double(demoAttachment.height)),
+            "name": .string(demoAttachment.name ?? "图片.png"),
+        ])
+        let goal: JSONValue = .object([
+            "id": .string(demoGoal.id),
+            "revision": .number(Double(demoGoal.revision)),
+            "objective": .string(demoGoal.objective),
+            "phase": .string(demoGoal.phase.rawValue),
+            "maxGoalRounds": .number(Double(demoGoal.maxRounds)),
+        ])
+        let goalProjection: JSONValue = .object([
+            "goal": goal,
+            "roundsStarted": .number(Double(demoGoal.roundsStarted)),
+            "createdAt": .number(demoGoal.createdAt.timeIntervalSince1970 * 1_000),
+            "updatedAt": .number(demoGoal.updatedAt.timeIntervalSince1970 * 1_000),
+        ])
+        let events = [
+            HistoryEntryWire(event: SessionEventWire(
+                type: "user/message",
+                seq: 1,
+                time: now - 12_000,
+                data: .object([
+                    "source": .object(["kind": .string("user")]),
+                    "content": .array([
+                        .object(["type": .string("image"), "attachment": attachment]),
+                    ]),
+                ])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "goal/change",
+                seq: 2,
+                time: now - 11_000,
+                data: .object([
+                    "kind": .string("goal/change"),
+                    "version": .number(1),
+                    "operation": .string("create"),
+                    "goal": goal,
+                    "roundsStarted": .number(Double(demoGoal.roundsStarted)),
+                    "createdAt": .number(demoGoal.createdAt.timeIntervalSince1970 * 1_000),
+                    "updatedAt": .number(demoGoal.updatedAt.timeIntervalSince1970 * 1_000),
+                ])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "plan/mode",
+                seq: 3,
+                time: now - 10_000,
+                data: .object(["active": .bool(true)])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "turn/start",
+                seq: 4,
+                time: now - 9_000,
+                data: .object(["turn": .number(0)])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "step/start",
+                seq: 5,
+                time: now - 8_000,
+                data: .object(["turn": .number(0), "step": .number(0)])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "assistant/message",
+                seq: 6,
+                time: now - 4_000,
+                data: .object([
+                    "turn": .number(0),
+                    "step": .number(0),
+                    "message": .object([
+                        "content": .array([.object([
+                            "type": .string("text"),
+                            "text": .string("我会先核对截图中的登录状态，再整理上线前修复计划。"),
+                        ])]),
+                    ]),
+                    "usage": .object(["outputTokens": .number(128)]),
+                ])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "turn/end",
+                seq: 7,
+                time: now - 3_000,
+                data: .object([
+                    "turn": .number(0),
+                    "reason": .object(["kind": .string("completed")]),
+                ])
+            ), view: nil),
+        ]
+        return SessionHistoryWire(
+            events: events,
+            hasMore: false,
+            projections: SessionProjectionsWire(values: [
+                "goal": goalProjection,
+                "plan": .object(["active": .bool(true), "pending": .bool(false)]),
+                "sessionStats": .object([
+                    "turns": .number(1),
+                    "steps": .number(1),
+                    "llmMs": .number(4_000),
+                    "toolMs": .number(0),
+                ]),
+                "tokenUsage": .object([
+                    "uncachedInputTokens": .number(320),
+                    "cacheReadTokens": .number(0),
+                    "outputTokens": .number(128),
+                ]),
+            ])
+        )
+    }
+
+    private static func assertRC8ContractFixtures() {
+        let decodedReplacement = try! JSONDecoder().decode(
+            SessionEventWire.self,
+            from: Data(#"{"type":"user/message","seq":9,"time":9000,"data":{},"surfaceOp":{"op":"replace","start":1,"end":2}}"#.utf8)
+        )
+        assert(decodedReplacement.surfaceOp?.objectValue?["op"]?.stringValue == "replace")
+
+        func resultEvent(
+            seq: Int,
+            turn: Int,
+            step: Int,
+            text: String,
+            attachment: JSONValue? = nil
+        ) -> HistoryEntryWire {
+            var content: [JSONValue] = [.object([
+                "type": .string("text"),
+                "text": .string(text),
+            ])]
+            if let attachment {
+                content.append(.object([
+                    "type": .string("image"),
+                    "attachment": attachment,
+                ]))
+            }
+            return HistoryEntryWire(event: SessionEventWire(
+                type: "tool/result",
+                seq: seq,
+                time: Double(seq * 1_000),
+                data: .object([
+                    "turn": .number(Double(turn)),
+                    "step": .number(Double(step)),
+                    "message": .object([
+                        "source": .object(["callId": .string("call-0")]),
+                        "content": .array([.object([
+                            "type": .string("tool-result"),
+                            "toolCallId": .string("call-0"),
+                            "content": .array(content),
+                            "isError": .bool(false),
+                        ])]),
+                    ]),
+                ]),
+                surfaceOp: .string("append")
+            ), view: nil)
+        }
+
+        let attachment: JSONValue = .object([
+            "attachmentId": .string(demoAttachment.attachmentID),
+            "mediaType": .string(demoAttachment.mediaType),
+            "bytes": .number(Double(demoAttachment.bytes)),
+            "width": .number(Double(demoAttachment.width)),
+            "height": .number(Double(demoAttachment.height)),
+        ])
+        let events: [HistoryEntryWire] = [
+            HistoryEntryWire(event: SessionEventWire(
+                type: "compaction/summary",
+                seq: 1,
+                time: 1_000,
+                data: .object([
+                    "compactionId": .string("compact-1"),
+                    "summary": .array([.object([
+                        "type": .string("text"),
+                        "text": .string("保留的压缩摘要"),
+                    ])]),
+                ])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "user/message",
+                seq: 2,
+                time: 2_000,
+                data: .object([
+                    "source": .object(["kind": .string("plugin")]),
+                    "content": .array([.object([
+                        "type": .string("text"),
+                        "text": .string("MODEL_ONLY_REPLACEMENT"),
+                    ])]),
+                ]),
+                sourceEventSeqs: [1],
+                surfaceOp: .object([
+                    "op": .string("replace"),
+                    "start": .number(1),
+                    "end": .number(1),
+                ])
+            ), view: nil),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "tool/call",
+                seq: 3,
+                time: 3_000,
+                data: .object([
+                    "turn": .number(0), "step": .number(0),
+                    "callId": .string("call-0"), "name": .string("first"),
+                    "arguments": .string("{}"),
+                ])
+            ), view: nil),
+            resultEvent(seq: 4, turn: 0, step: 0, text: "FIRST_RESULT"),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "tool/call",
+                seq: 5,
+                time: 5_000,
+                data: .object([
+                    "turn": .number(0), "step": .number(1),
+                    "callId": .string("call-0"), "name": .string("second"),
+                    "arguments": .string("{}"),
+                ])
+            ), view: nil),
+            resultEvent(seq: 6, turn: 0, step: 1, text: "SECOND_RESULT"),
+            resultEvent(
+                seq: 7,
+                turn: 1,
+                step: 0,
+                text: "ORPHAN_RESULT",
+                attachment: attachment
+            ),
+            HistoryEntryWire(event: SessionEventWire(
+                type: "compaction/end",
+                seq: 8,
+                time: 8_000,
+                data: .object([
+                    "compactionId": .string("compact-1"),
+                    "turn": .null,
+                ])
+            ), view: nil),
+        ]
+        let snapshot = ConversationFolder.fold(SessionHistoryWire(
+            events: events,
+            hasMore: false,
+            projections: nil
+        ))
+        assert(!snapshot.items.contains { $0.text.contains("MODEL_ONLY_REPLACEMENT") })
+        assert(snapshot.items.contains {
+            $0.details.contains { $0.content.contains("保留的压缩摘要") }
+        })
+        let tools = snapshot.items.filter { $0.kind == .tool }
+        assert(tools.count == 3)
+        assert(tools.contains { $0.text.contains("FIRST_RESULT") })
+        assert(tools.contains { $0.text.contains("SECOND_RESULT") })
+        assert(tools.contains {
+            $0.text.contains("ORPHAN_RESULT") && $0.attachments.count == 1
+        })
+        let compactions = snapshot.trajectory.filter {
+            $0.id == "trajectory-compaction:compact-1"
+        }
+        assert(compactions.count == 1 && compactions[0].state == .succeeded)
+    }
+    #endif
 }
 
 private struct EmptyPayload: Codable {}
@@ -727,6 +1130,10 @@ private struct SessionSelectModelPayload: Codable {
     let reasoningEffort: String?
 }
 private struct SessionHistoryPayload: Codable { let sessionId: String; let maxMessages: Int }
+private struct SessionAttachmentPayload: Codable {
+    let sessionId: String
+    let attachmentId: String
+}
 private struct PromptTextPart: Codable { let type: String; let text: String }
 private struct SessionPromptPayload: Codable {
     let sessionId: String
@@ -802,6 +1209,38 @@ private struct SessionHistoryWire: Decodable {
     let events: [HistoryEntryWire]
     let hasMore: Bool
     let projections: SessionProjectionsWire?
+}
+
+private struct SessionAttachmentWire: Decodable {
+    let attachment: ImageAttachmentWire
+    let data: String
+}
+
+private struct ImageAttachmentWire: Decodable {
+    let attachmentId: String
+    let mediaType: String
+    let bytes: Int
+    let width: Int
+    let height: Int
+    let name: String?
+
+    func remoteValue() throws -> RemoteImageAttachment {
+        guard !attachmentId.isEmpty,
+              ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mediaType),
+              bytes > 0,
+              width > 0,
+              height > 0 else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return RemoteImageAttachment(
+            attachmentID: attachmentId,
+            mediaType: mediaType,
+            bytes: bytes,
+            width: width,
+            height: height,
+            name: name
+        )
+    }
 }
 
 private struct SessionModelsWire: Decodable {
@@ -897,6 +1336,9 @@ private struct SessionEventWire: Decodable {
     let seq: Int
     let time: Double
     let data: JSONValue
+    var sourceEventSeqs: [Int]? = nil
+    var surfaceOp: JSONValue? = nil
+    var ignorable: Bool? = nil
 }
 
 private struct AcceptedWire: Decodable { let accepted: Bool }
@@ -990,11 +1432,23 @@ private enum LiveEventParser {
         let message = object["message"]?.objectValue
         let text = textContent(message?["content"])
         let preview = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachmentCount = imageCount(message?["content"])
+        let visiblePreview: String
+        if let preview, !preview.isEmpty {
+            visiblePreview = attachmentCount > 0
+                ? "\(preview) · \(attachmentCount) 张图片"
+                : preview
+        } else if attachmentCount > 0 {
+            visiblePreview = "\(attachmentCount) 张图片"
+        } else {
+            visiblePreview = "等待中的消息"
+        }
         return RemoteQueuedMessage(
             id: id,
             placement: placement,
-            preview: preview.flatMap { $0.isEmpty ? nil : $0 } ?? "等待中的消息",
-            text: text
+            preview: visiblePreview,
+            text: text,
+            attachmentCount: attachmentCount
         )
     }
 
@@ -1006,12 +1460,21 @@ private enum LiveEventParser {
         } ?? []
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
+
+    private static func imageCount(_ value: JSONValue?) -> Int {
+        value?.arrayValue?.reduce(into: 0) { count, item in
+            guard let block = item.objectValue else { return }
+            if block["type"]?.stringValue == "image" { count += 1 }
+            if let nested = block["content"] { count += imageCount(nested) }
+        } ?? 0
+    }
 }
 
 private enum ConversationFolder {
     private struct StreamBlock {
         var type: String
         var text: String
+        var attachment: RemoteImageAttachment?
     }
 
     private struct PartialAssistant {
@@ -1033,12 +1496,25 @@ private enum ConversationFolder {
         let details: [RemoteDetailSection]
     }
 
+    private struct ToolOccurrenceKey: Hashable {
+        let turn: Int
+        let step: Int
+        let callID: String
+    }
+
     static func fold(_ history: SessionHistoryWire) -> RemoteConversationSnapshot {
         let entries = history.events
-        let toolResults = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (String, HistoryEntryWire)? in
-            guard entry.event.type == "tool/result", let callID = toolResultCallID(entry) else { return nil }
-            return (callID, entry)
-        })
+        var toolResults: [ToolOccurrenceKey: HistoryEntryWire] = [:]
+        var toolCallKeys = Set<ToolOccurrenceKey>()
+        for entry in entries {
+            guard !isReplacementSurfaceEvent(entry.event),
+                  let key = toolOccurrenceKey(entry) else { continue }
+            if entry.event.type == "tool/result" {
+                toolResults[key] = entry
+            } else if entry.event.type == "tool/call" {
+                toolCallKeys.insert(key)
+            }
+        }
         let stepStarts = Dictionary(uniqueKeysWithValues: entries.compactMap { entry -> (String, Double)? in
             guard entry.event.type == "step/start",
                   let data = entry.event.data.objectValue,
@@ -1059,14 +1535,18 @@ private enum ConversationFolder {
             let date = Date(timeIntervalSince1970: event.time / 1_000)
             switch event.type {
             case "user/message":
-                guard let data = event.data.objectValue,
-                      let text = textContent(data["content"]) else { continue }
+                guard !isReplacementSurfaceEvent(event) else { continue }
+                guard let data = event.data.objectValue else { continue }
+                let text = textContent(data["content"]) ?? ""
+                let attachments = imageAttachments(data["content"])
+                guard !text.isEmpty || !attachments.isEmpty else { continue }
                 let source = data["source"]?.objectValue
                 let sourceKind = source?["kind"]?.stringValue ?? "context"
                 if sourceKind == "user" {
                     output.append(RemoteConversationItem(
                         id: "user:\(event.seq)", sequence: event.seq, kind: .user,
-                        title: nil, text: text, time: date
+                        title: nil, text: text, time: date,
+                        attachments: attachments
                     ))
                 } else {
                     output.append(contextItem(
@@ -1074,10 +1554,12 @@ private enum ConversationFolder {
                         sourceKind: sourceKind,
                         source: source,
                         text: text,
-                        time: date
+                        time: date,
+                        attachments: attachments
                     ))
                 }
             case "assistant/message":
+                guard !isReplacementSurfaceEvent(event) else { continue }
                 guard let data = event.data.objectValue,
                       let message = data["message"]?.objectValue else { continue }
                 let turn = int(data["turn"])
@@ -1085,11 +1567,17 @@ private enum ConversationFolder {
                 if partial?.turn == turn && partial?.step == step { partial = nil }
                 let text = textContent(message["content"]) ?? ""
                 let reasoning = reasoningContent(message["content"])
-                guard !text.isEmpty || reasoning != nil else { continue }
+                let attachments = imageAttachments(message["content"])
+                guard !text.isEmpty || reasoning != nil || !attachments.isEmpty else { continue }
+                let interrupted = data["interrupted"]?.boolValue == true
                 var item = RemoteConversationItem(
                     id: "assistant:\(event.seq)", sequence: event.seq, kind: .assistant,
-                    title: nil, text: text, time: date, state: .succeeded,
-                    reasoning: reasoning
+                    title: nil,
+                    text: text,
+                    time: date,
+                    state: interrupted ? .stopped : .succeeded,
+                    reasoning: reasoning,
+                    attachments: attachments
                 )
                 if let source = message["source"]?.objectValue {
                     let provider = source["provider"]?.stringValue
@@ -1103,6 +1591,7 @@ private enum ConversationFolder {
                 if let turn, let step, let started = stepStarts["\(turn):\(step)"] {
                     item.metadata.append(durationLabel(milliseconds: event.time - started))
                 }
+                if interrupted { item.metadata.append("已停止") }
                 item.metadata.removeAll(where: \.isEmpty)
                 output.append(item)
             case "assistant/chunk":
@@ -1118,9 +1607,17 @@ private enum ConversationFolder {
                 }
                 updatePartial(&partial, chunk: chunk, type: type)
             case "tool/call":
-                guard let data = event.data.objectValue,
-                      let callID = data["callId"]?.stringValue else { continue }
-                output.append(toolItem(call: entry, result: toolResults[callID]))
+                guard let key = toolOccurrenceKey(entry) else { continue }
+                output.append(toolItem(call: entry, result: toolResults[key]))
+            case "tool/result":
+                guard !isReplacementSurfaceEvent(event),
+                      let key = toolOccurrenceKey(entry),
+                      !toolCallKeys.contains(key) else { continue }
+                output.append(toolItem(call: nil, result: entry))
+            case "goal/change":
+                output.append(goalChangeItem(event: event, time: date))
+            case "plan/mode":
+                output.append(planModeItem(event: event, time: date))
             case "turn/end":
                 guard let data = event.data.objectValue,
                       let reason = data["reason"]?.objectValue,
@@ -1143,7 +1640,7 @@ private enum ConversationFolder {
                 ))
             case "compaction/summary":
                 guard let data = event.data.objectValue,
-                      let summary = data["summary"]?.stringValue else { continue }
+                      let summary = textContent(data["summary"]) else { continue }
                 output.append(RemoteConversationItem(
                     id: "compaction:\(event.seq)", sequence: event.seq, kind: .status,
                     title: "上下文已整理", text: "较早内容已压缩为摘要。", time: date,
@@ -1167,7 +1664,9 @@ private enum ConversationFolder {
                 .map(\.value.text)
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty || !reasoning.isEmpty {
+            let attachments = partial.blocks.sorted(by: { $0.key < $1.key })
+                .compactMap(\.value.attachment)
+            if !text.isEmpty || !reasoning.isEmpty || !attachments.isEmpty {
                 output.append(RemoteConversationItem(
                     id: "assistant-stream:\(partial.turn):\(partial.step)",
                     sequence: partial.firstSequence,
@@ -1177,6 +1676,7 @@ private enum ConversationFolder {
                     time: partial.time,
                     state: .running,
                     reasoning: reasoning.isEmpty ? nil : reasoning,
+                    attachments: attachments,
                     isStreaming: true
                 ))
             }
@@ -1194,13 +1694,76 @@ private enum ConversationFolder {
                 toolResults: toolResults,
                 stepStarts: stepStarts,
                 turnStarts: turnStarts
-            )
+            ),
+            goal: goalState(from: history.projections),
+            plan: planState(from: history.projections)
         )
+    }
+
+    private static func compactionTrajectoryRecords(
+        _ entries: [HistoryEntryWire]
+    ) -> [RemoteTrajectoryRecord] {
+        let relevant = entries.filter {
+            ["compaction/start", "compaction/summary", "compaction/end"]
+                .contains($0.event.type)
+        }
+        let grouped = Dictionary(grouping: relevant) { entry in
+            entry.event.data.objectValue?["compactionId"]?.stringValue ?? ""
+        }
+        return grouped.compactMap { compactionID, group in
+            guard !compactionID.isEmpty else { return nil }
+            let ordered = group.sorted { $0.event.seq < $1.event.seq }
+            let start = ordered.first { $0.event.type == "compaction/start" }
+            let summaryEvent = ordered.first { $0.event.type == "compaction/summary" }
+            let end = ordered.first { $0.event.type == "compaction/end" }
+            guard let anchor = summaryEvent ?? end ?? start else { return nil }
+
+            let summary = summaryEvent.flatMap {
+                textContent($0.event.data.objectValue?["summary"])
+            }
+            let error = end?.event.data.objectValue?["error"]?.stringValue
+            let completed = end != nil
+            let state: RemoteConversationItem.State = error != nil
+                ? .failed
+                : (completed ? .succeeded : .running)
+            let title = error != nil
+                ? "上下文整理失败"
+                : (completed ? "上下文已整理" : "整理上下文")
+            let text = error
+                ?? summary.map { firstMeaningfulLine($0, fallback: "较早内容已整理") }
+                ?? "正在压缩较早的会话内容"
+            let duration: TimeInterval? = if let start, let end {
+                max(end.event.time - start.event.time, 0) / 1_000
+            } else {
+                nil
+            }
+            let details = summary.map { value in
+                [RemoteDetailSection(
+                    id: "summary",
+                    title: "压缩摘要",
+                    content: value,
+                    kind: .text
+                )]
+            } ?? []
+            return RemoteTrajectoryRecord(
+                id: "trajectory-compaction:\(compactionID)",
+                sequence: anchor.event.seq,
+                turn: start.flatMap { int($0.event.data.objectValue?["turn"]) },
+                step: nil,
+                kind: .lifecycle,
+                title: title,
+                summary: text,
+                time: Date(timeIntervalSince1970: anchor.event.time / 1_000),
+                duration: duration,
+                state: state,
+                details: details
+            )
+        }
     }
 
     private static func buildTrajectory(
         _ entries: [HistoryEntryWire],
-        toolResults: [String: HistoryEntryWire],
+        toolResults: [ToolOccurrenceKey: HistoryEntryWire],
         stepStarts: [String: Double],
         turnStarts: [Int: Double]
     ) -> [RemoteTrajectoryRecord] {
@@ -1209,7 +1772,10 @@ private enum ConversationFolder {
                   let turn = int(entry.event.data.objectValue?["turn"]) else { return nil }
             return (entry.event.seq, turn)
         }
-        var records: [RemoteTrajectoryRecord] = []
+        var records = compactionTrajectoryRecords(entries)
+        let toolCallKeys = Set(entries.compactMap { entry in
+            entry.event.type == "tool/call" ? toolOccurrenceKey(entry) : nil
+        })
         var activeTurn: Int?
         var activeStep: Int?
 
@@ -1222,7 +1788,10 @@ private enum ConversationFolder {
 
             switch event.type {
             case "user/message":
-                guard let text = textContent(data["content"]) else { break }
+                guard !isReplacementSurfaceEvent(event) else { break }
+                let text = textContent(data["content"]) ?? ""
+                let attachments = imageAttachments(data["content"])
+                guard !text.isEmpty || !attachments.isEmpty else { break }
                 let source = data["source"]?.objectValue
                 let sourceKind = source?["kind"]?.stringValue ?? "context"
                 let turn = activeTurn ?? orderedTurnStarts.first(where: { $0.sequence > event.seq })?.turn
@@ -1240,16 +1809,19 @@ private enum ConversationFolder {
                     kind: isUser ? .input : .context,
                     title: isUser ? "用户消息" : contextSourceLabel(sourceKind),
                     summary: isUser
-                        ? firstMeaningfulLine(text, fallback: "消息内容")
-                        : presentation.preview,
+                        ? attachmentSummary(text, attachments)
+                        : (attachments.isEmpty
+                            ? presentation.preview
+                            : attachmentSummary(presentation.preview, attachments)),
                     time: time,
                     duration: nil,
                     state: .succeeded,
-                    details: isUser
-                        ? [RemoteDetailSection(
+                    details: (isUser
+                        ? (text.isEmpty ? [] : [RemoteDetailSection(
                             id: "message", title: "完整内容", content: limited(text), kind: .text
-                        )]
-                        : presentation.details
+                        )])
+                        : presentation.details) + attachmentDetails(attachments),
+                    attachments: attachments
                 ))
             case "request/header":
                 let header = data["header"]?.objectValue
@@ -1270,9 +1842,11 @@ private enum ConversationFolder {
                     time: time, duration: nil, state: .succeeded, details: details
                 ))
             case "assistant/message":
+                guard !isReplacementSurfaceEvent(event) else { break }
                 guard let message = data["message"]?.objectValue else { break }
                 let text = textContent(message["content"]) ?? ""
                 let reasoning = reasoningContent(message["content"]) ?? ""
+                let attachments = imageAttachments(message["content"])
                 let turn = int(data["turn"]) ?? activeTurn
                 let step = int(data["step"]) ?? activeStep
                 let summarySource = text.isEmpty ? reasoning : text
@@ -1283,6 +1857,7 @@ private enum ConversationFolder {
                 if !text.isEmpty {
                     details.append(.init(id: "answer", title: "回答", content: text, kind: .text))
                 }
+                details.append(contentsOf: attachmentDetails(attachments))
                 let duration = turn.flatMap { turn in
                     step.flatMap { stepStarts["\(turn):\($0)"] }.map { max(event.time - $0, 0) / 1_000 }
                 }
@@ -1290,20 +1865,79 @@ private enum ConversationFolder {
                     id: "trajectory-assistant:\(event.seq)", sequence: event.seq,
                     turn: turn, step: step, kind: .assistant,
                     title: text.isEmpty ? "模型思考" : "模型回答",
-                    summary: firstMeaningfulLine(summarySource, fallback: "模型输出"),
-                    time: time, duration: duration, state: .succeeded, details: details
+                    summary: attachments.isEmpty
+                        ? firstMeaningfulLine(summarySource, fallback: "模型输出")
+                        : attachmentSummary(summarySource, attachments),
+                    time: time,
+                    duration: duration,
+                    state: data["interrupted"]?.boolValue == true ? .stopped : .succeeded,
+                    details: details,
+                    attachments: attachments
                 ))
             case "tool/call":
-                guard let callID = data["callId"]?.stringValue else { break }
-                let item = toolItem(call: entry, result: toolResults[callID])
+                guard let key = toolOccurrenceKey(entry) else { break }
+                let item = toolItem(call: entry, result: toolResults[key])
                 let turn = int(data["turn"]) ?? activeTurn
                 let step = int(data["step"]) ?? activeStep
-                let duration = toolResults[callID].map { max($0.event.time - event.time, 0) / 1_000 }
+                let duration = toolResults[key].map { max($0.event.time - event.time, 0) / 1_000 }
                 records.append(RemoteTrajectoryRecord(
-                    id: "trajectory-tool:\(callID)", sequence: event.seq,
+                    id: "trajectory-tool:\(key.turn):\(key.step):\(key.callID)", sequence: event.seq,
                     turn: turn, step: step, kind: .tool,
                     title: item.title ?? "工具调用", summary: item.text,
-                    time: item.time, duration: duration, state: item.state, details: item.details
+                    time: item.time,
+                    duration: duration,
+                    state: item.state,
+                    details: item.details + attachmentDetails(item.attachments),
+                    attachments: item.attachments
+                ))
+            case "tool/result":
+                guard !isReplacementSurfaceEvent(event),
+                      let key = toolOccurrenceKey(entry),
+                      !toolCallKeys.contains(key) else { break }
+                let item = toolItem(call: nil, result: entry)
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-tool-result:\(key.turn):\(key.step):\(key.callID):\(event.seq)",
+                    sequence: event.seq,
+                    turn: key.turn,
+                    step: key.step,
+                    kind: .tool,
+                    title: item.title ?? key.callID,
+                    summary: item.text,
+                    time: item.time,
+                    duration: nil,
+                    state: item.state,
+                    details: item.details + attachmentDetails(item.attachments),
+                    attachments: item.attachments
+                ))
+            case "goal/change":
+                let item = goalChangeItem(event: event, time: time)
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-goal:\(event.seq)",
+                    sequence: event.seq,
+                    turn: activeTurn,
+                    step: activeStep,
+                    kind: .goal,
+                    title: item.title ?? "目标变化",
+                    summary: item.text,
+                    time: time,
+                    duration: nil,
+                    state: item.state,
+                    details: item.details
+                ))
+            case "plan/mode":
+                let item = planModeItem(event: event, time: time)
+                records.append(RemoteTrajectoryRecord(
+                    id: "trajectory-plan:\(event.seq)",
+                    sequence: event.seq,
+                    turn: activeTurn,
+                    step: activeStep,
+                    kind: .plan,
+                    title: item.title ?? "计划模式",
+                    summary: item.text,
+                    time: time,
+                    duration: nil,
+                    state: item.state,
+                    details: item.details
                 ))
             case "llm/retry":
                 let turn = int(data["turn"]) ?? activeTurn
@@ -1314,13 +1948,8 @@ private enum ConversationFolder {
                     title: "模型请求重试", summary: data["error"]?.objectValue?["message"]?.stringValue ?? "等待下一次请求",
                     time: time, duration: nil, state: .running
                 ))
-            case "compaction/start":
-                records.append(RemoteTrajectoryRecord(
-                    id: "trajectory-compaction:\(event.seq)", sequence: event.seq,
-                    turn: activeTurn, step: activeStep, kind: .lifecycle,
-                    title: "整理上下文", summary: "正在压缩较早的会话内容",
-                    time: time, duration: nil, state: .running
-                ))
+            case "compaction/start", "compaction/summary", "compaction/end":
+                break
             case "turn/end":
                 guard let turn = int(data["turn"]),
                       let reason = data["reason"]?.objectValue else { break }
@@ -1376,6 +2005,258 @@ private enum ConversationFolder {
         } ?? []
     }
 
+    private static func imageAttachments(_ value: JSONValue?) -> [RemoteImageAttachment] {
+        var attachments: [RemoteImageAttachment] = []
+
+        func collect(_ value: JSONValue?) {
+            guard let value else { return }
+            if let values = value.arrayValue {
+                values.forEach { collect($0) }
+                return
+            }
+            guard let object = value.objectValue else { return }
+            if object["type"]?.stringValue == "image",
+               let attachment = remoteImageAttachment(object["attachment"]) {
+                attachments.append(attachment)
+            }
+            if let nested = object["content"] {
+                collect(nested)
+            }
+        }
+
+        collect(value)
+        return attachments
+    }
+
+    private static func remoteImageAttachment(_ value: JSONValue?) -> RemoteImageAttachment? {
+        guard let object = value?.objectValue,
+              let attachmentID = object["attachmentId"]?.stringValue,
+              !attachmentID.isEmpty,
+              let mediaType = object["mediaType"]?.stringValue,
+              ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mediaType),
+              let bytes = int(object["bytes"]), bytes > 0,
+              let width = int(object["width"]), width > 0,
+              let height = int(object["height"]), height > 0 else {
+            return nil
+        }
+        return RemoteImageAttachment(
+            attachmentID: attachmentID,
+            mediaType: mediaType,
+            bytes: bytes,
+            width: width,
+            height: height,
+            name: object["name"]?.stringValue
+        )
+    }
+
+    private static func attachmentSummary(
+        _ text: String,
+        _ attachments: [RemoteImageAttachment]
+    ) -> String {
+        if attachments.isEmpty {
+            return firstMeaningfulLine(text, fallback: "消息内容")
+        }
+        let imageText = "\(attachments.count) 张图片"
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return imageText }
+        return "\(firstMeaningfulLine(trimmed, fallback: imageText)) · \(imageText)"
+    }
+
+    private static func attachmentDetails(
+        _ attachments: [RemoteImageAttachment]
+    ) -> [RemoteDetailSection] {
+        guard !attachments.isEmpty else { return [] }
+        let rows = attachments.enumerated().map { index, attachment in
+            let name = attachment.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = name.flatMap { $0.isEmpty ? nil : $0 } ?? "图片 \(index + 1)"
+            let size = ByteCountFormatter.string(
+                fromByteCount: Int64(attachment.bytes),
+                countStyle: .file
+            )
+            return "\(label)\t\(attachment.width)×\(attachment.height) · \(size)"
+        }
+        return [RemoteDetailSection(
+            id: "attachments",
+            title: "图片",
+            content: rows.joined(separator: "\n"),
+            kind: .list
+        )]
+    }
+
+    private static func goalState(from projections: SessionProjectionsWire?) -> RemoteGoalState? {
+        goalState(from: projections?.values["goal"])
+    }
+
+    private static func goalState(from value: JSONValue?) -> RemoteGoalState? {
+        guard let projection = value?.objectValue,
+              let goal = projection["goal"]?.objectValue,
+              let id = goal["id"]?.stringValue,
+              !id.isEmpty,
+              let revision = int(goal["revision"]), revision > 0,
+              let objective = goal["objective"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !objective.isEmpty,
+              let phaseValue = goal["phase"]?.stringValue,
+              let phase = RemoteGoalState.Phase(rawValue: phaseValue),
+              let maxRounds = int(goal["maxGoalRounds"]), maxRounds > 0,
+              let roundsStarted = int(projection["roundsStarted"]), roundsStarted >= 0,
+              let createdAt = projection["createdAt"]?.numberValue,
+              let updatedAt = projection["updatedAt"]?.numberValue else {
+            return nil
+        }
+        let blockedReason = goal["blockedReason"]?.objectValue
+        return RemoteGoalState(
+            id: id,
+            revision: revision,
+            objective: objective,
+            phase: phase,
+            blockedReasonCode: blockedReason?["code"]?.stringValue,
+            blockedReasonMessage: blockedReason?["message"]?.stringValue,
+            maxRounds: maxRounds,
+            roundsStarted: roundsStarted,
+            createdAt: Date(timeIntervalSince1970: createdAt / 1_000),
+            updatedAt: Date(timeIntervalSince1970: updatedAt / 1_000)
+        )
+    }
+
+    private static func planState(from projections: SessionProjectionsWire?) -> RemotePlanState? {
+        guard let value = projections?.values["plan"]?.objectValue,
+              let active = value["active"]?.boolValue,
+              let pending = value["pending"]?.boolValue else {
+            return nil
+        }
+        return RemotePlanState(active: active, pending: pending)
+    }
+
+    private static func goalChangeItem(
+        event: SessionEventWire,
+        time: Date
+    ) -> RemoteConversationItem {
+        let data = event.data.objectValue ?? [:]
+        let operation = data["operation"]?.stringValue ?? "edit"
+        if operation == "clear" {
+            let cleared = data["cleared"]?.objectValue
+            let revision = int(cleared?["revision"])
+            return RemoteConversationItem(
+                id: "goal:\(event.seq)",
+                sequence: event.seq,
+                kind: .status,
+                title: "目标已清除",
+                text: "当前会话不再自动继续这个目标。",
+                time: time,
+                state: .info,
+                metadata: revision.map { ["修订 \($0)"] } ?? [],
+                symbolName: "target"
+            )
+        }
+
+        guard let goal = goalState(from: event.data) else {
+            return RemoteConversationItem(
+                id: "goal:\(event.seq)",
+                sequence: event.seq,
+                kind: .status,
+                title: "目标状态已变化",
+                text: "Harness 已更新当前目标。",
+                time: time,
+                state: .info,
+                symbolName: "target"
+            )
+        }
+        let title: String = switch operation {
+        case "create": "目标已创建"
+        case "pause": "目标已暂停"
+        case "resume": "目标已继续"
+        case "complete": "目标已完成"
+        case "block": "目标需要处理"
+        default: "目标已更新"
+        }
+        return RemoteConversationItem(
+            id: "goal:\(event.seq)",
+            sequence: event.seq,
+            kind: .status,
+            title: title,
+            text: goal.blockedReasonMessage ?? goal.objective,
+            time: time,
+            state: state(for: goal.phase),
+            details: goalDetails(goal),
+            metadata: ["\(goal.roundsStarted)/\(goal.maxRounds) 轮", "修订 \(goal.revision)"],
+            symbolName: "target"
+        )
+    }
+
+    private static func planModeItem(
+        event: SessionEventWire,
+        time: Date
+    ) -> RemoteConversationItem {
+        let active = event.data.objectValue?["active"]?.boolValue == true
+        return RemoteConversationItem(
+            id: "plan:\(event.seq)",
+            sequence: event.seq,
+            kind: .status,
+            title: active ? "已进入计划模式" : "已退出计划模式",
+            text: active
+                ? "Harness 会先整理方案，再请求你确认是否执行。"
+                : "Harness 已恢复正常执行模式。",
+            time: time,
+            state: active ? .running : .info,
+            details: [RemoteDetailSection(
+                id: "plan-mode",
+                title: "计划模式",
+                content: active ? "当前状态\t已开启" : "当前状态\t已关闭",
+                kind: .list
+            )],
+            symbolName: "map"
+        )
+    }
+
+    private static func goalDetails(_ goal: RemoteGoalState) -> [RemoteDetailSection] {
+        var details = [RemoteDetailSection(
+            id: "goal-objective",
+            title: "目标",
+            content: goal.objective,
+            kind: .text
+        )]
+        let status = [
+            "状态\t\(goalPhaseLabel(goal.phase))",
+            "进度\t\(goal.roundsStarted) / \(goal.maxRounds) 轮",
+            "修订\t\(goal.revision)",
+        ]
+        details.append(RemoteDetailSection(
+            id: "goal-status",
+            title: "状态",
+            content: status.joined(separator: "\n"),
+            kind: .list
+        ))
+        if let message = goal.blockedReasonMessage, !message.isEmpty {
+            details.append(RemoteDetailSection(
+                id: "goal-blocked",
+                title: "需要处理",
+                content: message,
+                kind: .text
+            ))
+        }
+        return details
+    }
+
+    private static func goalPhaseLabel(_ phase: RemoteGoalState.Phase) -> String {
+        switch phase {
+        case .active: "进行中"
+        case .paused: "已暂停"
+        case .blocked: "受阻"
+        case .complete: "已完成"
+        }
+    }
+
+    private static func state(
+        for phase: RemoteGoalState.Phase
+    ) -> RemoteConversationItem.State {
+        switch phase {
+        case .active: .running
+        case .paused, .blocked: .stopped
+        case .complete: .succeeded
+        }
+    }
+
     private static func updatePartial(
         _ partial: inout PartialAssistant?,
         chunk: [String: JSONValue],
@@ -1387,11 +2268,16 @@ private enum ConversationFolder {
         case "block-start":
             value.blocks[index] = StreamBlock(
                 type: chunk["blockType"]?.stringValue ?? "other",
-                text: ""
+                text: "",
+                attachment: nil
             )
         case "text-delta", "reasoning-delta":
             let blockType = type == "text-delta" ? "text" : "reasoning"
-            var block = value.blocks[index] ?? StreamBlock(type: blockType, text: "")
+            var block = value.blocks[index] ?? StreamBlock(
+                type: blockType,
+                text: "",
+                attachment: nil
+            )
             block.type = blockType
             block.text += chunk["text"]?.stringValue ?? ""
             value.blocks[index] = block
@@ -1400,7 +2286,8 @@ private enum ConversationFolder {
                let blockType = block["type"]?.stringValue {
                 value.blocks[index] = StreamBlock(
                     type: blockType,
-                    text: block["text"]?.stringValue ?? ""
+                    text: block["text"]?.stringValue ?? "",
+                    attachment: imageAttachments(.object(block)).first
                 )
             }
         default:
@@ -1414,7 +2301,8 @@ private enum ConversationFolder {
         sourceKind: String,
         source: [String: JSONValue]?,
         text: String,
-        time: Date
+        time: Date,
+        attachments: [RemoteImageAttachment]
     ) -> RemoteConversationItem {
         let title = contextSourceLabel(sourceKind)
         let presentation = contextPresentation(
@@ -1424,8 +2312,12 @@ private enum ConversationFolder {
         )
         return RemoteConversationItem(
             id: "context:\(sequence)", sequence: sequence, kind: .context,
-            title: title, text: presentation.preview, time: time, state: .info,
-            details: presentation.details
+            title: title,
+            text: attachments.isEmpty ? presentation.preview : attachmentSummary(text, attachments),
+            time: time,
+            state: .info,
+            details: presentation.details,
+            attachments: attachments
         )
     }
 
@@ -1436,6 +2328,21 @@ private enum ConversationFolder {
     ) -> ContextPresentation {
         var details: [RemoteDetailSection] = []
         var preview = firstContextLine(text)
+
+        if sourceKind == "goal",
+           let round = int(source?["round"]), round > 0 {
+            preview = "Goal · 第 \(round) 轮"
+            var rows = ["轮次\t第 \(round) 轮"]
+            if let revision = int(source?["revision"]) {
+                rows.append("修订\t\(revision)")
+            }
+            details.append(RemoteDetailSection(
+                id: "goal-source",
+                title: "Goal 续跑",
+                content: rows.joined(separator: "\n"),
+                kind: .list
+            ))
+        }
 
         if sourceKind == "agent-instructions",
            let changes = instructionChanges(source) {
@@ -1507,32 +2414,38 @@ private enum ConversationFolder {
             "skill-catalog": "可用能力",
             "skill-invocation": "技能上下文",
             "session-reference": "引用会话",
+            "goal": "目标续跑",
         ]
         return labels[sourceKind] ?? "系统上下文"
     }
 
     private static func toolItem(
-        call: HistoryEntryWire,
+        call: HistoryEntryWire?,
         result: HistoryEntryWire?
     ) -> RemoteConversationItem {
-        let event = call.event
-        let data = event.data.objectValue ?? [:]
-        let callID = data["callId"]?.stringValue ?? "seq-\(event.seq)"
-        let toolName = data["name"]?.stringValue ?? "工具"
-        let callView = call.view?.objectValue?["view"]?.objectValue
+        guard let event = call?.event ?? result?.event else {
+            preconditionFailure("tool item needs a call or result")
+        }
+        let data = call?.event.data.objectValue ?? [:]
+        let callID = data["callId"]?.stringValue
+            ?? result.flatMap(toolResultCallID)
+            ?? "seq-\(event.seq)"
+        let toolName = data["name"]?.stringValue ?? callID
+        let callView = call?.view?.objectValue?["view"]?.objectValue
         let resultView = result?.view?.objectValue?["view"]?.objectValue
         let resultBlock = toolResultBlock(result)
         let isError = resultBlock?["isError"]?.boolValue == true
-        let errorCode = resultBlock?["error"]?.objectValue?["code"]?.stringValue
+        let errorCode = result?.event.data.objectValue?["error"]?.objectValue?["code"]?.stringValue
         let state: RemoteConversationItem.State = result == nil
             ? .running
             : (errorCode == "interrupted" ? .stopped : (isError ? .failed : .succeeded))
         let title = resultView?["title"]?.stringValue
             ?? callView?["title"]?.stringValue
-            ?? readableToolName(toolName)
+            ?? (call == nil ? callID : readableToolName(toolName))
         let cardName = resultView?["card"]?.stringValue ?? callView?["card"]?.stringValue
         let card = toolCard(cardName)
         let rawResult = textContent(resultBlock?["content"])
+        let attachments = imageAttachments(resultBlock?["content"])
         let presentation = toolPresentation(
             card: card,
             callView: callView,
@@ -1541,8 +2454,8 @@ private enum ConversationFolder {
             state: state
         )
         var metadata: [String] = []
-        if let result {
-            metadata.append(durationLabel(milliseconds: result.event.time - event.time))
+        if let call, let result {
+            metadata.append(durationLabel(milliseconds: result.event.time - call.event.time))
         }
         if let exitCode = int(resultView?["exitCode"]) {
             metadata.append("exit \(exitCode)")
@@ -1550,17 +2463,20 @@ private enum ConversationFolder {
             metadata.append(signal)
         }
         return RemoteConversationItem(
-            id: "tool:\(callID)",
+            id: "tool:\(event.seq):\(callID)",
             sequence: event.seq,
             kind: .tool,
             title: title,
-            text: presentation.summary,
+            text: attachments.isEmpty
+                ? presentation.summary
+                : attachmentSummary(presentation.summary, attachments),
             time: Date(timeIntervalSince1970: event.time / 1_000),
             state: state,
             toolCard: card,
             toolCategory: callView?["kind"]?.stringValue,
             details: presentation.details,
-            metadata: metadata
+            metadata: metadata,
+            attachments: attachments
         )
     }
 
@@ -1687,6 +2603,23 @@ private enum ConversationFolder {
     private static func toolResultCallID(_ entry: HistoryEntryWire) -> String? {
         entry.event.data.objectValue?["message"]?.objectValue?["source"]?.objectValue?["callId"]?.stringValue
             ?? toolResultBlock(entry)?["toolCallId"]?.stringValue
+    }
+
+    private static func toolOccurrenceKey(_ entry: HistoryEntryWire) -> ToolOccurrenceKey? {
+        guard let data = entry.event.data.objectValue,
+              let turn = int(data["turn"]),
+              let step = int(data["step"]) else {
+            return nil
+        }
+        let callID = entry.event.type == "tool/call"
+            ? data["callId"]?.stringValue
+            : toolResultCallID(entry)
+        guard let callID, !callID.isEmpty else { return nil }
+        return ToolOccurrenceKey(turn: turn, step: step, callID: callID)
+    }
+
+    private static func isReplacementSurfaceEvent(_ event: SessionEventWire) -> Bool {
+        event.surfaceOp?.objectValue?["op"]?.stringValue == "replace"
     }
 
     private static func turnStatusItem(

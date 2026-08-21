@@ -2,9 +2,9 @@
 
 ## Scope
 
-This document defines the visible product language for Harness Remote on iOS. The Desktop application continues to host the upstream Harness Web UI and should not be reskinned by these rules.
+This document defines the visible product language for DSH Remote on iOS. DSH Desktop continues to host the upstream Harness Web UI and should not be reskinned by these rules.
 
-Harness Remote is a mobile continuation surface for a developer's computer. It should feel like the same Harness product expressed with native iPhone ergonomics: compact, calm, information-rich, and explicit about remote state.
+DSH Remote is a mobile continuation surface for a developer's computer. It should feel like the same Harness product expressed with native iPhone ergonomics: compact, calm, information-rich, and explicit about remote state.
 
 ## Product hierarchy
 
@@ -88,11 +88,15 @@ Projects are disclosure rows in one quiet surface. Sessions remain visibly subor
 
 Keep the transcript central. User content is a bubble; assistant content is flat. Reasoning is collapsed by default. Tools remain in execution order and expand in place. Context and lifecycle rows stay compact and lead to a native detail sheet.
 
+Images belong to their originating message, without a surrounding gallery card. A single image uses a stable large preview; multiple images use compact tiles. Loading, success, and retry states reserve the same geometry so attachment delivery never steals scroll position.
+
 Initial history appears already positioned at the latest item. Streaming follows only when the user is near the bottom or has just sent a message; otherwise an updates control appears without stealing the reading position.
 
 ### Composer, queue, and interaction
 
 The composer is a sticky 22-point surface containing delivery, model, stop, and send controls. Queue content visually tucks behind it. A pending approval or question replaces the composer without losing transcript state or draft state. Options are custom rows and must not resemble a Settings form.
+
+An active, paused, or blocked Goal appears as one quiet strip behind the composer and opens read-only details. Plan is a compact read-only label inside the composer controls. Durable Goal and Plan changes remain flat transcript and trajectory rows; they never become dashboards or standalone cards.
 
 ### Models
 

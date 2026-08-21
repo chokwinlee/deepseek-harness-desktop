@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 struct RemoteConversationView: View {
     private enum BusyDelivery {
@@ -31,7 +32,9 @@ struct RemoteConversationView: View {
         _viewModel = StateObject(wrappedValue: RemoteConversationViewModel(client: client, session: session))
         #if DEBUG
         let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"]
-        _viewMode = State(initialValue: scenario == "trajectory" ? .trajectory : .conversation)
+        _viewMode = State(initialValue:
+            scenario == "trajectory" || scenario == "rc8-trajectory" ? .trajectory : .conversation
+        )
         _showsModelPicker = State(initialValue: scenario == "models")
         if scenario == "details" {
             _selectedDetail = State(initialValue: Self.debugDetailItem)
@@ -88,9 +91,13 @@ struct RemoteConversationView: View {
                             .padding(.top, 38)
                         } else if viewMode == .conversation {
                             ForEach(viewModel.items) { item in
-                                ConversationItemView(item: item) {
-                                    selectedDetail = item
-                                }
+                                ConversationItemView(
+                                    item: item,
+                                    loadAttachment: { attachment in
+                                        try await viewModel.attachmentData(for: attachment)
+                                    },
+                                    onOpenDetails: { selectedDetail = item }
+                                )
                                 .id(item.id)
                             }
                         } else {
@@ -123,7 +130,7 @@ struct RemoteConversationView: View {
                     if isNearBottom { unseenUpdates = 0 }
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    if unseenUpdates > 0 {
+                    if viewMode == .conversation, unseenUpdates > 0 {
                         Button {
                             withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
@@ -159,6 +166,10 @@ struct RemoteConversationView: View {
                     guard didInitialPosition else { return }
                     let added = max(viewModel.items.count - lastItemCount, 1)
                     lastItemCount = viewModel.items.count
+                    guard viewMode == .conversation else {
+                        shouldFollowNextSend = false
+                        return
+                    }
                     if isNearBottom || shouldFollowNextSend {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("conversation-bottom", anchor: .bottom)
@@ -170,6 +181,30 @@ struct RemoteConversationView: View {
                 }
                 .onChange(of: viewModel.isLoadingOlder) { wasLoading, isLoading in
                     if wasLoading && !isLoading { lastItemCount = viewModel.items.count }
+                }
+                .onChange(of: viewModel.goal) { _, _ in
+                    guard viewMode == .conversation,
+                          didInitialPosition,
+                          isNearBottom else { return }
+                    DispatchQueue.main.async {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: viewModel.plan) { _, _ in
+                    guard viewMode == .conversation,
+                          didInitialPosition,
+                          isNearBottom else { return }
+                    DispatchQueue.main.async {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
+                    }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if viewModel.hasLoadedConversationSnapshot {
@@ -228,7 +263,7 @@ struct RemoteConversationView: View {
                     .fill(RemoteTheme.hairline)
                     .frame(height: 0.5)
             }
-            .background(RemoteTheme.canvas.opacity(0.98))
+            .background(RemoteTheme.canvas)
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
         .remoteNavigationChromeHidden()
@@ -237,7 +272,12 @@ struct RemoteConversationView: View {
             if !wasRunning && isRunning { busyDelivery = .queue }
         }
         .sheet(item: $selectedDetail) { item in
-            ConversationDetailSheet(item: item)
+            ConversationDetailSheet(
+                item: item,
+                loadAttachment: { attachment in
+                    try await viewModel.attachmentData(for: attachment)
+                }
+            )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(RemoteTheme.canvas)
@@ -256,6 +296,16 @@ struct RemoteConversationView: View {
 
     private func bottomDock(bottomSafeArea: CGFloat) -> some View {
         VStack(spacing: 0) {
+            if viewModel.interaction == nil,
+               let goal = viewModel.goal,
+               goal.phase != .complete {
+                RemoteGoalStatusDock(goal: goal) {
+                    selectedDetail = goalDetailItem(goal)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, -5)
+                .zIndex(0)
+            }
             if viewModel.queue.contains(where: { $0.placement == .queued }) {
                 QueueDockView(queue: viewModel.queue, isRunning: viewModel.session.running) { item, action in
                     Task { await viewModel.updateQueue(item, action: action) }
@@ -373,14 +423,20 @@ struct RemoteConversationView: View {
 
     @ViewBuilder
     private var composerControls: some View {
-        if dynamicTypeSize.isAccessibilitySize && viewModel.session.running {
+        if dynamicTypeSize.isAccessibilitySize
+            && (viewModel.session.running || planStatusVisible) {
             VStack(spacing: 2) {
                 HStack(spacing: 8) {
-                    modelSelector
+                    if viewModel.session.running {
+                        deliverySelector
+                    }
+                    if planStatusVisible {
+                        RemotePlanStatusLabel(plan: viewModel.plan!)
+                    }
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: 8) {
-                    deliverySelector
+                    modelSelector
                     Spacer(minLength: 0)
                     composerActions
                 }
@@ -390,11 +446,18 @@ struct RemoteConversationView: View {
                 if viewModel.session.running {
                     deliverySelector
                 }
+                if planStatusVisible {
+                    RemotePlanStatusLabel(plan: viewModel.plan!)
+                }
                 modelSelector
                 Spacer(minLength: 0)
                 composerActions
             }
         }
+    }
+
+    private var planStatusVisible: Bool {
+        viewModel.plan?.effectiveActive == true
     }
 
     private var deliverySelector: some View {
@@ -676,14 +739,75 @@ struct RemoteConversationView: View {
         case .request: .status
         case .assistant: .assistant
         case .tool: .tool
+        case .goal, .plan: .status
         case .lifecycle: .status
         }
         return RemoteConversationItem(
             id: "inspect:\(record.id)", sequence: record.sequence, kind: kind,
             title: record.title, text: record.summary, time: record.time,
             state: record.state, details: record.details,
-            metadata: record.duration.map { [durationText($0)] } ?? []
+            metadata: record.duration.map { [durationText($0)] } ?? [],
+            attachments: record.attachments,
+            symbolName: record.kind == .goal ? "target" : (record.kind == .plan ? "map" : nil)
         )
+    }
+
+    private func goalDetailItem(_ goal: RemoteGoalState) -> RemoteConversationItem {
+        var details = [RemoteDetailSection(
+            id: "goal-objective",
+            title: "目标",
+            content: goal.objective,
+            kind: .text
+        )]
+        let stateRows = [
+            "状态\t\(goalPhaseLabel(goal.phase))",
+            "进度\t\(goal.roundsStarted) / \(goal.maxRounds) 轮",
+            "修订\t\(goal.revision)",
+        ]
+        details.append(RemoteDetailSection(
+            id: "goal-status",
+            title: "状态",
+            content: stateRows.joined(separator: "\n"),
+            kind: .list
+        ))
+        if let message = goal.blockedReasonMessage, !message.isEmpty {
+            details.append(RemoteDetailSection(
+                id: "goal-blocked",
+                title: "需要处理",
+                content: message,
+                kind: .text
+            ))
+        }
+        return RemoteConversationItem(
+            id: "current-goal:\(goal.id):\(goal.revision)",
+            kind: .status,
+            title: "当前 Goal",
+            text: goal.objective,
+            time: goal.updatedAt,
+            state: goalConversationState(goal.phase),
+            details: details,
+            metadata: ["\(goal.roundsStarted)/\(goal.maxRounds) 轮"],
+            symbolName: "target"
+        )
+    }
+
+    private func goalPhaseLabel(_ phase: RemoteGoalState.Phase) -> String {
+        switch phase {
+        case .active: "进行中"
+        case .paused: "已暂停"
+        case .blocked: "受阻"
+        case .complete: "已完成"
+        }
+    }
+
+    private func goalConversationState(
+        _ phase: RemoteGoalState.Phase
+    ) -> RemoteConversationItem.State {
+        switch phase {
+        case .active: .running
+        case .paused, .blocked: .stopped
+        case .complete: .succeeded
+        }
     }
 
     private func durationText(_ value: TimeInterval) -> String {
@@ -724,7 +848,7 @@ private struct RemoteModelSelectionSheet: View {
                 if viewModel.modelDirectory == nil && viewModel.isLoadingModels {
                     RemoteInlineNotice(
                         title: "正在读取电脑上的模型",
-                        message: "模型目录由 Harness Desktop 提供。",
+                        message: "模型目录由 DSH Desktop 提供。",
                         icon: "cpu",
                         tone: .info
                     )
@@ -828,7 +952,7 @@ private struct RemoteModelSelectionSheet: View {
                         RemoteEmptyState(
                             icon: "cpu",
                             title: "没有可选择的模型",
-                            message: "请先在 Harness Desktop 中配置模型提供方。"
+                            message: "请先在 DSH Desktop 中配置模型提供方。"
                         )
                         .padding(.vertical, 28)
                     }
@@ -972,6 +1096,7 @@ private struct RemoteModelSelectionSheet: View {
 
 private struct ConversationItemView: View {
     let item: RemoteConversationItem
+    let loadAttachment: (RemoteImageAttachment) async throws -> Data
     let onOpenDetails: () -> Void
 
     @State private var showsReasoning = false
@@ -989,10 +1114,19 @@ private struct ConversationItemView: View {
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
-                    MarkdownContent(text: item.text)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(RemoteTheme.userBubble, in: RoundedRectangle(cornerRadius: 22))
+                    if !item.attachments.isEmpty {
+                        RemoteMessageImageGallery(
+                            attachments: item.attachments,
+                            alignment: .trailing,
+                            loadAttachment: loadAttachment
+                        )
+                    }
+                    if !item.text.isEmpty {
+                        MarkdownContent(text: item.text)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(RemoteTheme.userBubble, in: RoundedRectangle(cornerRadius: 22))
+                    }
                 }
             }
         case .assistant:
@@ -1042,6 +1176,13 @@ private struct ConversationItemView: View {
                             .padding(.vertical, 4)
                     }
                 }
+                if !item.attachments.isEmpty {
+                    RemoteMessageImageGallery(
+                        attachments: item.attachments,
+                        alignment: .leading,
+                        loadAttachment: loadAttachment
+                    )
+                }
                 if !item.text.isEmpty {
                     MarkdownContent(text: item.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1081,7 +1222,7 @@ private struct ConversationItemView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             VStack(alignment: .leading, spacing: 0) {
-                if item.details.isEmpty {
+                if item.details.isEmpty && item.attachments.isEmpty {
                     toolHeader
                         .accessibilityElement(children: .combine)
                 } else {
@@ -1096,7 +1237,7 @@ private struct ConversationItemView: View {
                     .accessibilityHint(showsToolDetails ? "收起工具详情" : "展开工具详情")
                 }
 
-                if showsToolDetails, let detail = item.details.first {
+                if showsToolDetails {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 7) {
                             Circle()
@@ -1107,7 +1248,16 @@ private struct ConversationItemView: View {
                             MetadataLine(values: item.metadata)
                             Spacer()
                         }
-                        toolDetailPreview(detail)
+                        if let detail = item.details.first {
+                            toolDetailPreview(detail)
+                        }
+                        if !item.attachments.isEmpty {
+                            RemoteMessageImageGallery(
+                                attachments: item.attachments,
+                                alignment: .leading,
+                                loadAttachment: loadAttachment
+                            )
+                        }
                         HStack {
                             if item.details.count > 1 {
                                 Text("另有 \(item.details.count - 1) 段详情")
@@ -1135,62 +1285,81 @@ private struct ConversationItemView: View {
                 }
             }
         case .context:
-            Button(action: onOpenDetails) {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18)
-                    Text(item.title ?? "上下文")
-                        .font(.caption.weight(.semibold))
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Text(item.text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    if !item.details.isEmpty {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: onOpenDetails) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                        Text(item.title ?? "上下文")
+                            .font(.caption.weight(.semibold))
+                        Text("·")
                             .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.vertical, 7)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(item.details.isEmpty)
-        case .status:
-            Button(action: onOpenDetails) {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: stateIcon)
-                        .font(.caption)
-                        .foregroundStyle(stateColor)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let title = item.title {
-                            Text(title).font(.caption.weight(.semibold))
-                        }
                         Text(item.text)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        if !item.details.isEmpty {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
-                    Spacer(minLength: 6)
-                    if !item.details.isEmpty {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.tertiary)
-                    }
+                    .padding(.vertical, 7)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 7)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(item.details.isEmpty)
+                if !item.attachments.isEmpty {
+                    RemoteMessageImageGallery(
+                        attachments: item.attachments,
+                        alignment: .leading,
+                        loadAttachment: loadAttachment
+                    )
+                    .padding(.leading, 26)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(item.details.isEmpty)
+        case .status:
+            if item.details.isEmpty {
+                statusRow
+                    .accessibilityElement(children: .combine)
+            } else {
+                Button(action: onOpenDetails) {
+                    statusRow
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看状态详情")
+            }
         }
+    }
+
+    private var statusRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.symbolName ?? stateIcon)
+                .font(.caption)
+                .foregroundStyle(stateColor)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                if let title = item.title {
+                    Text(title).font(.caption.weight(.semibold))
+                }
+                Text(item.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 6)
+            if !item.details.isEmpty {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 7)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     private var toolHeader: some View {
@@ -1219,7 +1388,7 @@ private struct ConversationItemView: View {
                     .fill(stateColor)
                     .frame(width: 6, height: 6)
             }
-            if !item.details.isEmpty {
+            if !item.details.isEmpty || !item.attachments.isEmpty {
                 Image(systemName: showsToolDetails ? "chevron.up" : "chevron.down")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.tertiary)
@@ -1273,7 +1442,8 @@ private struct ConversationItemView: View {
     }
 
     private var stateColor: Color {
-        switch item.state {
+        if item.symbolName == "map", item.state == .running { return RemoteTheme.warning }
+        return switch item.state {
         case .running: RemoteTheme.accent
         case .succeeded: RemoteTheme.success
         case .failed: RemoteTheme.danger
@@ -1339,7 +1509,7 @@ private struct TrajectoryLedgerView: View {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
-                            Text(group.turn.map { "第 \($0 + 1) 轮" } ?? "会话上下文")
+                            Text(groupTitle(group))
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.tertiary)
                             Spacer()
@@ -1404,7 +1574,9 @@ private struct TrajectoryLedgerView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 6)
-            if record.state == .running {
+            if record.state == .running
+                && record.kind != .goal
+                && record.kind != .plan {
                 ProgressView().controlSize(.mini)
             } else {
                 VStack(alignment: .trailing, spacing: 2) {
@@ -1457,7 +1629,8 @@ private struct TrajectoryLedgerView: View {
         VStack(spacing: 5) {
             timelineLane("输入", kinds: [.input, .context])
             timelineLane("模型", kinds: [.request, .assistant])
-            timelineLane("工具", kinds: [.tool, .lifecycle])
+            timelineLane("工具", kinds: [.tool])
+            timelineLane("状态", kinds: [.goal, .plan, .lifecycle])
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
@@ -1532,6 +1705,13 @@ private struct TrajectoryLedgerView: View {
         }.map { Group(turn: $0, records: grouped[$0, default: []]) }
     }
 
+    private func groupTitle(_ group: Group) -> String {
+        if let turn = group.turn { return "第 \(turn + 1) 轮" }
+        return group.records.contains(where: { [.goal, .plan].contains($0.kind) })
+            ? "会话状态与上下文"
+            : "会话上下文"
+    }
+
     private func icon(for kind: RemoteTrajectoryRecord.Kind) -> String {
         switch kind {
         case .input: "text.bubble.fill"
@@ -1539,6 +1719,8 @@ private struct TrajectoryLedgerView: View {
         case .request: "arrow.up.forward.app"
         case .assistant: "sparkle"
         case .tool: "wrench.and.screwdriver.fill"
+        case .goal: "target"
+        case .plan: "map"
         case .lifecycle: "flag.checkered"
         }
     }
@@ -1552,6 +1734,8 @@ private struct TrajectoryLedgerView: View {
         case .request: .cyan
         case .assistant: RemoteTheme.thinking
         case .tool: RemoteTheme.tool
+        case .goal: record.state == .succeeded ? RemoteTheme.success : RemoteTheme.accent
+        case .plan: RemoteTheme.warning
         case .lifecycle: .secondary
         }
     }
@@ -1570,6 +1754,212 @@ private struct MetadataLine: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+        }
+    }
+}
+
+private struct RemoteMessageImageGallery: View {
+    let attachments: [RemoteImageAttachment]
+    let alignment: Alignment
+    let loadAttachment: (RemoteImageAttachment) async throws -> Data
+
+    var body: some View {
+        Group {
+            if let attachment = attachments.first, attachments.count == 1 {
+                let size = singleImageSize(attachment)
+                RemoteMessageImageView(
+                    attachment: attachment,
+                    size: size,
+                    contentMode: .fit,
+                    loadAttachment: loadAttachment
+                )
+                .frame(maxWidth: .infinity, alignment: alignment)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 64, maximum: 64), spacing: 10)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
+                        RemoteMessageImageView(
+                            attachment: attachment,
+                            size: CGSize(width: 64, height: 64),
+                            contentMode: .fill,
+                            loadAttachment: loadAttachment
+                        )
+                    }
+                }
+                .frame(maxWidth: 286, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: alignment)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func singleImageSize(_ attachment: RemoteImageAttachment) -> CGSize {
+        let rawRatio = CGFloat(attachment.width) / CGFloat(attachment.height)
+        let ratio = min(max(rawRatio, 0.25), 4)
+        if ratio >= 1 {
+            return CGSize(width: 240, height: 240 / ratio)
+        }
+        return CGSize(width: 240 * ratio, height: 240)
+    }
+}
+
+private struct RemoteMessageImageView: View {
+    private enum Phase {
+        case loading
+        case loaded(UIImage)
+        case failed
+    }
+
+    let attachment: RemoteImageAttachment
+    let size: CGSize
+    let contentMode: ContentMode
+    let loadAttachment: (RemoteImageAttachment) async throws -> Data
+
+    @State private var phase: Phase = .loading
+    @State private var retryGeneration = 0
+    @State private var showsViewer = false
+
+    var body: some View {
+        Group {
+            switch phase {
+            case .loading:
+                ZStack {
+                    RemoteTheme.mutedSurface
+                    VStack(spacing: 7) {
+                        ProgressView().controlSize(.small)
+                        Text("图片加载中")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityLabel("图片加载中")
+            case .loaded(let image):
+                Button {
+                    showsViewer = true
+                } label: {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: contentMode)
+                        .frame(width: size.width, height: size.height)
+                        .background(RemoteTheme.mutedSurface)
+                        .clipped()
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(attachment.name ?? "图片")
+                .accessibilityHint("打开图片预览")
+            case .failed:
+                Button {
+                    phase = .loading
+                    retryGeneration += 1
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption.weight(.semibold))
+                        Text("加载失败")
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(RemoteTheme.mutedSurface)
+                .accessibilityLabel("图片加载失败，重试")
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
+        }
+        .task(id: retryGeneration) {
+            await load()
+        }
+        .fullScreenCover(isPresented: $showsViewer) {
+            if case .loaded(let image) = phase {
+                RemoteImageViewer(image: image, name: attachment.name)
+            }
+        }
+    }
+
+    private func load() async {
+        do {
+            let data = try await loadAttachment(attachment)
+            let targetPixels = max(size.width, size.height) * UIScreen.main.scale * 3
+            let image = try await Task.detached(priority: .utility) {
+                try Self.downsampledImage(data: data, maxPixelSize: targetPixels)
+            }.value
+            guard !Task.isCancelled else { return }
+            phase = .loaded(image)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            phase = .failed
+        }
+    }
+
+    nonisolated private static func downsampledImage(
+        data: Data,
+        maxPixelSize: CGFloat
+    ) throws -> UIImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(Int(maxPixelSize), 320),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            throw HarnessRemoteClientError.invalidResponse
+        }
+        return UIImage(cgImage: image)
+    }
+}
+
+private struct RemoteImageViewer: View {
+    let image: UIImage
+    let name: String?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .padding(.horizontal, 8)
+                .accessibilityLabel(name ?? "图片")
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 10) {
+                Text(name ?? "图片预览")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .accessibilityLabel("关闭图片预览")
+            }
+            .padding(.horizontal, 12)
         }
     }
 }
@@ -1648,12 +2038,17 @@ private struct MarkdownContent: View {
 
 private struct ConversationDetailSheet: View {
     let item: RemoteConversationItem
+    let loadAttachment: (RemoteImageAttachment) async throws -> Data
     @Environment(\.dismiss) private var dismiss
     @State private var selectedSectionID: String?
     @State private var copied = false
 
-    init(item: RemoteConversationItem) {
+    init(
+        item: RemoteConversationItem,
+        loadAttachment: @escaping (RemoteImageAttachment) async throws -> Data
+    ) {
         self.item = item
+        self.loadAttachment = loadAttachment
         let preferred = item.details.first(where: { $0.id == "context-raw" })
             ?? item.details.first
         _selectedSectionID = State(initialValue: preferred?.id)
@@ -1667,6 +2062,13 @@ private struct ConversationDetailSheet: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
+                    if !item.attachments.isEmpty {
+                        RemoteMessageImageGallery(
+                            attachments: item.attachments,
+                            alignment: .leading,
+                            loadAttachment: loadAttachment
+                        )
+                    }
                     if let summaryText {
                         Text(summaryText)
                             .font(.subheadline)
@@ -2204,6 +2606,114 @@ private struct InstructionSourcesView: View {
     }
 }
 
+private struct RemoteGoalStatusDock: View {
+    let goal: RemoteGoalState
+    let onOpen: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "target")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tone)
+                    .frame(width: 28, height: 28)
+                    .background(tone.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 7) {
+                        Text(phaseTitle)
+                            .font(.caption.weight(.semibold))
+                        Text("\(goal.roundsStarted)/\(goal.maxRounds) 轮")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(RemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(RemoteTheme.hairline, lineWidth: 1)
+        }
+        .accessibilityLabel(phaseTitle)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint("查看 Goal 详情")
+    }
+
+    private var summary: String {
+        if goal.phase == .blocked,
+           let reason = goal.blockedReasonMessage,
+           !reason.isEmpty {
+            return reason
+        }
+        return goal.objective
+    }
+
+    private var accessibilityValue: String {
+        if goal.phase == .blocked,
+           let reason = goal.blockedReasonMessage,
+           !reason.isEmpty {
+            return "\(goal.objective)，受阻原因：\(reason)，\(goal.roundsStarted) / \(goal.maxRounds) 轮"
+        }
+        return "\(goal.objective)，\(goal.roundsStarted) / \(goal.maxRounds) 轮"
+    }
+
+    private var phaseTitle: String {
+        switch goal.phase {
+        case .active: "进行中的 Goal"
+        case .paused: "已暂停的 Goal"
+        case .blocked: "受阻的 Goal"
+        case .complete: "已完成的 Goal"
+        }
+    }
+
+    private var tone: Color {
+        switch goal.phase {
+        case .active: RemoteTheme.accent
+        case .paused, .blocked: RemoteTheme.warning
+        case .complete: RemoteTheme.success
+        }
+    }
+}
+
+private struct RemotePlanStatusLabel: View {
+    let plan: RemotePlanState
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "map")
+                .font(.system(size: 10, weight: .semibold))
+            Text(plan.pending ? "Plan · 待生效" : "Plan")
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(RemoteTheme.warning)
+        .padding(.horizontal, 9)
+        .frame(minHeight: 30)
+        .background(RemoteTheme.warning.opacity(0.10), in: Capsule())
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(plan.pending ? "计划模式等待生效" : "计划模式已开启")
+    }
+}
+
 private struct QueueDockView: View {
     let queue: [RemoteQueuedMessage]
     let isRunning: Bool
@@ -2249,7 +2759,7 @@ private struct QueueDockView: View {
                                             onAction(item, .steer)
                                         }
                                     }
-                                    if let text = item.text {
+                                    if let text = item.text, item.attachmentCount == 0 {
                                         Button("编辑", systemImage: "pencil") {
                                             editText = text
                                             editingItem = item

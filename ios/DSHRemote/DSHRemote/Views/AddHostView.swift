@@ -238,7 +238,7 @@ struct AddHostView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
         }
-        .background(RemoteTheme.canvas.opacity(0.98))
+        .background(RemoteTheme.canvas)
     }
 
     private var scannerIsAvailable: Bool {
@@ -328,7 +328,7 @@ private struct RemoteScannerSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("扫描电脑二维码")
                         .font(.headline)
-                    Text("对准 Harness Desktop 显示的二维码")
+                    Text("对准 DSH Desktop 显示的二维码")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
                 }

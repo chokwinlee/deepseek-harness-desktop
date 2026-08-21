@@ -1,6 +1,6 @@
-# Harness Remote for iOS
+# DSH Remote for iOS
 
-这是 Harness Desktop 的独立开源 iPhone 控制端。它不连接本项目维护者提供的服务器，而是直接访问用户自己的电脑。跨网络推荐使用 Tailscale Tailnet；在同一个受信任 Wi-Fi 中，也可使用 Desktop 自带的认证局域网入口。
+这是 DSH Desktop 的独立开源 iPhone 控制端。它不连接本项目维护者提供的服务器，而是直接访问用户自己的电脑。跨网络推荐使用 Tailscale Tailnet；在同一个受信任 Wi-Fi 中，也可使用 Desktop 自带的认证局域网入口。
 
 ## 当前进度
 
@@ -11,6 +11,8 @@
 - 通过 `host.describe` 验证目标确实是 Harness，而不是只检查网页状态码；
 - 本地保存多台电脑；
 - 原生调用 `session.list`、`session.history`、`session.prompt` 与 `session.cancel`；
+- 读取 rc.8 持久图片附件，在用户消息、模型消息和工具结果中原位展示，失败可重试；
+- 只读展示当前 Goal、Plan 模式及对应的对话与轨迹事件；
 - 任务执行中补充指令、停止任务、处理审批和结构化问题；
 - WebSocket 事件流与定时刷新共同恢复运行状态、消息、完成通知和待确认提醒；
 - 无网络、无模型调用的内置审核演示模式；

@@ -45,7 +45,7 @@ struct RootView: View {
                 RemoteSessionView()
             }
             .tint(RemoteTheme.accent)
-        case "conversation", "models", "trajectory", "details":
+        case "conversation", "models", "trajectory", "details", "rc8", "rc8-trajectory", "rc8-image-failure":
             NavigationStack {
                 RemoteConversationView(
                     client: DemoHarnessRemoteClient(),

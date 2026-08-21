@@ -47,7 +47,7 @@ struct HostListView: View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Harness Remote")
+                    Text("DSH Remote")
                         .font(.title2.weight(.bold))
                     HStack(alignment: .center, spacing: 8) {
                         Text(hostStore.hosts.isEmpty ? "从手机继续电脑上的 Harness" : "你的电脑")
@@ -60,7 +60,7 @@ struct HostListView: View {
             } else {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Harness Remote")
+                        Text("DSH Remote")
                             .font(.title2.weight(.bold))
                         Text(hostStore.hosts.isEmpty ? "从手机继续电脑上的 Harness" : "你的电脑")
                             .font(.caption)
@@ -74,7 +74,7 @@ struct HostListView: View {
         .padding(.horizontal, RemoteTheme.pagePadding)
         .padding(.top, 8)
         .padding(.bottom, 12)
-        .background(RemoteTheme.canvas.opacity(0.98))
+        .background(RemoteTheme.canvas)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
@@ -259,8 +259,8 @@ private struct EmptyConnectionView: View {
 
     private var onboardingMessage: String {
         dynamicTypeSize.isAccessibilitySize
-            ? "在 Harness Desktop 开启手机 Remote。扫码后即可查看项目、会话和运行状态。"
-            : "在 Harness Desktop 开启手机 Remote，\n扫码后即可查看项目、会话和运行状态。"
+            ? "在 DSH Desktop 开启手机 Remote。扫码后即可查看项目、会话和运行状态。"
+            : "在 DSH Desktop 开启手机 Remote，\n扫码后即可查看项目、会话和运行状态。"
     }
 }
 

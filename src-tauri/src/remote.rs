@@ -137,7 +137,7 @@ pub fn parse_tailscale_status(value: &serde_json::Value) -> Result<TailscaleInfo
 
 pub fn inspect_tailscale() -> Result<TailscaleInfo, String> {
     let executable = resolve_tailscale()
-        .ok_or("未找到 Tailscale。请先安装并登录，再重新打开 DeepSeek Harness Desktop。")?;
+        .ok_or("未找到 Tailscale。请先安装并登录，再重新打开 DSH Desktop。")?;
     let value = run_json(&executable, &["status", "--json"])?;
     let mut info = parse_tailscale_status(&value)?;
     info.executable = executable;

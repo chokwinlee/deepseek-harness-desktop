@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop iOS Remote 方案
+# DSH Desktop iOS Remote 方案
 
 ## 决策
 
@@ -6,11 +6,11 @@
 
 ```mermaid
 flowchart LR
-    A["iPhone: Harness Remote"] -->|"Tailnet HTTPS / WSS"| B["Tailscale Serve :8443"]
+    A["iPhone: DSH Remote"] -->|"Tailnet HTTPS / WSS"| B["Tailscale Serve :8443"]
     B -->|"127.0.0.1:随机端口"| C["DeepSeek Harness Web/API"]
     A -->|"受信任 Wi-Fi + bearer"| E["LAN Remote Proxy :8765"]
     E -->|"白名单 API / 127.0.0.1"| C
-    D["DeepSeek Harness Desktop"] -->|"启动、监控、停止"| C
+    D["DSH Desktop"] -->|"启动、监控、停止"| C
     D -->|"启动、监控、停止"| B
     D -->|"启动、监控、停止"| E
 ```
@@ -82,7 +82,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 ### 局域网直连边界
 
 - Harness 本身仍只绑定 `127.0.0.1`；Desktop 另启 `:8765` 代理，不能把 Harness 直接绑定到 `0.0.0.0`。
-- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
+- 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、持久图片附件读取、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
 - HTTP 与 WebSocket 都要求二维码中的 bearer，转发到 Harness 前会剥离认证头并重写 loopback Host。
 - 裸局域网 HTTP 地址不能在 iOS 手输；缺少凭据时客户端拒绝保存。
 - 该路径有认证但没有链路加密，只允许用户明确启用并用于受信任家庭/办公 Wi-Fi；不受信任网络使用 Tailscale HTTPS。
@@ -111,8 +111,10 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 6. `/api/events.mux` WebSocket 重连；
 7. approval/question 的 `/api/respond`；
 8. 只读工具视图与 diff。
+9. `session.attachment` 按需读取会话中的持久图片；图片引用留在消息模型，二进制数据由 session 级缓存去重，不随轮询重复下载；
+10. 从 history events 与 projections 只读折叠 Goal、Plan 当前状态及轨迹变化。
 
-每次升级 `@deepseek-ai/dsh` 都必须重新核对 `dsh-host-apiproxy` 类型。当前协议属于开发预览，不能把 rc.6 的线格式复制成长期稳定的 iOS 公共 API；更稳妥的做法是在 Desktop 中增加一个版本化的窄 Remote Adapter，由它把上游变化隔离在电脑端。
+每次升级 `@deepseek-ai/dsh` 都必须重新核对 `dsh-host-apiproxy` 类型。当前协议属于开发预览，不能把 rc.8 的线格式复制成长期稳定的 iOS 公共 API；更稳妥的做法是在 Desktop 中增加一个版本化的窄 Remote Adapter，由它把上游变化隔离在电脑端。
 
 ## MVP 验收门槛
 

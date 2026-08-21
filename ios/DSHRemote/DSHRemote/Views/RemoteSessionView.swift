@@ -147,7 +147,7 @@ struct RemoteSessionView: View {
         RemoteEmptyState(
             icon: "folder",
             title: "还没有项目",
-            message: "先在 Harness Desktop 中添加项目或打开一个目录。"
+            message: "先在 DSH Desktop 中添加项目或打开一个目录。"
         )
         .frame(maxWidth: .infinity)
         .padding(.top, 72)
@@ -675,7 +675,7 @@ private struct ProjectsConnectionError: View {
         RemoteEmptyState(
             icon: "wifi.exclamationmark",
             title: "无法连接这台电脑",
-            message: "请确认 Harness Desktop 正在运行且手机 Remote 已开启。\n\(message)",
+            message: "请确认 DSH Desktop 正在运行且手机 Remote 已开启。\n\(message)",
             action: retry
         ) {
             Label("重新连接", systemImage: "arrow.clockwise")

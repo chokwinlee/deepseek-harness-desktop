@@ -12,6 +12,27 @@ interface RemoteTestApi {
   shouldPollStatus: (value: Record<string, unknown> | undefined, settingVisible: boolean) => boolean
 }
 
+const EXPECTED_LAN_REMOTE_HTTP_PATHS = [
+  '/api/host.describe',
+  '/api/workspace.list',
+  '/api/session.list',
+  '/api/session.history',
+  '/api/session.attachment',
+  '/api/session.models',
+  '/api/session.selectModel',
+  '/api/session.prompt',
+  '/api/session.updateQueue',
+  '/api/session.cancel',
+  '/api/respond',
+]
+
+async function lanRemoteAllowedHttpPaths(): Promise<string[]> {
+  const source = await readFile(join(process.cwd(), 'scripts', 'lan-remote-proxy.mjs'), 'utf8')
+  const expression = source.match(/const ALLOWED_HTTP_PATHS = (new Set\(\[[\s\S]*?\]\))/)?.[1]
+  assert.ok(expression, 'LAN Remote HTTP allowlist declaration is missing')
+  return [...runInNewContext(expression)] as string[]
+}
+
 async function loadTestApi(): Promise<RemoteTestApi> {
   const source = await readFile(join(process.cwd(), 'src', 'remote.js'), 'utf8')
   const context: Record<string, unknown> = {
@@ -102,19 +123,27 @@ test('Remote polls Tailscale while its settings row is visible', async () => {
   assert.equal(api.shouldPollStatus({ busy: true }, true), false)
 })
 
-test('LAN Remote exposes workspace grouping as read-only enrichment', async () => {
-  const source = await readFile(join(process.cwd(), 'scripts', 'lan-remote-proxy.mjs'), 'utf8')
-  assert.match(source, /'\/api\/workspace\.list'/)
-  assert.doesNotMatch(
-    source,
-    /'\/api\/workspace\.(?:create|rename|delete|insertBefore|insertSessionBefore|archiveSession)'/,
-  )
+test('LAN Remote HTTP allowlist exactly matches the reviewed capability boundary', async () => {
+  const paths = await lanRemoteAllowedHttpPaths()
+  assert.deepEqual(paths, EXPECTED_LAN_REMOTE_HTTP_PATHS)
 })
 
-test('LAN Remote exposes conversation model and queue controls', async () => {
-  const source = await readFile(join(process.cwd(), 'scripts', 'lan-remote-proxy.mjs'), 'utf8')
-  assert.match(source, /'\/api\/session\.models'/)
-  assert.match(source, /'\/api\/session\.selectModel'/)
-  assert.match(source, /'\/api\/session\.updateQueue'/)
-  assert.doesNotMatch(source, /'\/api\/(?:llm|settings|credentials)\./)
+test('LAN Remote allows referenced attachments but keeps sensitive host APIs closed', async () => {
+  const paths = await lanRemoteAllowedHttpPaths()
+  assert.ok(paths.includes('/api/session.attachment'))
+
+  for (const path of [
+    '/api/settings.describe',
+    '/api/settings.update',
+    '/api/credentials.describe',
+    '/api/credentials.set',
+    '/api/host.pickDirectory',
+    '/api/host.listDirectory',
+    '/api/host.createDirectory',
+    '/api/host.openPath',
+    '/api/workspace.create',
+    '/api/workspace.delete',
+  ]) {
+    assert.equal(paths.includes(path), false, `${path} must stay outside LAN Remote`)
+  }
 })

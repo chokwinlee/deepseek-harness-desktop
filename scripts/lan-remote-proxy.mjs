@@ -10,6 +10,7 @@ const ALLOWED_HTTP_PATHS = new Set([
   '/api/workspace.list',
   '/api/session.list',
   '/api/session.history',
+  '/api/session.attachment',
   '/api/session.models',
   '/api/session.selectModel',
   '/api/session.prompt',

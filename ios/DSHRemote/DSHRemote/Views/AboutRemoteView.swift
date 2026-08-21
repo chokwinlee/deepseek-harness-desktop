@@ -9,7 +9,7 @@ struct AboutRemoteView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 RemoteSheetHeader(
-                    title: "关于 Harness Remote",
+                    title: "关于 DSH Remote",
                     subtitle: "隐私、连接方式与项目信息"
                 )
 
@@ -62,7 +62,7 @@ struct AboutRemoteView: View {
             .frame(width: 66, height: 66)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Harness Remote")
+                Text("DSH Remote")
                     .font(.title2.weight(.bold))
                 Text("开源、独立的 Harness 手机控制端")
                     .font(.subheadline)
@@ -96,7 +96,7 @@ struct AboutRemoteView: View {
                 AboutInfoRow(
                     icon: "server.rack",
                     title: "模型由电脑调用",
-                    detail: "密钥和提供商设置仍由 Harness Desktop 管理"
+                    detail: "密钥和提供商设置仍由 DSH Desktop 管理"
                 )
                 divider
                 Link(destination: privacyURL) {
@@ -133,7 +133,7 @@ struct AboutRemoteView: View {
         VStack(alignment: .leading, spacing: 9) {
             RemoteSectionHeader(title: "独立开源项目")
             VStack(spacing: 0) {
-                Text("Harness Remote 并非 DeepSeek AI 或 Tailscale 的官方产品，也不受其背书。相关商标归各自权利人所有。")
+                Text("DSH Remote 并非 DeepSeek AI 或 Tailscale 的官方产品，也不受其背书。相关商标归各自权利人所有。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineSpacing(3)

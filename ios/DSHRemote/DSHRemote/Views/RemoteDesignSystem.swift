@@ -231,7 +231,7 @@ struct RemotePageHeader<Trailing: View>: View {
         .frame(minHeight: 56)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        .background(RemoteTheme.canvas.opacity(0.98))
+        .background(RemoteTheme.canvas)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(RemoteTheme.hairline)
@@ -293,7 +293,7 @@ struct RemoteSheetHeader<Trailing: View>: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .background(RemoteTheme.canvas.opacity(0.98))
+        .background(RemoteTheme.canvas)
         .overlay(alignment: .bottom) {
             Rectangle().fill(RemoteTheme.hairline).frame(height: 0.5)
         }

@@ -1,8 +1,8 @@
-# Harness Remote App Review Notes
+# DSH Remote App Review Notes
 
 ## Product summary
 
-Harness Remote is a native SwiftUI companion that controls an AI coding Harness running on a computer owned or managed by the user. The iOS app does not download or execute code, expose a terminal, install plugins, edit model credentials, or purchase digital services. Work executes on the user's computer.
+DSH Remote is a native SwiftUI companion that controls an AI coding Harness running on a computer owned or managed by the user. The iOS app does not download or execute code, expose a terminal, install plugins, edit model credentials, or purchase digital services. Work executes on the user's computer.
 
 The app is an independent open-source project and is not affiliated with DeepSeek AI or Tailscale. The name, icon, About screen, and store copy must preserve that distinction.
 

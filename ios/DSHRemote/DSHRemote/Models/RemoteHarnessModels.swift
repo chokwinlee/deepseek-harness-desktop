@@ -96,6 +96,51 @@ struct RemoteConversationSnapshot: Hashable, Sendable {
     let hasMore: Bool
     let stats: RemoteConversationStats?
     var trajectory: [RemoteTrajectoryRecord] = []
+    var goal: RemoteGoalState? = nil
+    var plan: RemotePlanState? = nil
+}
+
+struct RemoteGoalState: Hashable, Sendable {
+    enum Phase: String, Hashable, Sendable {
+        case active
+        case paused
+        case blocked
+        case complete
+    }
+
+    let id: String
+    let revision: Int
+    let objective: String
+    let phase: Phase
+    let blockedReasonCode: String?
+    let blockedReasonMessage: String?
+    let maxRounds: Int
+    let roundsStarted: Int
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct RemotePlanState: Hashable, Sendable {
+    let active: Bool
+    let pending: Bool
+
+    var effectiveActive: Bool { pending ? !active : active }
+}
+
+struct RemoteImageAttachment: Identifiable, Hashable, Sendable {
+    let attachmentID: String
+    let mediaType: String
+    let bytes: Int
+    let width: Int
+    let height: Int
+    let name: String?
+
+    var id: String { attachmentID }
+}
+
+struct RemoteImageAttachmentPayload: Hashable, Sendable {
+    let attachment: RemoteImageAttachment
+    let data: Data
 }
 
 struct RemoteConversationStats: Hashable, Sendable {
@@ -202,6 +247,8 @@ struct RemoteConversationItem: Identifiable, Hashable, Sendable {
     var reasoning: String? = nil
     var details: [RemoteDetailSection] = []
     var metadata: [String] = []
+    var attachments: [RemoteImageAttachment] = []
+    var symbolName: String? = nil
     var isStreaming = false
 }
 
@@ -216,6 +263,7 @@ struct RemoteQueuedMessage: Identifiable, Hashable, Sendable {
     let placement: Placement
     let preview: String
     let text: String?
+    var attachmentCount: Int = 0
 }
 
 struct RemoteTrajectoryRecord: Identifiable, Hashable, Sendable {
@@ -225,6 +273,8 @@ struct RemoteTrajectoryRecord: Identifiable, Hashable, Sendable {
         case request
         case assistant
         case tool
+        case goal
+        case plan
         case lifecycle
     }
 
@@ -239,6 +289,7 @@ struct RemoteTrajectoryRecord: Identifiable, Hashable, Sendable {
     let duration: TimeInterval?
     let state: RemoteConversationItem.State
     var details: [RemoteDetailSection] = []
+    var attachments: [RemoteImageAttachment] = []
 }
 
 enum RemoteQueueAction: Hashable, Sendable {

@@ -1,6 +1,43 @@
 import Combine
 import Foundation
 
+private actor RemoteAttachmentLimiter {
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) {
+        self.limit = max(limit, 1)
+    }
+
+    func run<Value: Sendable>(
+        _ operation: @Sendable () async throws -> Value
+    ) async throws -> Value {
+        await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    private func acquire() async {
+        if active < limit {
+            active += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            active -= 1
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 @MainActor
 final class RemoteHostViewModel: ObservableObject {
     @Published private(set) var sessions: [RemoteSessionSummary] = []
@@ -125,6 +162,8 @@ final class RemoteConversationViewModel: ObservableObject {
     @Published private(set) var trajectory: [RemoteTrajectoryRecord] = []
     @Published private(set) var queue: [RemoteQueuedMessage] = []
     @Published private(set) var stats: RemoteConversationStats?
+    @Published private(set) var goal: RemoteGoalState?
+    @Published private(set) var plan: RemotePlanState?
     @Published private(set) var modelDirectory: RemoteModelDirectory?
     @Published private(set) var isLoadingModels = false
     @Published private(set) var isSelectingModel = false
@@ -144,6 +183,18 @@ final class RemoteConversationViewModel: ObservableObject {
     private var lastRunning: Bool?
     private var historyMessageLimit = 80
     private var modelGeneration = 0
+    private var attachmentCache: [String: CachedAttachment] = [:]
+    private var attachmentTasks: [String: Task<RemoteImageAttachmentPayload, Error>] = [:]
+    private var attachmentAccessCounter = 0
+    private var attachmentCacheBytes = 0
+    private let attachmentLimiter = RemoteAttachmentLimiter(limit: 3)
+
+    private struct CachedAttachment {
+        let data: Data
+        var lastAccess: Int
+    }
+
+    private static let attachmentCacheLimit = 32 * 1_024 * 1_024
 
     init(client: any HarnessRemoteClient, session: RemoteSessionSummary) {
         self.client = client
@@ -164,6 +215,8 @@ final class RemoteConversationViewModel: ObservableObject {
         defer {
             modelsTask.cancel()
             eventsTask.cancel()
+            attachmentTasks.values.forEach { $0.cancel() }
+            attachmentTasks.removeAll()
         }
 
         await refresh()
@@ -186,6 +239,8 @@ final class RemoteConversationViewModel: ObservableObject {
             items = snapshot.items
             trajectory = snapshot.trajectory
             stats = snapshot.stats
+            goal = snapshot.goal
+            plan = snapshot.plan
             hasMoreHistory = snapshot.hasMore
             hasLoadedConversationSnapshot = true
             if let latest = sessions.first(where: { $0.id == session.id }) {
@@ -280,7 +335,62 @@ final class RemoteConversationViewModel: ObservableObject {
         }
     }
 
+    func attachmentData(for attachment: RemoteImageAttachment) async throws -> Data {
+        attachmentAccessCounter += 1
+        if var cached = attachmentCache[attachment.attachmentID] {
+            cached.lastAccess = attachmentAccessCounter
+            attachmentCache[attachment.attachmentID] = cached
+            return cached.data
+        }
+
+        let task: Task<RemoteImageAttachmentPayload, Error>
+        if let existing = attachmentTasks[attachment.attachmentID] {
+            task = existing
+        } else {
+            let client = client
+            let sessionID = session.id
+            let limiter = attachmentLimiter
+            task = Task {
+                try await limiter.run {
+                    try await client.attachment(
+                        sessionID: sessionID,
+                        attachmentID: attachment.attachmentID
+                    )
+                }
+            }
+            attachmentTasks[attachment.attachmentID] = task
+        }
+
+        do {
+            let payload = try await task.value
+            attachmentTasks[attachment.attachmentID] = nil
+            guard payload.attachment == attachment else {
+                throw HarnessRemoteClientError.mismatchedResponse
+            }
+            attachmentAccessCounter += 1
+            if var cached = attachmentCache[attachment.attachmentID] {
+                cached.lastAccess = attachmentAccessCounter
+                attachmentCache[attachment.attachmentID] = cached
+                return cached.data
+            }
+            attachmentCache[attachment.attachmentID] = CachedAttachment(
+                data: payload.data,
+                lastAccess: attachmentAccessCounter
+            )
+            attachmentCacheBytes += payload.data.count
+            trimAttachmentCache(protecting: attachment.attachmentID)
+            return payload.data
+        } catch {
+            attachmentTasks[attachment.attachmentID] = nil
+            throw error
+        }
+    }
+
     func updateQueue(_ item: RemoteQueuedMessage, action: RemoteQueueAction) async {
+        if case .edit = action, item.attachmentCount > 0 {
+            errorMessage = "带图片的排队消息不能只编辑文字；请删除后重新发送。"
+            return
+        }
         do {
             try await client.updateQueue(sessionID: session.id, itemID: item.id, action: action)
             switch action {
@@ -290,7 +400,8 @@ final class RemoteConversationViewModel: ObservableObject {
                         id: item.id,
                         placement: item.placement,
                         preview: text,
-                        text: text
+                        text: text,
+                        attachmentCount: item.attachmentCount
                     )
                 }
             case .remove, .steer:
@@ -360,5 +471,15 @@ final class RemoteConversationViewModel: ObservableObject {
             kind: .completed,
             body: "“\(latest.title)”已在你的电脑上完成。"
         ))
+    }
+
+    private func trimAttachmentCache(protecting protectedID: String) {
+        while attachmentCacheBytes > Self.attachmentCacheLimit,
+              let candidate = attachmentCache
+                .filter({ $0.key != protectedID })
+                .min(by: { $0.value.lastAccess < $1.value.lastAccess }) {
+            attachmentCacheBytes -= candidate.value.data.count
+            attachmentCache[candidate.key] = nil
+        }
     }
 }
