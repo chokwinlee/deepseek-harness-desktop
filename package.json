@@ -64,7 +64,7 @@
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.8",
     "dsh-desktop-settings-plugin": "file:src/dsh-desktop-settings-plugin",
     "pnpm": "11.21.0",
-    "react": "18.3.1",
+    "react": "19.2.8",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
