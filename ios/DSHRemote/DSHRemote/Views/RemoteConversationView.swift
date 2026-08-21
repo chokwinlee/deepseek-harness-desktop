@@ -38,7 +38,7 @@ struct RemoteConversationView: View {
     @State private var draft = ""
     @State private var draftReferences: [RemoteDraftReference] = []
     @State private var composerSelection = NSRange(location: 0, length: 0)
-    @State private var composerTextHeight: CGFloat = 38
+    @State private var composerTextHeight: CGFloat = 44
     @State private var draftImages: [RemotePromptImage] = []
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isPreparingImages = false
@@ -66,7 +66,7 @@ struct RemoteConversationView: View {
     @State private var didRunLiveAcceptance = false
     @State private var debugSubagent: RemoteSubagentEntry?
     #endif
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -838,6 +838,7 @@ struct RemoteConversationView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22)
                 .stroke(RemoteTheme.hairline, lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
     }
@@ -1707,6 +1708,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
         view.tintColor = UIColor(RemoteTheme.accent)
         view.accessibilityLabel = "消息"
         view.accessibilityHint = "输入发送给 Harness 的内容"
+        view.accessibilityIdentifier = "remote-composer-text-view"
         context.coordinator.render(view, force: true)
         return view
     }
@@ -1732,10 +1734,21 @@ private struct RemoteComposerTextView: UIViewRepresentable {
             context.coordinator.isApplyingChange = false
         }
 
-        if isFocused, !view.isFirstResponder {
-            DispatchQueue.main.async { view.becomeFirstResponder() }
-        } else if !isFocused, view.isFirstResponder {
-            DispatchQueue.main.async { view.resignFirstResponder() }
+        if isFocused, isEnabled, !view.isFirstResponder {
+            DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+                guard let view,
+                      let coordinator,
+                      coordinator.parent.isFocused,
+                      coordinator.parent.isEnabled,
+                      view.window != nil,
+                      !view.isFirstResponder else { return }
+                view.becomeFirstResponder()
+            }
+        } else if !isEnabled, view.isFirstResponder {
+            DispatchQueue.main.async { [weak view] in
+                guard let view, !view.isEditable, view.isFirstResponder else { return }
+                view.resignFirstResponder()
+            }
         }
     }
 
@@ -1748,7 +1761,7 @@ private struct RemoteComposerTextView: UIViewRepresentable {
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        return CGSize(width: width, height: min(max(measured.height, 38), maxHeight))
+        return CGSize(width: width, height: min(max(measured.height, 44), maxHeight))
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -3289,6 +3302,7 @@ private struct RemoteSubagentConversationView: View {
                     .font(.body)
                     .lineLimit(1...6)
                     .textFieldStyle(.plain)
+                    .frame(minHeight: 44)
                     .focused($composerFocused)
                     .disabled(viewModel.isSending)
             } else {
@@ -3367,6 +3381,7 @@ private struct RemoteSubagentConversationView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22)
                 .stroke(RemoteTheme.hairline, lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
     }
