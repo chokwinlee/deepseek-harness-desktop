@@ -634,6 +634,21 @@ private struct RemoteFieldSurfaceModifier: ViewModifier {
 }
 
 extension View {
+    @ViewBuilder
+    func remoteDestructiveConfirmationPresentation(
+        for dynamicTypeSize: DynamicTypeSize
+    ) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(RemoteTheme.canvas)
+        } else {
+            presentationDetents([.height(310)])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(RemoteTheme.canvas)
+        }
+    }
+
     func remoteSurface(cornerRadius: CGFloat = RemoteTheme.cardRadius, elevated: Bool = false) -> some View {
         modifier(RemoteSurfaceModifier(cornerRadius: cornerRadius, elevated: elevated))
     }

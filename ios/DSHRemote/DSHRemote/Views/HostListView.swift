@@ -37,9 +37,7 @@ struct HostListView: View {
                 remove(host)
                 pendingRemoval = nil
             }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .presentationBackground(RemoteTheme.canvas)
+            .remoteDestructiveConfirmationPresentation(for: dynamicTypeSize)
         }
     }
 

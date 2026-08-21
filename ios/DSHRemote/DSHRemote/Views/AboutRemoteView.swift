@@ -3,6 +3,7 @@ import UIKit
 
 struct AboutRemoteView: View {
     @EnvironmentObject private var hostStore: RemoteHostStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmsDeletion = false
 
     var body: some View {
@@ -41,9 +42,7 @@ struct AboutRemoteView: View {
                     hostStore.removeAll()
                     confirmsDeletion = false
                 }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(RemoteTheme.canvas)
+                .remoteDestructiveConfirmationPresentation(for: dynamicTypeSize)
             }
         }
     }
