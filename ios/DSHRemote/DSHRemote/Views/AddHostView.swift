@@ -18,6 +18,7 @@ struct AddHostView: View {
     @State private var name = ""
     @State private var address = ""
     @State private var showsScanner = false
+    @State private var showsTailscaleGuide = false
     @State private var showsCrossNetworkEntry = false
     @State private var hasImportedConnection = false
     @State private var isChecking = false
@@ -103,6 +104,12 @@ struct AddHostView: View {
                     connect(addressOverride: value)
                 }
                 .presentationBackground(.black)
+            }
+            .sheet(isPresented: $showsTailscaleGuide) {
+                TailscaleSetupGuideView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+                    .presentationBackground(RemoteTheme.canvas)
             }
             .onAppear {
                 if let connection = hostStore.consumePendingImportedConnection() {
@@ -281,10 +288,18 @@ struct AddHostView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     RemoteInlineNotice(
                         title: "跨网络方式",
-                        message: "先在 Mac 配置 Tailscale Serve，或使用你自己管理的 HTTPS。Tailscale 不是同一 Wi-Fi 配对的前置条件。",
+                        message: "在 Desktop 按指南开启跨网络连接，再用 Remote 扫描二维码。Desktop 会自动配置 Tailscale Serve，不需要终端命令。",
                         icon: "point.3.connected.trianglepath.dotted",
                         tone: .info
                     )
+                    Button {
+                        focusedField = nil
+                        showsTailscaleGuide = true
+                    } label: {
+                        Label("查看 3 分钟 Tailscale 教程", systemImage: "book.pages")
+                    }
+                    .buttonStyle(RemoteActionButtonStyle(kind: .secondary))
+                    .accessibilityHint("查看 Mac、iPhone、MagicDNS、HTTPS 和蜂窝网络验收步骤")
                     nameField
                     addressField
                 }
@@ -636,6 +651,155 @@ struct AddHostView: View {
         )
         if case .sameWiFi = host.transport { return true }
         return false
+    }
+}
+
+struct TailscaleSetupGuideView: View {
+    private struct GuideLink: Identifiable {
+        let id: String
+        let title: String
+        let url: URL
+    }
+
+    private struct GuideStep: Identifiable {
+        let id: Int
+        let title: String
+        let detail: String
+        let links: [GuideLink]
+    }
+
+    private let steps: [GuideStep] = [
+        GuideStep(
+            id: 1,
+            title: "在 Mac 安装并登录",
+            detail: "安装 Tailscale，并用你的账号登录。Standalone 版本最适合普通 Mac 用户。",
+            links: [GuideLink(
+                id: "mac",
+                title: "下载 Mac 版",
+                url: URL(string: "https://tailscale.com/download/mac")!
+            )]
+        ),
+        GuideStep(
+            id: 2,
+            title: "在 iPhone 登录同一账号",
+            detail: "安装 Tailscale，允许 VPN 配置，并确认 Mac 与 iPhone 出现在同一个 Tailnet。",
+            links: [GuideLink(
+                id: "ios",
+                title: "下载 iPhone 版",
+                url: URL(string: "https://tailscale.com/download/ios")!
+            )]
+        ),
+        GuideStep(
+            id: 3,
+            title: "完成 DNS 与 HTTPS 授权",
+            detail: "回到 Desktop 查看检测结果；若提示缺少 MagicDNS 或 HTTPS，按按钮进入 Tailnet DNS 设置。启用证书会把设备 DNS 名称写入公开证书日志。",
+            links: [GuideLink(
+                id: "dns",
+                title: "打开 Tailnet DNS 设置",
+                url: URL(string: "https://login.tailscale.com/admin/dns")!
+            )]
+        ),
+        GuideStep(
+            id: 4,
+            title: "在 Desktop 开启跨网络连接",
+            detail: "Desktop 会自动配置 Tailscale Serve、Harness 地址和二维码，不需要复制或运行终端命令。",
+            links: [GuideLink(
+                id: "serve",
+                title: "查看 Tailscale Serve 说明",
+                url: URL(string: "https://tailscale.com/docs/features/tailscale-serve")!
+            )]
+        ),
+        GuideStep(
+            id: 5,
+            title: "用蜂窝网络验收",
+            detail: "在 Remote 扫描跨网络二维码，然后关闭 iPhone Wi-Fi，只保留蜂窝网络和 Tailscale，再打开会话并发送一条消息。",
+            links: []
+        ),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                RemoteSheetHeader(
+                    title: "Tailscale 设置",
+                    subtitle: "约 3 分钟 · 同一 Wi-Fi 不需要 Tailscale"
+                )
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        RemoteInlineNotice(
+                            title: "Desktop 会自动完成 Serve",
+                            message: "你只需要让 Mac 和 iPhone 加入同一个 Tailnet，并按 Desktop 提示完成 DNS 与 HTTPS 授权。",
+                            icon: "wand.and.stars",
+                            tone: .info
+                        )
+
+                        ForEach(steps) { step in
+                            guideStep(step)
+                        }
+
+                        RemoteInlineNotice(
+                            title: "不要使用 Funnel",
+                            message: "DSH Remote 只使用 Tailnet 内可访问的 Tailscale Serve。Funnel 会把入口暴露到公网。",
+                            icon: "exclamationmark.shield.fill",
+                            tone: .warning
+                        )
+
+                        Text("DSH Remote 是独立开源项目，并非 Tailscale 官方产品。连接、账号与设备权限由你的 Tailnet 管理。")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 2)
+                    }
+                    .padding(.horizontal, RemoteTheme.pagePadding)
+                    .padding(.top, 16)
+                    .padding(.bottom, 32)
+                }
+            }
+            .background(RemoteTheme.canvas.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    private func guideStep(_ step: GuideStep) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(step.id)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 30, height: 30)
+                .background(RemoteTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(step.title)
+                    .font(.body.weight(.semibold))
+                Text(step.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !step.links.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(step.links) { link in
+                            Link(destination: link.url) {
+                                Label(link.title, systemImage: "arrow.up.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(RemoteTheme.accent)
+                                    .padding(.horizontal, 10)
+                                    .frame(minHeight: 34)
+                                    .background(RemoteTheme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+                            }
+                            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                        }
+                    }
+                    .padding(.top, 3)
+                }
+            }
+        }
+        .padding(14)
+        .remoteSurface(cornerRadius: 14)
+        .accessibilityElement(children: .contain)
     }
 }
 

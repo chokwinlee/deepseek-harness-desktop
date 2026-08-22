@@ -42,3 +42,9 @@ Live mode connects directly to the user's Harness computer through Tailscale Ser
 - Attach a short review video only if Apple requests help reproducing a live-computer connection; the built-in demo should remain sufficient for core review.
 - Verify the final archive contains `PrivacyInfo.xcprivacy`, the independent 1024×1024 icon, camera/local-network purpose strings, and no `WKWebView` remote UI.
 - Confirm all repository licenses and attribution notices are current before the first public binary.
+
+## Distribution before App Store release
+
+Until a public TestFlight build is approved, GitHub describes DSH Remote as an iOS source preview. Developers can run it on their own device through Xcode signing. The repository does not publish a generic IPA or imply that an App Store build exists.
+
+After the first external TestFlight build passes Beta App Review, the repository can replace the “coming soon” notice with the public TestFlight invitation link. App Store availability must remain a separate later milestone.

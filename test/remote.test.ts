@@ -14,6 +14,10 @@ interface RemoteTestApi {
     token?: string,
     parameters?: Record<string, string | number | boolean>,
   ) => string
+  authoritativeOperationOutcome: (
+    operation: Record<string, unknown> | undefined,
+    status: Record<string, unknown> | undefined,
+  ) => string
   copyFor: (language: 'zh' | 'en') => Record<string, string>
   languageFromTag: (tag: string) => 'zh' | 'en'
   normalizeOperation: (value?: Record<string, unknown>) => Record<string, unknown>
@@ -49,6 +53,10 @@ interface RemoteTestApi {
     transport: 'lan' | 'tailscale',
     message: string,
   ) => Record<string, unknown>
+  tailscaleGuideState: (
+    value: Record<string, unknown> | undefined,
+    language?: 'zh' | 'en',
+  ) => Record<string, unknown>
   transportViewState: (
     value: Record<string, unknown> | undefined,
     transport: 'lan' | 'tailscale',
@@ -78,6 +86,7 @@ const EXPECTED_LAN_REMOTE_HTTP_PATHS = [
   '/api/host.describe',
   '/api/workspace.list',
   '/api/session.list',
+  '/api/session.create',
   '/api/session.history',
   '/api/session.attachment',
   '/api/session.models',
@@ -192,6 +201,10 @@ test('Remote actions use the tokenized Desktop bridge', async () => {
     'dsh-desktop://action/remote-lan-disable?token=desktop-token',
   )
   assert.equal(
+    api.actionUrl('remote-lan-reset', 'desktop-token'),
+    'dsh-desktop://action/remote-lan-reset?token=desktop-token',
+  )
+  assert.equal(
     api.actionUrl('remote-status', 'desktop-token', { force: 1 }),
     'dsh-desktop://action/remote-status?token=desktop-token&force=1',
   )
@@ -243,8 +256,12 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.copyFor('zh').title, '手机 Remote')
   assert.equal(api.copyFor('zh').connect, '连接 iPhone')
   assert.equal(api.copyFor('zh').lanTitle, '同一 Wi-Fi')
+  assert.equal(api.copyFor('zh').lanReset, '重置配对')
+  assert.match(String(api.copyFor('zh').lanResetBody), /立即失效/)
   assert.match(String(api.copyFor('zh').lanDescription), /无需安装或配置 Tailscale/)
   assert.equal(api.copyFor('zh').tailscaleTitle, '跨网络连接')
+  assert.equal(api.copyFor('zh').guide, '设置指南')
+  assert.match(String(api.copyFor('zh').guideStepEnableDetail), /不需要手动运行命令/)
   assert.equal(api.copyFor('zh').operationChecking, '检查 Tailscale')
   assert.equal(api.copyFor('zh').operationRestarting, '重启 Harness')
   assert.equal(api.copyFor('zh').operationServing, '启动安全入口')
@@ -252,8 +269,42 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.copyFor('zh').disableStopping, '关闭安全入口')
   assert.equal(api.copyFor('zh').disableRestarting, '恢复 Harness')
   assert.equal(api.copyFor('zh').confirmInterrupt, '正在运行的任务会中断。')
+  assert.match(String(api.copyFor('zh').resumeTakingLong), /重新检查/)
   assert.equal(api.copyFor('en').title, 'Mobile Remote')
   assert.equal(api.copyFor('en').lanBadge, 'Recommended')
+  assert.equal(api.copyFor('en').lanReset, 'Reset pairing')
+  assert.equal(api.copyFor('en').guide, 'Setup guide')
+})
+
+test('Tailscale tutorial points to the next detected setup step', async () => {
+  const api = await loadTestApi()
+  assert.equal(api.tailscaleGuideState(undefined, 'zh').key, 'checking')
+  assert.equal(api.tailscaleGuideState({ tailscaleStatusReady: true }, 'zh').key, 'install')
+  assert.equal(api.tailscaleGuideState({
+    tailscaleStatusReady: true,
+    installed: true,
+    backendState: 'Stopped',
+  }, 'zh').key, 'connect')
+  assert.equal(api.tailscaleGuideState({
+    tailscaleStatusReady: true,
+    installed: true,
+    backendState: 'Running',
+  }, 'zh').key, 'magicdns')
+  assert.equal(api.tailscaleGuideState({
+    tailscaleStatusReady: true,
+    installed: true,
+    backendState: 'Running',
+    magicDNS: true,
+  }, 'zh').key, 'https')
+  const ready = api.tailscaleGuideState({
+    tailscaleStatusReady: true,
+    installed: true,
+    backendState: 'Running',
+    magicDNS: true,
+    httpsReady: true,
+  }, 'zh')
+  assert.equal(ready.key, 'ready')
+  assert.match(String(ready.title), /准备好/)
 })
 
 test('Remote uses one settings entry and keeps transport choices inside the pairing layer', async () => {
@@ -272,12 +323,26 @@ test('Remote uses one settings entry and keeps transport choices inside the pair
   assert.match(source, /class="progress-steps" hidden/)
   assert.match(source, /class="confirm dialog-view" hidden/)
   assert.match(source, /class="dsh-remote-primary confirm-enable"/)
+  assert.match(source, /class="dsh-remote-danger reset"/)
+  assert.match(source, /openLanResetConfirmation/)
+  assert.match(source, /class="tailscale-guide dialog-view"/)
+  assert.match(source, /openTailscaleGuide/)
+  assert.match(source, /https:\/\/tailscale\.com\/download\/mac/)
+  assert.match(source, /https:\/\/tailscale\.com\/download\/ios/)
+  assert.doesNotMatch(source, /guideStepEnableDetail[^\n]*tailscale serve --/i)
   assert.match(source, /className = 'dsh-remote-spinner'/)
   assert.match(source, /route\.setAttribute\('aria-busy', String\(view\.busy\)\)/)
   assert.match(source, /@media\(prefers-reduced-motion:reduce\)/)
   assert.match(source, /\.dsh-remote-spinner,\.progress-step\[data-state="current"\]::before\{animation:none\}/)
   assert.match(source, /const surfaceVisible = Boolean\(settingRow\?\.isConnected\)[\s\S]*?Boolean\(layer && !layer\.hidden\)[\s\S]*?Boolean\(resumeCurtain\?\.isConnected\)/)
   assert.match(source, /request\('remote-presented', \{ id: operationId \}\)/)
+  assert.match(source, /const RESUME_STALL_TIMEOUT_MS = 12000/)
+  assert.match(source, /copyFor\(currentLanguage\(\)\)/)
+  assert.match(source, /updateResumeCurtainCopy\(\)/)
+  assert.match(source, /authoritativeOperationOutcome\(operation, nextStatus\)/)
+  assert.match(source, /!operationResumeSettled[\s\S]*?shouldRestoreOperation\(resumeOperationId, operation\)/)
+  assert.match(source, /if \(settingRow && settingTitle && settingDescription && settingConnectButton\)/)
+  assert.doesNotMatch(source, /function updateSetting\(\) \{\s*if \(!settingRow/)
   assert.match(
     source,
     /if \(!operation\.active && shouldPresent\) \{[\s\S]*?if \(shouldDeferTerminalPresentation\(resumeOperationId, operation\)\)[\s\S]*?if \(dismissedOperationId === operation\.id\)/,
@@ -355,6 +420,40 @@ test('Remote operation stages normalize into a stable progress contract', async 
   assert.equal(failed.terminal, 'error')
 })
 
+test('authoritative transport readiness finishes a stale Remote operation', async () => {
+  const api = await loadTestApi()
+  const enabling = {
+    id: '71',
+    transport: 'tailscale',
+    action: 'enable',
+    stage: 'generating-pairing',
+    active: true,
+  }
+  assert.equal(api.authoritativeOperationOutcome(enabling, {
+    statusReady: true,
+    enabled: true,
+    qrSvg: 'data:image/svg+xml,ready',
+  }), 'enable-ready')
+  assert.equal(api.authoritativeOperationOutcome(enabling, {
+    statusReady: true,
+    enabled: true,
+    qrSvg: '',
+  }), '')
+
+  const disabling = {
+    id: '72',
+    transport: 'tailscale',
+    action: 'disable',
+    stage: 'restoring-harness',
+    active: true,
+  }
+  assert.equal(api.authoritativeOperationOutcome(disabling, {
+    statusReady: true,
+    enabled: false,
+    busy: false,
+  }), 'disable-ready')
+})
+
 test('Remote presentation resumes only the exact native operation', async () => {
   const api = await loadTestApi()
   const operations = [
@@ -406,19 +505,35 @@ test('Remote presentation resumes only the exact native operation', async () => 
   )
 })
 
-test('LAN pairing auto-opens only for the locally requested off-to-on transition', async () => {
+test('LAN pairing auto-opens for a requested enable or credential rotation', async () => {
   const api = await loadTestApi()
   const off = { statusReady: true, lanAvailable: true, lanEnabled: false }
-  const on = { statusReady: true, lanEnabled: true, lanQrSvg: 'data:image/svg+xml,lan' }
+  const on = {
+    statusReady: true,
+    lanEnabled: true,
+    lanQrSvg: 'data:image/svg+xml,lan',
+    lanPairingURL: 'harnessremote://connect?token=first',
+  }
+  const rotated = {
+    ...on,
+    lanQrSvg: 'data:image/svg+xml,rotated',
+    lanPairingURL: 'harnessremote://connect?token=second',
+  }
 
   assert.equal(api.shouldAutoOpenLanPairing(false, off, on), false)
   assert.equal(api.shouldAutoOpenLanPairing(true, off, { ...on, lanQrSvg: '' }), false)
   assert.equal(api.shouldAutoOpenLanPairing(true, on, on), false)
   assert.equal(api.shouldAutoOpenLanPairing(true, off, on), true)
+  assert.equal(api.shouldAutoOpenLanPairing(true, on, rotated), true)
   assert.equal(
     api.pendingActionAfterStatus('remote-lan-enable', { lanBusy: true }, 'lan'),
     '',
     'native busy acknowledges the requested LAN transition while its operation continues',
+  )
+  assert.equal(
+    api.pendingActionAfterStatus('remote-lan-reset', { lanBusy: false, lanEnabled: true }, 'lan'),
+    '',
+    'credential rotation completes without changing the enabled state',
   )
 })
 
@@ -556,6 +671,16 @@ test('Remote DOM observer does not schedule mounts for its own text updates', as
   assert.match(source, /new MutationObserver\(handleMutations\)/)
   assert.doesNotMatch(source, /new MutationObserver\(scheduleMount\)/)
   assert.match(source, /settingRow\.parentElement !== slot\)\) scheduleMount\(\)/)
+})
+
+test('Desktop retries authoritative Remote status after internal navigation', async () => {
+  const native = await readFile(join(process.cwd(), 'src-tauri', 'src', 'main.rs'), 'utf8')
+  assert.match(native, /const REMOTE_HANDOFF_STATUS_DELAYS: \[Duration; 3\]/)
+  assert.match(native, /fn schedule_remote_handoff_status\(handle: tauri::AppHandle\)/)
+  assert.match(
+    native,
+    /mark_remote_operation_presentation_handoff\(&mut state, operation_id\);[\s\S]*?emit_remote_status\(handle\);[\s\S]*?schedule_remote_handoff_status\(handle\.clone\(\)\);/,
+  )
 })
 
 test('LAN Remote HTTP allowlist exactly matches the reviewed capability boundary', async () => {

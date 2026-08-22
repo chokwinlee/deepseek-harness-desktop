@@ -18,6 +18,7 @@
   const STATUS_POLL_INTERVAL_MS = 10000
   const STATUS_REQUEST_TIMEOUT_MS = 6000
   const ACTION_ACK_TIMEOUT_MS = 8000
+  const RESUME_STALL_TIMEOUT_MS = 12000
   const LAN_TRANSPORT = 'lan'
   const TAILSCALE_TRANSPORT = 'tailscale'
   const RESUME_OPERATION_PARAMETER = 'dsh-desktop-remote-operation'
@@ -34,6 +35,7 @@
     'remote-disable',
     'remote-lan-enable',
     'remote-lan-disable',
+    'remote-lan-reset',
     'remote-presented',
   ])
 
@@ -142,7 +144,10 @@
   function shouldAutoOpenLanPairing(requested, previous, next) {
     const before = normalizeStatus(previous)
     const after = normalizeStatus(next)
-    return Boolean(requested) && !before.lanEnabled && after.lanEnabled && Boolean(after.lanQrSvg)
+    return Boolean(requested)
+      && after.lanEnabled
+      && Boolean(after.lanQrSvg)
+      && (!before.lanEnabled || before.lanPairingURL !== after.lanPairingURL)
   }
 
   function shouldPollStatus(value, surfaceVisible, pageVisible = true, requestInFlight = false) {
@@ -180,6 +185,12 @@
           lanStop: '关闭本地连接',
           lanStopping: '正在关闭本地连接…',
           lanPair: '显示配对码',
+          lanReset: '重置配对',
+          lanResetTitle: '重置同一 Wi-Fi 配对？',
+          lanResetBody: '当前二维码和所有已保存它的 iPhone 将立即失效。',
+          lanResetRevoke: '已经配对的 iPhone 需要重新扫描二维码。',
+          lanResetKeepAddress: '电脑地址保持不变，只更换访问凭据。',
+          lanResetConfirm: '重置配对',
           tailscaleTitle: '跨网络连接',
           tailscaleBadge: '可选',
           tailscaleDescription: '离开本地 Wi-Fi 时，通过你自己的 Tailscale 网络连接。',
@@ -189,6 +200,30 @@
           magicDNS: '当前 Tailnet 需要开启 MagicDNS；这不会影响同一 Wi-Fi 配对。',
           https: '还需在 Tailscale 管理页启用 HTTPS。',
           setupHTTPS: '设置 HTTPS',
+          guide: '设置指南',
+          guideTitle: 'Tailscale 跨网络设置',
+          guideBody: '大约 3 分钟。Desktop 会自动配置安全入口，不需要复制终端命令。',
+          guideStatusChecking: '正在检查 Tailscale',
+          guideStatusInstall: '下一步：在 Mac 安装 Tailscale',
+          guideStatusConnect: '下一步：登录并连接 Tailscale',
+          guideStatusMagicDNS: '下一步：开启 MagicDNS',
+          guideStatusHTTPS: '下一步：授权 Tailnet HTTPS',
+          guideStatusReady: 'Tailscale 已准备好',
+          guideStepMacTitle: '在 Mac 安装并登录',
+          guideStepMacDetail: '安装 Tailscale，并用你的账号登录。Standalone 版本最适合普通 Mac 用户。',
+          guideStepIPhoneTitle: '在 iPhone 登录同一账号',
+          guideStepIPhoneDetail: '安装 Tailscale，允许 VPN 配置，并确认 Mac 与 iPhone 出现在同一个 Tailnet。',
+          guideStepDNSHTitle: '完成 DNS 与 HTTPS 授权',
+          guideStepDNSDetail: '按 Desktop 提示开启 MagicDNS 和 HTTPS。启用证书会把设备 DNS 名称写入公开证书日志。',
+          guideStepEnableTitle: '回到 Desktop 开启跨网络',
+          guideStepEnableDetail: 'Desktop 会自动配置 Tailscale Serve 和 Harness，不需要手动运行命令。',
+          guideStepTestTitle: '用蜂窝网络验收',
+          guideStepTestDetail: '在 Remote 扫描二维码，然后关闭 iPhone Wi-Fi，只保留蜂窝网络和 Tailscale 再发送一条消息。',
+          guideMacLink: '下载 Mac 版',
+          guideIPhoneLink: '下载 iPhone 版',
+          guideDNSLink: '打开 Tailnet DNS 设置',
+          guideHelpLink: '查看 Tailscale 官方说明',
+          guideSafety: '只使用 Tailscale Serve。不要开启 Funnel；Funnel 会把入口暴露到公网。',
           active: '跨网络连接已开启：{url}',
           enable: '开启跨网络',
           enabling: '正在开启跨网络连接…',
@@ -220,6 +255,8 @@
           disableRestartingDetail: 'Harness 正在恢复普通连接模式，完成后会自动回到这里。',
           disableErrorTitle: '跨网络连接未能关闭',
           resumeMissing: '刚才的设置状态已经结束，请重新检查连接方式。',
+          resumeTakingLong: '正在重新检查跨网络状态',
+          resumeTakingLongDetail: '恢复页面没有收到最新状态，已返回主界面。Tailscale 设置仍会继续接受检查。',
           hide: '隐藏',
           modalTitle: '跨网络配对',
           lanModalTitle: '同一 Wi-Fi 配对',
@@ -256,6 +293,12 @@
           lanStop: 'Turn off local connection',
           lanStopping: 'Turning off local connection…',
           lanPair: 'Show pairing code',
+          lanReset: 'Reset pairing',
+          lanResetTitle: 'Reset same-Wi-Fi pairing?',
+          lanResetBody: 'The current QR code and every iPhone that saved it will stop working immediately.',
+          lanResetRevoke: 'Previously paired iPhones must scan the new QR code.',
+          lanResetKeepAddress: 'The computer address stays the same; only the access credential changes.',
+          lanResetConfirm: 'Reset pairing',
           tailscaleTitle: 'Connect from anywhere',
           tailscaleBadge: 'Optional',
           tailscaleDescription: 'Use your own Tailscale network when iPhone is away from local Wi-Fi.',
@@ -265,6 +308,30 @@
           magicDNS: 'MagicDNS must be enabled for this tailnet. Same Wi-Fi pairing is unaffected.',
           https: 'Enable HTTPS in the Tailscale admin console to continue.',
           setupHTTPS: 'Set up HTTPS',
+          guide: 'Setup guide',
+          guideTitle: 'Set up Tailscale access',
+          guideBody: 'About 3 minutes. Desktop configures the secure entry automatically—no terminal commands to copy.',
+          guideStatusChecking: 'Checking Tailscale',
+          guideStatusInstall: 'Next: install Tailscale on this Mac',
+          guideStatusConnect: 'Next: sign in and connect Tailscale',
+          guideStatusMagicDNS: 'Next: enable MagicDNS',
+          guideStatusHTTPS: 'Next: authorize tailnet HTTPS',
+          guideStatusReady: 'Tailscale is ready',
+          guideStepMacTitle: 'Install and sign in on Mac',
+          guideStepMacDetail: 'Install Tailscale and sign in with your account. The Standalone variant is recommended for most Mac users.',
+          guideStepIPhoneTitle: 'Use the same account on iPhone',
+          guideStepIPhoneDetail: 'Install Tailscale, allow the VPN configuration, and confirm the Mac and iPhone are in the same tailnet.',
+          guideStepDNSHTitle: 'Authorize DNS and HTTPS',
+          guideStepDNSDetail: 'Follow Desktop prompts for MagicDNS and HTTPS. Certificate names are recorded in public certificate logs.',
+          guideStepEnableTitle: 'Enable anywhere access in Desktop',
+          guideStepEnableDetail: 'Desktop configures Tailscale Serve and Harness automatically. No manual command is required.',
+          guideStepTestTitle: 'Test over cellular',
+          guideStepTestDetail: 'Scan the QR code in Remote, turn off iPhone Wi-Fi, keep cellular and Tailscale on, then send a message.',
+          guideMacLink: 'Download for Mac',
+          guideIPhoneLink: 'Download for iPhone',
+          guideDNSLink: 'Open tailnet DNS settings',
+          guideHelpLink: 'Read the official Tailscale guide',
+          guideSafety: 'Use Tailscale Serve only. Do not enable Funnel; Funnel exposes the entry to the public internet.',
           active: 'Anywhere connection is on: {url}',
           enable: 'Connect from anywhere',
           enabling: 'Preparing anywhere connection…',
@@ -296,6 +363,8 @@
           disableRestartingDetail: 'Harness is returning to its normal connection mode. This panel will resume automatically.',
           disableErrorTitle: 'Anywhere access could not be turned off',
           resumeMissing: 'The previous setup has ended. Check the connection options again.',
+          resumeTakingLong: 'Rechecking anywhere access',
+          resumeTakingLongDetail: 'The recovery page did not receive fresh status, so the main interface was restored while Tailscale is checked again.',
           hide: 'Hide',
           modalTitle: 'Pair from anywhere',
           lanModalTitle: 'Pair on the same Wi-Fi',
@@ -308,6 +377,44 @@
           managerClose: 'Close',
           back: 'Back to connection options',
         }
+  }
+
+  function tailscaleGuideState(value, language = 'en') {
+    const next = normalizeStatus(value)
+    const copy = copyFor(languageFromTag(language))
+    if (!next.tailscaleStatusReady) {
+      return Object.freeze({ key: 'checking', title: copy.guideStatusChecking, detail: copy.tailscaleChecking })
+    }
+    if (!next.installed) {
+      return Object.freeze({ key: 'install', title: copy.guideStatusInstall, detail: copy.unavailable })
+    }
+    if (next.backendState !== 'Running') {
+      return Object.freeze({ key: 'connect', title: copy.guideStatusConnect, detail: copy.disconnected })
+    }
+    if (!next.magicDNS) {
+      return Object.freeze({ key: 'magicdns', title: copy.guideStatusMagicDNS, detail: copy.magicDNS })
+    }
+    if (!next.httpsReady) {
+      return Object.freeze({ key: 'https', title: copy.guideStatusHTTPS, detail: copy.https })
+    }
+    return Object.freeze({
+      key: 'ready',
+      title: copy.guideStatusReady,
+      detail: next.enabled ? copy.active.replace('{url}', next.url) : copy.tailscaleDescription,
+    })
+  }
+
+  function authoritativeOperationOutcome(value, statusValue) {
+    const operation = normalizeOperation(value)
+    const next = normalizeStatus(statusValue)
+    if (!isTailscaleOperation(operation)) return ''
+    if (isTailscaleEnableOperation(operation) && next.enabled && Boolean(next.qrSvg)) {
+      return 'enable-ready'
+    }
+    if (isDisableOperation(operation) && next.statusReady && !next.busy && !next.enabled) {
+      return 'disable-ready'
+    }
+    return ''
   }
 
   function transportViewState(
@@ -426,6 +533,7 @@
     if (busy) return ''
     if (pendingAction.endsWith('-enable') && enabled) return ''
     if (pendingAction.endsWith('-disable') && !enabled) return ''
+    if (pendingAction.endsWith('-reset')) return ''
     return pendingAction
   }
 
@@ -433,6 +541,7 @@
   if (testGlobal?.[TEST_FLAG] === true) {
     testGlobal[TEST_API] = Object.freeze({
       actionUrl,
+      authoritativeOperationOutcome,
       copyFor,
       languageFromTag,
       normalizeOperation,
@@ -445,6 +554,7 @@
       shouldRestoreOperation,
       shouldAutoOpenLanPairing,
       statusAfterError,
+      tailscaleGuideState,
       transportViewState,
     })
     return
@@ -461,12 +571,14 @@
     }
   }
 
+  const resumeCurtainShadows = new WeakMap()
+
   function createResumeCurtain(operationId) {
     if (!operationId || document.getElementById(`${LAYER_ID}-resume`)) return null
     const host = document.createElement('div')
     host.id = `${LAYER_ID}-resume`
     const shadow = host.attachShadow({ mode: 'closed' })
-    const copy = copyFor(languageFromTag(document.documentElement?.lang || navigator.language))
+    const copy = copyFor(currentLanguage())
     shadow.innerHTML = `
       <style>
         :host{all:initial;position:fixed;z-index:2147483003;inset:0;display:grid;place-items:center;background:var(--dsw-alias-bg-layer-1,#111318);color:var(--dsw-alias-label-primary,#f4f5f7);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -483,14 +595,33 @@
     `
     shadow.querySelector('.title').textContent = copy.operationTitle
     shadow.querySelector('.detail').textContent = copy.operationRestartingDetail
+    resumeCurtainShadows.set(host, shadow)
     const parent = document.documentElement || document.body
     if (!parent) return null
     parent.append(host)
     return host
   }
 
+  function updateResumeCurtainCopy() {
+    const shadow = resumeCurtain && resumeCurtainShadows.get(resumeCurtain)
+    if (!shadow) return
+    const copy = copyFor(currentLanguage())
+    shadow.querySelector('.title').textContent = copy.operationTitle
+    shadow.querySelector('.detail').textContent = copy.operationRestartingDetail
+  }
+
   const resumeOperationId = resumeOperationIdFromLocation()
   let resumeCurtain = createResumeCurtain(resumeOperationId)
+  let resumeRecoveryTimer = 0
+
+  function armResumeRecoveryTimer() {
+    if (resumeRecoveryTimer) window.clearTimeout(resumeRecoveryTimer)
+    resumeRecoveryTimer = resumeCurtain
+      ? window.setTimeout(recoverStalledResume, RESUME_STALL_TIMEOUT_MS)
+      : 0
+  }
+
+  armResumeRecoveryTimer()
 
   let status = normalizeStatus()
   let settingRow = null
@@ -505,6 +636,7 @@
   let tailscaleDescription = null
   let tailscaleActionButton = null
   let tailscalePairButton = null
+  let tailscaleGuideButton = null
   let layer = null
   let layerShadow = null
   let observer = null
@@ -524,6 +656,7 @@
   let operationResumeSettled = false
   let dismissedOperationId = ''
   let tailscaleOperationRequested = ''
+  let confirmationAction = ''
 
   function currentLanguage() {
     return languageFromTag(document.documentElement.lang || navigator.language)
@@ -567,7 +700,9 @@
   function requestTransportAction(action, transport) {
     lastActionTransport = transport
     if (transport === LAN_TRANSPORT) {
-      if (action === 'remote-lan-enable') lanAutoPairRequested = true
+      if (action === 'remote-lan-enable' || action === 'remote-lan-reset') {
+        lanAutoPairRequested = true
+      }
       if (action === 'remote-lan-disable') lanAutoPairRequested = false
     }
     if (action !== 'remote-open-https') {
@@ -766,6 +901,9 @@
     layerShadow.querySelector('.chooser').hidden = name !== 'chooser'
     layerShadow.querySelector('.confirm').hidden = name !== 'confirm'
     layerShadow.querySelector('.pairing').hidden = name !== 'pairing'
+    layerShadow.querySelector('.tailscale-guide').hidden = name !== 'guide'
+    layerShadow.querySelector('.reset').hidden = name !== 'pairing'
+      || pairingTransport !== LAN_TRANSPORT
     if (name !== 'operation' && name !== 'chooser') {
       layerShadow.querySelector('.manager-status').hidden = true
     }
@@ -805,7 +943,6 @@
   }
 
   function updateSetting() {
-    if (!settingRow || !settingTitle || !settingDescription || !settingConnectButton) return
     const copy = copyFor(currentLanguage())
     const lanView = transportViewState(
       status,
@@ -821,29 +958,35 @@
       pendingTailscaleAction,
       pendingLanAction,
     )
-    settingTitle.textContent = copy.title
-    if (lanView.busy) settingDescription.textContent = lanView.description
-    else if (tailscaleView.busy) settingDescription.textContent = tailscaleView.description
-    else if (status.lanEnabled && status.enabled) settingDescription.textContent = copy.bothSummaryActive
-    else if (status.lanEnabled) settingDescription.textContent = copy.lanSummaryActive
-    else if (status.enabled) settingDescription.textContent = copy.tailscaleSummaryActive
-    else settingDescription.textContent = copy.description
-    const hasActiveConnection = status.enabled
-      || status.lanEnabled
-      || status.busy
-      || status.lanBusy
-      || pendingLanAction
-      || pendingTailscaleAction
-    settingConnectButton.textContent = hasActiveConnection ? copy.manage : copy.connect
-    settingConnectButton.setAttribute('aria-label', settingConnectButton.textContent)
+    if (settingRow && settingTitle && settingDescription && settingConnectButton) {
+      settingTitle.textContent = copy.title
+      if (lanView.busy) settingDescription.textContent = lanView.description
+      else if (tailscaleView.busy) settingDescription.textContent = tailscaleView.description
+      else if (status.lanEnabled && status.enabled) settingDescription.textContent = copy.bothSummaryActive
+      else if (status.lanEnabled) settingDescription.textContent = copy.lanSummaryActive
+      else if (status.enabled) settingDescription.textContent = copy.tailscaleSummaryActive
+      else settingDescription.textContent = copy.description
+      const hasActiveConnection = status.enabled
+        || status.lanEnabled
+        || status.busy
+        || status.lanBusy
+        || pendingLanAction
+        || pendingTailscaleAction
+      settingConnectButton.textContent = hasActiveConnection ? copy.manage : copy.connect
+      settingConnectButton.setAttribute('aria-label', settingConnectButton.textContent)
+    }
     if (!lanRoute || !tailscaleRoute) return
     lanRoute.querySelector('.dsh-remote-route-title').textContent = copy.lanTitle
     lanRoute.querySelector('.dsh-remote-badge').textContent = copy.lanBadge
     tailscaleRoute.querySelector('.dsh-remote-route-title').textContent = copy.tailscaleTitle
     tailscaleRoute.querySelector('.dsh-remote-badge').textContent = copy.tailscaleBadge
+    if (tailscaleGuideButton) tailscaleGuideButton.textContent = copy.guide
     renderTransport(LAN_TRANSPORT, lanView)
     renderTransport(TAILSCALE_TRANSPORT, tailscaleView)
     renderProbeStatus()
+    if (layerShadow && !layerShadow.querySelector('.tailscale-guide').hidden) {
+      renderTailscaleGuide()
+    }
   }
 
   function createTransportRoute(transport) {
@@ -857,6 +1000,11 @@
     const badge = document.createElement('span')
     badge.className = 'dsh-remote-badge'
     heading.append(title, badge)
+    let guideButton = null
+    if (transport === TAILSCALE_TRANSPORT) {
+      guideButton = createButton('', 'dsh-remote-guide-link', openTailscaleGuide)
+      heading.append(guideButton)
+    }
     const description = document.createElement('p')
     description.className = 'dsh-remote-route-description'
     description.id = `dsh-remote-${transport}-description`
@@ -886,7 +1034,7 @@
     pairButton.setAttribute('aria-describedby', description.id)
     controls.append(actionButton, pairButton)
     route.append(heading, description, controls)
-    return { actionButton, description, pairButton, route }
+    return { actionButton, description, guideButton, pairButton, route }
   }
 
   function createSettingRow() {
@@ -933,14 +1081,15 @@
         .dialog-view{animation:view-in 150ms ease-out}.chooser-routes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:18px}
         .dsh-remote-route{min-width:0;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:13px;padding:13px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);transition:border-color 160ms ease,background-color 160ms ease,transform 160ms ease}
         .dsh-remote-route[data-kind="lan"]{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 32%,var(--dsw-alias-border-l2,#dbe1ea));background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 5%,var(--dsw-alias-bg-layer-1,#f1f5f9))}.dsh-remote-route[data-busy]{border-color:var(--dsw-alias-state-business-primary,#2563eb)}.dsh-remote-route[data-error]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 52%,var(--dsw-alias-border-l2,#dbe1ea))}
-        .dsh-remote-route-heading{display:flex;align-items:center;gap:7px;min-height:20px}.dsh-remote-route-title{margin:0;color:var(--dsw-alias-label-primary,#111827);font-size:13px;font-weight:600;line-height:20px}.dsh-remote-badge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-tertiary,#64748b);font-size:10px;font-weight:600;line-height:17px}.dsh-remote-route[data-kind="lan"] .dsh-remote-badge{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 12%,transparent);color:var(--dsw-alias-state-business-primary,#2563eb)}
+        .dsh-remote-route-heading{display:flex;align-items:center;gap:7px;min-height:28px}.dsh-remote-route-title{margin:0;color:var(--dsw-alias-label-primary,#111827);font-size:13px;font-weight:600;line-height:20px}.dsh-remote-badge{border-radius:999px;padding:1px 7px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-tertiary,#64748b);font-size:10px;font-weight:600;line-height:17px}.dsh-remote-route[data-kind="lan"] .dsh-remote-badge{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 12%,transparent);color:var(--dsw-alias-state-business-primary,#2563eb)}.dsh-remote-guide-link{min-height:28px;margin-left:auto;border:0;padding:4px 6px;background:transparent;color:var(--dsw-alias-state-business-primary,#2563eb);font-size:11px}.dsh-remote-guide-link:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 8%,transparent)}
         .dsh-remote-route-description{min-height:54px;margin:5px 0 0;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px;overflow-wrap:anywhere}.dsh-remote-route[data-error] .dsh-remote-route-description{color:var(--dsw-alias-state-error-primary,#dc2626)}.dsh-remote-controls{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:12px}
         .manager-status{margin-top:16px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 26%,var(--dsw-alias-border-l2,#dbe1ea));border-radius:14px;padding:14px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 5%,var(--dsw-alias-bg-layer-1,#f1f5f9))}.manager-status[data-kind="error"]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 55%,var(--dsw-alias-border-l2,#dbe1ea));background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 6%,var(--dsw-alias-bg-layer-1,#f1f5f9))}
         .status-line{display:flex;align-items:flex-start;gap:10px}.status-copy{min-width:0;flex:1}.status-title{font-size:13px;font-weight:650;line-height:20px}.status-detail{margin-top:2px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px}.status-symbol{display:grid;flex:0 0 auto;width:20px;height:20px;place-items:center;border-radius:50%;background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 13%,transparent);color:var(--dsw-alias-state-business-primary,#2563eb);font-size:12px;font-weight:700}.manager-status[data-kind="error"] .status-symbol{background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 13%,transparent);color:var(--dsw-alias-state-error-primary,#dc2626)}
         .progress-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:14px 0 0;padding:0;list-style:none}.progress-steps[data-count="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}.progress-step{position:relative;min-width:0;padding-top:20px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:10px;font-weight:550;line-height:14px}.progress-step::before{position:absolute;z-index:1;top:0;left:0;width:10px;height:10px;border:2px solid var(--dsw-alias-border-l2,#cbd5e1);border-radius:50%;background:var(--dsw-alias-bg-layer-1,#f1f5f9);content:""}.progress-step:not(:last-child)::after{position:absolute;top:5px;right:5px;left:14px;height:1px;background:var(--dsw-alias-border-l2,#cbd5e1);content:""}.progress-step[data-state="done"]{color:var(--dsw-alias-label-secondary,#475569)}.progress-step[data-state="done"]::before{border-color:var(--dsw-alias-state-success-primary,#22a45d);background:var(--dsw-alias-state-success-primary,#22a45d);box-shadow:inset 0 0 0 2px var(--dsw-alias-bg-layer-1,#fff)}.progress-step[data-state="current"]{color:var(--dsw-alias-label-primary,#111827)}.progress-step[data-state="current"]::before{border-color:var(--dsw-alias-state-business-primary,#2563eb);border-top-color:transparent;animation:spin .8s linear infinite}
         .confirm{margin-top:18px;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:14px;padding:16px;background:var(--dsw-alias-bg-layer-1,#f1f5f9)}.confirm h3{font-size:14px;line-height:21px}.confirm-body{margin-top:4px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px}.confirm-list{display:grid;gap:7px;margin:14px 0 0;padding:0;list-style:none}.confirm-list li{position:relative;padding-left:18px;color:var(--dsw-alias-label-secondary,#475569);font-size:12px;line-height:18px}.confirm-list li::before{position:absolute;top:7px;left:3px;width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-state-warning-primary,#d97706);content:""}.confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+        .tailscale-guide{margin-top:16px}.guide-status{border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 30%,var(--dsw-alias-border-l2,#dbe1ea));border-radius:13px;padding:12px 14px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 6%,var(--dsw-alias-bg-layer-1,#f1f5f9))}.guide-status-title{font-size:13px;font-weight:650;line-height:20px}.guide-status-detail{margin-top:2px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px}.guide-steps{display:grid;gap:0;margin:14px 0 0;padding:0;list-style:none}.guide-step{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#dbe1ea)}.guide-step:last-child{border-bottom:0}.guide-step-number{display:grid;width:26px;height:26px;place-items:center;border-radius:8px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);color:var(--dsw-alias-label-secondary,#475569);font-size:11px;font-weight:700}.guide-step-title{font-size:13px;font-weight:650;line-height:20px}.guide-step-detail{margin-top:2px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:12px;line-height:18px}.guide-step-links{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.guide-step-links a{border-radius:8px;padding:5px 8px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 9%,transparent);color:var(--dsw-alias-state-business-primary,#2563eb);font-size:11px;font-weight:600;text-decoration:none}.guide-step-links a:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#2563eb);outline-offset:2px}.guide-safety{margin-top:12px;border-radius:10px;padding:10px 12px;background:color-mix(in srgb,var(--dsw-alias-state-warning-primary,#d97706) 8%,transparent);color:var(--dsw-alias-label-secondary,#475569);font-size:11px;line-height:17px}
         .qr{display:block;width:248px;height:248px;margin:20px auto 16px;border:10px solid #fff;border-radius:14px;background:#fff}.label{margin-top:6px;color:var(--dsw-alias-label-tertiary,#64748b);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.url{margin-top:5px;border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-1,#f1f5f9);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.actions{display:flex;align-items:center;gap:8px;margin-top:18px}.spacer{flex:1}
-        button{display:inline-flex;min-height:36px;align-items:center;justify-content:center;gap:7px;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:9px;padding:7px 13px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px;transition:transform 100ms ease-out,background-color 120ms ease,color 120ms ease,border-color 120ms ease}button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#e9eef5)}button:active:not(:disabled){transform:scale(.97)}button[aria-disabled="true"]:hover{background:transparent}button[aria-disabled="true"]:active{transform:none}button:disabled{cursor:default;opacity:.5}button[data-busy]{cursor:wait;opacity:1}.primary,.dsh-remote-primary{border-color:var(--dsw-alias-label-primary,#172033);background:var(--dsw-alias-label-primary,#172033);color:var(--dsw-alias-bg-layer-3,#fff)}button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#2563eb);outline-offset:2px}
+        button{display:inline-flex;min-height:36px;align-items:center;justify-content:center;gap:7px;border:1px solid var(--dsw-alias-border-l2,#dbe1ea);border-radius:9px;padding:7px 13px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;font-weight:600;line-height:18px;transition:transform 100ms ease-out,background-color 120ms ease,color 120ms ease,border-color 120ms ease}button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#e9eef5)}button:active:not(:disabled){transform:scale(.97)}button[aria-disabled="true"]:hover{background:transparent}button[aria-disabled="true"]:active{transform:none}button:disabled{cursor:default;opacity:.5}button[data-busy]{cursor:wait;opacity:1}.primary,.dsh-remote-primary{border-color:var(--dsw-alias-label-primary,#172033);background:var(--dsw-alias-label-primary,#172033);color:var(--dsw-alias-bg-layer-3,#fff)}.dsh-remote-danger{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 40%,var(--dsw-alias-border-l2,#dbe1ea));color:var(--dsw-alias-state-error-primary,#dc2626)}.dsh-remote-danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#dc2626) 8%,transparent)}button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#2563eb);outline-offset:2px}
         .dsh-remote-spinner{display:inline-block;flex:0 0 auto;width:13px;height:13px;border:2px solid color-mix(in srgb,currentColor 28%,transparent);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@keyframes materialize{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:scale(1)}}@keyframes view-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
         @media(max-width:620px){.chooser-routes{grid-template-columns:1fr}.dsh-remote-route-description{min-height:0}.progress-steps{grid-template-columns:1fr}.progress-step{min-height:22px;padding:2px 0 2px 24px}.progress-step::before{top:5px}.progress-step:not(:last-child)::after{top:17px;bottom:-9px;left:5px;width:1px;height:auto}}
         @media(prefers-reduced-motion:reduce){.dialog,.dialog-view,.dsh-remote-route,button{animation:none;transition:opacity 120ms ease}.dsh-remote-spinner,.progress-step[data-state="current"]::before{animation:none}.progress-step[data-state="current"]::before{border-color:var(--dsw-alias-state-business-primary,#2563eb)}button:active:not(:disabled){transform:none}}
@@ -961,8 +1110,9 @@
             <ul class="confirm-list"><li class="confirm-interrupt"></li><li class="confirm-return"></li></ul>
             <div class="confirm-actions"><button class="confirm-cancel"></button><button class="dsh-remote-primary confirm-enable"></button></div>
           </div>
+          <div class="tailscale-guide dialog-view" hidden><div class="guide-status" role="status"><div class="guide-status-title"></div><p class="guide-status-detail"></p></div><ol class="guide-steps"></ol><p class="guide-safety"></p></div>
           <div class="pairing dialog-view" hidden><img class="qr" alt=""><p class="label"></p><div class="url"></div></div>
-          <div class="actions"><button class="back" hidden></button><span class="spacer"></span><button class="copy" hidden></button><button class="primary close"></button></div>
+          <div class="actions"><button class="back" hidden></button><button class="dsh-remote-danger reset" hidden></button><span class="spacer"></span><button class="copy" hidden></button><button class="primary close"></button></div>
         </section>
       </div>
     `
@@ -977,12 +1127,22 @@
     tailscaleDescription = tailscale.description
     tailscaleActionButton = tailscale.actionButton
     tailscalePairButton = tailscale.pairButton
+    tailscaleGuideButton = tailscale.guideButton
     routes.append(lanRoute, tailscaleRoute)
     layerShadow.querySelector('.confirm-cancel').addEventListener('click', () => {
+      if (confirmationAction === 'remote-lan-reset') {
+        openPairing(LAN_TRANSPORT)
+        return
+      }
       openConnectionManager()
       if (!tailscaleActionButton.disabled) tailscaleActionButton.focus()
     })
     layerShadow.querySelector('.confirm-enable').addEventListener('click', () => {
+      if (confirmationAction === 'remote-lan-reset') {
+        openConnectionManager()
+        requestTransportAction('remote-lan-reset', LAN_TRANSPORT)
+        return
+      }
       renderOperationManager({
         transport: TAILSCALE_TRANSPORT,
         action: 'remote-enable',
@@ -997,6 +1157,7 @@
     layerShadow.querySelector('.close').addEventListener('click', closePairing)
     layerShadow.querySelector('.copy').addEventListener('click', copyAddress)
     layerShadow.querySelector('.back').addEventListener('click', openConnectionManager)
+    layerShadow.querySelector('.reset').addEventListener('click', openLanResetConfirmation)
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         if (layer.hidden) return
@@ -1045,11 +1206,100 @@
     }
   }
 
+  function createGuideLink(label, href) {
+    const link = document.createElement('a')
+    link.href = href
+    link.textContent = label
+    return link
+  }
+
+  function renderTailscaleGuide() {
+    if (!layerShadow) return
+    const copy = copyFor(currentLanguage())
+    const current = tailscaleGuideState(status, currentLanguage())
+    layerShadow.querySelector('.guide-status-title').textContent = current.title
+    layerShadow.querySelector('.guide-status-detail').textContent = current.detail
+
+    const steps = [
+      {
+        title: copy.guideStepMacTitle,
+        detail: copy.guideStepMacDetail,
+        links: [[copy.guideMacLink, 'https://tailscale.com/download/mac']],
+      },
+      {
+        title: copy.guideStepIPhoneTitle,
+        detail: copy.guideStepIPhoneDetail,
+        links: [[copy.guideIPhoneLink, 'https://tailscale.com/download/ios']],
+      },
+      {
+        title: copy.guideStepDNSHTitle,
+        detail: copy.guideStepDNSDetail,
+        links: [[copy.guideDNSLink, 'https://login.tailscale.com/admin/dns']],
+      },
+      {
+        title: copy.guideStepEnableTitle,
+        detail: copy.guideStepEnableDetail,
+        links: [[copy.guideHelpLink, 'https://tailscale.com/docs/features/tailscale-serve']],
+      },
+      {
+        title: copy.guideStepTestTitle,
+        detail: copy.guideStepTestDetail,
+        links: [],
+      },
+    ]
+    const items = steps.map((step, index) => {
+      const item = document.createElement('li')
+      item.className = 'guide-step'
+      const number = document.createElement('span')
+      number.className = 'guide-step-number'
+      number.textContent = String(index + 1)
+      number.setAttribute('aria-hidden', 'true')
+      const content = document.createElement('div')
+      const title = document.createElement('div')
+      title.className = 'guide-step-title'
+      title.textContent = step.title
+      const detail = document.createElement('p')
+      detail.className = 'guide-step-detail'
+      detail.textContent = step.detail
+      content.append(title, detail)
+      if (step.links.length) {
+        const links = document.createElement('div')
+        links.className = 'guide-step-links'
+        links.append(...step.links.map(([label, href]) => createGuideLink(label, href)))
+        content.append(links)
+      }
+      item.append(number, content)
+      return item
+    })
+    layerShadow.querySelector('.guide-steps').replaceChildren(...items)
+    layerShadow.querySelector('.guide-safety').textContent = copy.guideSafety
+  }
+
+  function openTailscaleGuide() {
+    const shouldRememberFocus = !layer || layer.hidden
+    ensureLayer()
+    if (shouldRememberFocus) pairingReturnFocus = document.activeElement
+    const copy = copyFor(currentLanguage())
+    layerShadow.querySelector('h2').textContent = copy.guideTitle
+    layerShadow.querySelector('.body').textContent = copy.guideBody
+    showDialogPanel('guide')
+    renderTailscaleGuide()
+    layerShadow.querySelector('.back').hidden = false
+    layerShadow.querySelector('.back').textContent = copy.back
+    layerShadow.querySelector('.copy').hidden = true
+    layerShadow.querySelector('.close').hidden = false
+    layerShadow.querySelector('.close').textContent = copy.managerClose
+    layer.hidden = false
+    layerShadow.querySelector('h2').focus()
+    refreshStatus(true)
+  }
+
   function openTailscaleConfirmation() {
     const shouldRememberFocus = !layer || layer.hidden
     ensureLayer()
     if (shouldRememberFocus) pairingReturnFocus = document.activeElement
     const copy = copyFor(currentLanguage())
+    confirmationAction = 'remote-enable'
     layerShadow.querySelector('h2').textContent = copy.connect
     layerShadow.querySelector('.body').textContent = copy.managerBody
     showDialogPanel('confirm')
@@ -1058,7 +1308,31 @@
     layerShadow.querySelector('.confirm-interrupt').textContent = copy.confirmInterrupt
     layerShadow.querySelector('.confirm-return').textContent = copy.confirmReturn
     layerShadow.querySelector('.confirm-cancel').textContent = copy.cancel
-    layerShadow.querySelector('.confirm-enable').textContent = copy.restartAndEnable
+    const confirmButton = layerShadow.querySelector('.confirm-enable')
+    confirmButton.className = 'dsh-remote-primary confirm-enable'
+    confirmButton.textContent = copy.restartAndEnable
+    layerShadow.querySelector('.back').hidden = true
+    layerShadow.querySelector('.copy').hidden = true
+    layerShadow.querySelector('.close').hidden = true
+    layer.hidden = false
+    layerShadow.querySelector('.confirm-cancel').focus()
+  }
+
+  function openLanResetConfirmation() {
+    ensureLayer()
+    const copy = copyFor(currentLanguage())
+    confirmationAction = 'remote-lan-reset'
+    layerShadow.querySelector('h2').textContent = copy.lanModalTitle
+    layerShadow.querySelector('.body').textContent = copy.lanModalBody
+    showDialogPanel('confirm')
+    layerShadow.querySelector('.confirm h3').textContent = copy.lanResetTitle
+    layerShadow.querySelector('.confirm-body').textContent = copy.lanResetBody
+    layerShadow.querySelector('.confirm-interrupt').textContent = copy.lanResetRevoke
+    layerShadow.querySelector('.confirm-return').textContent = copy.lanResetKeepAddress
+    layerShadow.querySelector('.confirm-cancel').textContent = copy.cancel
+    const confirmButton = layerShadow.querySelector('.confirm-enable')
+    confirmButton.className = 'dsh-remote-danger confirm-enable'
+    confirmButton.textContent = copy.lanResetConfirm
     layerShadow.querySelector('.back').hidden = true
     layerShadow.querySelector('.copy').hidden = true
     layerShadow.querySelector('.close').hidden = true
@@ -1132,6 +1406,7 @@
     layerShadow.querySelector('.url').textContent = endpoint
     layerShadow.querySelector('.copy').textContent = copy.copy
     layerShadow.querySelector('.copy').hidden = lan
+    layerShadow.querySelector('.reset').textContent = copy.lanReset
     layerShadow.querySelector('.back').textContent = copy.back
     layerShadow.querySelector('.back').hidden = false
     layerShadow.querySelector('.close').hidden = false
@@ -1150,6 +1425,18 @@
     pairingReturnFocus = null
   }
 
+  function recoverStalledResume() {
+    if (!resumeCurtain || operationResumeSettled) return
+    clearResumeOperationParameter()
+    openConnectionManager()
+    const copy = copyFor(currentLanguage())
+    renderManagerStatus({
+      title: copy.resumeTakingLong,
+      detail: copy.resumeTakingLongDetail,
+    })
+    refreshStatus(true)
+  }
+
   function clearResumeOperationParameter() {
     if (!resumeOperationId || operationResumeSettled) return
     operationResumeSettled = true
@@ -1162,6 +1449,8 @@
     }
     resumeCurtain?.remove()
     resumeCurtain = null
+    if (resumeRecoveryTimer) window.clearTimeout(resumeRecoveryTimer)
+    resumeRecoveryTimer = 0
   }
 
   function acknowledgePresentedOperation(operationId) {
@@ -1195,11 +1484,31 @@
   function reconcileOperationPresentation(nextStatus) {
     const operation = nextStatus.operation
     const progress = operationProgress(operation)
-    const resumeMatches = shouldRestoreOperation(resumeOperationId, operation)
+    const resumeMatches = !operationResumeSettled
+      && shouldRestoreOperation(resumeOperationId, operation)
     const sameVisibleOperation = Boolean(operation.id) && visibleOperationId === operation.id
     const requestedHere = Boolean(pendingTailscaleAction || tailscaleOperationRequested)
     const shouldPresent = isTailscaleOperation(operation)
       && (resumeMatches || sameVisibleOperation || requestedHere)
+    const authoritativeOutcome = authoritativeOperationOutcome(operation, nextStatus)
+
+    if (operationResumeSettled
+      && !operation.active
+      && operation.id === resumeOperationId
+      && acknowledgedOperationId !== operation.id) {
+      acknowledgePresentedOperation(operation.id)
+      return
+    }
+
+    if (authoritativeOutcome && shouldPresent) {
+      tailscaleOperationRequested = ''
+      visibleOperationId = ''
+      if (authoritativeOutcome === 'enable-ready') openPairing(TAILSCALE_TRANSPORT)
+      else openConnectionManager()
+      if (operation.active) clearResumeOperationParameter()
+      else acknowledgePresentedOperation(operation.id)
+      return
+    }
 
     if (operation.active && shouldPresent && dismissedOperationId !== operation.id) {
       if (operation.id) visibleOperationId = operation.id
@@ -1293,6 +1602,7 @@
   function handleMutations(mutations) {
     if (mutations.some(mutation => mutation.type === 'attributes' && mutation.attributeName === 'lang')) {
       updateSetting()
+      updateResumeCurtainCopy()
     }
     const slot = document.querySelector(SETTINGS_SLOT_SELECTOR)
     if (slot && (!settingRow?.isConnected || settingRow.parentElement !== slot)) scheduleMount()
@@ -1332,7 +1642,9 @@
   function start() {
     if (resumeOperationId && !resumeCurtain) {
       resumeCurtain = createResumeCurtain(resumeOperationId)
+      armResumeRecoveryTimer()
     }
+    updateResumeCurtainCopy()
     installStyle()
     observer = new MutationObserver(handleMutations)
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['lang'] })

@@ -7,6 +7,7 @@ protocol HarnessRemoteClient: Sendable {
     func describe() async throws -> RemoteHostDescription
     func workspaces() async throws -> RemoteWorkspaceSnapshot
     func sessions() async throws -> [RemoteSessionSummary]
+    func createSession(workspaceID: String?, cwd: String?) async throws -> String
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot
     func attachment(sessionID: String, attachmentID: String) async throws -> RemoteImageAttachmentPayload
     func fileReferences(sessionID: String, query: String) async throws -> [RemoteFileReferenceCandidate]
@@ -137,6 +138,14 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
                     projectPath: projectPath
                 )
             }
+    }
+
+    func createSession(workspaceID: String?, cwd: String?) async throws -> String {
+        let response: SessionCreateWire = try await call(
+            "session.create",
+            payload: SessionCreatePayload(workspaceId: workspaceID, cwd: cwd)
+        )
+        return response.sessionId
     }
 
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
@@ -803,6 +812,10 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ]
     }
 
+    func createSession(workspaceID: String?, cwd: String?) async throws -> String {
+        "demo-created-session-\(UUID().uuidString.lowercased())"
+    }
+
     func conversation(sessionID: String, maxMessages: Int) async throws -> RemoteConversationSnapshot {
         #if DEBUG
         if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"],
@@ -1404,6 +1417,10 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
 
 private struct EmptyPayload: Codable {}
 private struct SessionIDPayload: Codable { let sessionId: String }
+private struct SessionCreatePayload: Codable {
+    let workspaceId: String?
+    let cwd: String?
+}
 private struct SessionSelectModelPayload: Codable {
     let sessionId: String
     let provider: String
@@ -1503,6 +1520,7 @@ private struct HostDescriptionWire: Decodable {
     let attachedSessions: Int
 }
 
+private struct SessionCreateWire: Decodable { let sessionId: String }
 private struct SessionListWire: Decodable { let items: [SessionSummaryWire] }
 private struct WorkspaceListWire: Decodable {
     let items: [WorkspaceSummaryWire]

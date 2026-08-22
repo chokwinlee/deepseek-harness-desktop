@@ -5,6 +5,7 @@ struct AboutRemoteView: View {
     @EnvironmentObject private var hostStore: RemoteHostStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmsDeletion = false
+    @State private var showsTailscaleGuide = false
 
     var body: some View {
         NavigationStack {
@@ -43,6 +44,12 @@ struct AboutRemoteView: View {
                     confirmsDeletion = false
                 }
                 .remoteDestructiveConfirmationPresentation(for: dynamicTypeSize)
+            }
+            .sheet(isPresented: $showsTailscaleGuide) {
+                TailscaleSetupGuideView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+                    .presentationBackground(RemoteTheme.canvas)
             }
         }
     }
@@ -138,6 +145,13 @@ struct AboutRemoteView: View {
                     title: "跨网络使用 Tailscale",
                     detail: "同一 Wi-Fi 可扫码配对；不要在酒店或咖啡店网络使用局域网 HTTP，也不要开启公开 Funnel"
                 )
+                divider
+                Button {
+                    showsTailscaleGuide = true
+                } label: {
+                    AboutActionRow(icon: "book.pages", title: "Tailscale 跨网络教程")
+                }
+                .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
                 divider
                 Button {
                     UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)

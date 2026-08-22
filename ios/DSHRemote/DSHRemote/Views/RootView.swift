@@ -52,6 +52,10 @@ struct RootView: View {
                 RemoteSessionView()
             }
             .tint(RemoteTheme.accent)
+        case "new-session":
+            newRemoteSessionPreview()
+        case "tailscale-guide":
+            TailscaleSetupGuideView()
         case "conversation", "models", "trajectory", "details", "rc8", "rc8-trajectory", "rc8-image-failure", "references", "image-draft", "subagents":
             NavigationStack {
                 RemoteConversationView(

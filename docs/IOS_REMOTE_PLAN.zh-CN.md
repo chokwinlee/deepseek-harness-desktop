@@ -30,7 +30,7 @@ macOS Tauri Remote Host 与原生 iOS SwiftUI 客户端已经实现。Tailscale 
 ### 连接方式选择
 
 1. Remote 默认关闭。Desktop 设置行只显示“连接 iPhone”入口。
-2. 进入后先展示“同一 Wi-Fi（推荐、无需 Tailscale）”，再展示“跨网络连接（可选）”。两种方式分别显示自己的状态、错误、开启、配对和关闭操作。
+2. 进入后先展示“同一 Wi-Fi（推荐、无需 Tailscale）”，再展示“跨网络连接（可选）”。两种方式分别显示自己的状态、错误、开启、配对和关闭操作；Desktop 与 iOS Remote 都提供五步 Tailscale 教程，Desktop 教程会按检测状态指出下一步。
 3. 同一 Wi-Fi 路径一键启动认证局域网代理并自动显示二维码；iOS 扫码后立即验证并保存。
 4. 只有用户选择跨网络路径时，才检查 Tailscale、MagicDNS 与 Tailnet HTTPS。
 
@@ -77,7 +77,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - Harness 始终绑定 `127.0.0.1`，不能改为 `0.0.0.0`。
 - 跨网络只能使用 Tailscale Serve 或用户自己管理的 HTTPS，不能使用 Funnel。
 - `--trusted-host` 只加入当前 Tailnet 的精确 DNS authority 和端口，不能加入通配符。
-- Tailscale 二维码只包含 URL；局域网二维码包含 Desktop 每次开启时重新生成的高强度随机 bearer 凭据，但不包含 API Key 或 Tailscale key。
+- Tailscale 二维码只包含 URL；局域网二维码包含 Desktop 首次配对时生成并安全持久化的高强度随机 bearer 凭据，但不包含 API Key 或 Tailscale key。普通重启和关闭再开启复用该凭据；只有用户在二维码页确认“重置配对”才轮换并撤销旧 iPhone。
 - Remote 默认关闭，并提供明确的离线/撤销入口。
 
 ### 两层边界
@@ -92,6 +92,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - 代理只接受 `host.describe`、只读 `workspace.list`、会话读写、持久图片附件读取、文件/会话引用候选、子代理列表/历史/补充/停止、会话模型读取/选择、取消、交互响应和事件 WebSocket；其他路径一律 404。任何 `workspace.*` 写操作以及 `llm.*`、`settings.*`、`credentials.*` 配置面仍不对局域网入口开放。
 - `session.prompt` 图片仍是 JSON 中的 base64 内容，不是独立上传端点。代理使用背压流式转发、`Content-Length` 预检和累计字节双限，线格式上限为 136 MiB；超限返回 413。
 - HTTP 与 WebSocket 都要求二维码中的 bearer，转发到 Harness 前会剥离认证头并重写 loopback Host。
+- Desktop 将 bearer 原子写入 `$DSH_HOME/desktop-secrets/lan-remote-token`；Unix 上目录为 `0700`、文件为 `0600`，损坏内容会被替换为新凭据并要求重新扫码。
 - 裸局域网 HTTP 地址不能在 iOS 手输；缺少凭据时客户端拒绝保存。
 - 该路径有认证但没有链路加密，只允许用户明确启用并用于受信任家庭/办公 Wi-Fi；不受信任网络使用 Tailscale HTTPS。
 
@@ -111,7 +112,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 
 当前客户端使用以下最小协议：
 
-1. `session.list` 与 `session.history`；会话摘要保留上游原始 `cwd`，并兼容 macOS/Linux `/` 和 Windows `\\` 路径提取项目名；
+1. `session.list`、`session.create` 与 `session.history`；新建会话优先传权威 `workspaceId`，项目分组不可用时回退传已有 `cwd`，会话摘要兼容 macOS/Linux `/` 和 Windows `\\` 路径；
 2. 只读 `workspace.list` 作为增强信息，提供电脑端的项目标题、路径、会话顺序和归档集合；接口缺失或请求失败时，会话列表仍按 `session.list` 与 `cwd` 正常展示；
 3. `session.models` 与 `session.selectModel`，读取并切换当前会话的 provider、model 与可选 reasoning effort；选中值用于下一次提示词组装，Host 同时 best-effort 把它保存为部署默认值。模型目录在进入会话和每次打开选择器时刷新，整目录失败保留上一次可用状态；
 4. `session.prompt`，支持 `queue` 和 `steer`；
@@ -143,6 +144,7 @@ macOS Tauri 和 Windows Electron 必须共用同一状态机与错误码；平�
 - Desktop 关闭 Remote 后，8443 立即不可访问；
 - 错误的 Host/Origin 被 Harness 拒绝；
 - Desktop 重启后二维码 authority 不变，Serve 目标更新到新的随机端口；
+- Desktop 重启或关闭再开启局域网 Remote 后，原二维码凭据仍有效；执行“重置配对”后旧凭据返回 401，新二维码可重新配对；
 - macOS 与 Windows 各完成一次真机 iPhone 验收。
 
 ## 建议交付顺序

@@ -11,6 +11,8 @@ DSH Remote is an independent open-source project. It is not an official DeepSeek
 5. Do not use Tailscale Funnel. DSH Remote is intended for a private network or another HTTPS endpoint you protect.
 6. In the app, pull down on the task list to retry.
 
+Chinese step-by-step setup: [`TAILSCALE_REMOTE_SETUP.zh-CN.md`](./TAILSCALE_REMOTE_SETUP.zh-CN.md).
+
 ## Get help
 
 Report reproducible problems at <https://github.com/chokwinlee/deepseek-harness-desktop/issues>. Include the iOS version, Desktop version, connection type, and the visible error message. Never include API keys, tailnet credentials, private source code, or confidential prompts.

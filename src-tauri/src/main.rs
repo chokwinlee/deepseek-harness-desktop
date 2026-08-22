@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -38,9 +38,16 @@ const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+const LAN_REMOTE_CREDENTIAL_DIR: &str = "desktop-secrets";
+const LAN_REMOTE_CREDENTIAL_FILE: &str = "lan-remote-token";
 const PRODUCT_NAME: &str = "DSH Desktop";
 const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
 const REMOTE_STATUS_CACHE_TTL: Duration = Duration::from_secs(8);
+const REMOTE_HANDOFF_STATUS_DELAYS: [Duration; 3] = [
+    Duration::from_millis(150),
+    Duration::from_millis(600),
+    Duration::from_millis(1_500),
+];
 
 #[derive(Clone, Copy)]
 struct ProductSubagent {
@@ -400,6 +407,100 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn desktop_preferences_path(dsh_home: &Path) -> PathBuf {
     dsh_home.join(DESKTOP_PREFERENCES_FILE)
+}
+
+fn lan_remote_credential_path(dsh_home: &Path) -> PathBuf {
+    dsh_home
+        .join(LAN_REMOTE_CREDENTIAL_DIR)
+        .join(LAN_REMOTE_CREDENTIAL_FILE)
+}
+
+fn valid_lan_remote_token(token: &str) -> bool {
+    token.len() == 64
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn generate_lan_remote_token() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+fn write_lan_remote_credential(path: &Path, token: &str) -> Result<(), String> {
+    if !valid_lan_remote_token(token) {
+        return Err("无法保存局域网 Remote 配对凭据：凭据格式无效。".into());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("局域网 Remote 配对凭据路径无效：{}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("无法创建 {}：{error}", parent.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("无法保护 {}：{error}", parent.display()))?;
+
+    let temporary = parent.join(format!(
+        ".{LAN_REMOTE_CREDENTIAL_FILE}.{}-{}",
+        std::process::id(),
+        Uuid::new_v4().simple()
+    ));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| format!("无法写入 {}：{error}", temporary.display()))?;
+    file.write_all(token.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("无法写入 {}：{error}", temporary.display()))?;
+    drop(file);
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| format!("无法替换 {}：{error}", path.display()))?;
+    }
+    fs::rename(&temporary, path)
+        .map_err(|error| format!("无法保存 {}：{error}", path.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("无法保护 {}：{error}", path.display()))?;
+    Ok(())
+}
+
+fn read_lan_remote_credential(path: &Path) -> Result<Option<String>, String> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("无法读取 {}：{error}", path.display())),
+    };
+    let token = contents.trim();
+    if !valid_lan_remote_token(token) {
+        return Err(format!("局域网 Remote 配对凭据已损坏：{}", path.display()));
+    }
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("无法保护 {}：{error}", path.display()))?;
+    Ok(Some(token.to_string()))
+}
+
+fn rotate_lan_remote_credential(path: &Path) -> Result<String, String> {
+    let token = generate_lan_remote_token();
+    write_lan_remote_credential(path, &token)?;
+    Ok(token)
+}
+
+fn load_or_create_lan_remote_credential(path: &Path) -> Result<String, String> {
+    match read_lan_remote_credential(path) {
+        Ok(Some(token)) => Ok(token),
+        Ok(None) => rotate_lan_remote_credential(path),
+        Err(error) => {
+            eprintln!("[dsh] {error}; replacing the unusable LAN Remote credential");
+            rotate_lan_remote_credential(path)
+        }
+    }
 }
 
 fn read_desktop_preferences(path: &Path) -> Result<serde_json::Value, String> {
@@ -2075,6 +2176,17 @@ fn emit_remote_status(handle: &tauri::AppHandle) {
     emit_bridge_event(handle, "remote-status", remote_status_value());
 }
 
+fn schedule_remote_handoff_status(handle: tauri::AppHandle) {
+    thread::spawn(move || {
+        let mut previous = Duration::ZERO;
+        for delay in REMOTE_HANDOFF_STATUS_DELAYS {
+            thread::sleep(delay.saturating_sub(previous));
+            emit_remote_status(&handle);
+            previous = delay;
+        }
+    });
+}
+
 struct RemoteStatusProbeGuard;
 
 impl Drop for RemoteStatusProbeGuard {
@@ -2624,6 +2736,7 @@ fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
 
 fn perform_lan_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
     let _operation = OperationGuard::acquire()?;
+    let paths = harness_paths();
     if RECOVERY_STATE
         .lock()
         .map(|state| state.safe_mode)
@@ -2638,7 +2751,7 @@ fn perform_lan_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
         .ok_or("Harness 尚未启动完成。")?
         .parse()
         .map_err(|error| format!("Harness 地址无效：{error}"))?;
-    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = load_or_create_lan_remote_credential(&lan_remote_credential_path(&paths.dsh_home))?;
     if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
         *saved = Some(token);
     }
@@ -2681,6 +2794,51 @@ fn perform_lan_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn perform_lan_remote_reset(handle: tauri::AppHandle) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    let was_enabled = LAN_REMOTE_DESIRED.load(Ordering::SeqCst)
+        && REMOTE_STATE
+            .lock()
+            .map(|state| state.lan_enabled)
+            .unwrap_or(false);
+    let harness_url = if was_enabled {
+        Some(
+            CURRENT_HARNESS_URL
+                .lock()
+                .map_err(|_| "Harness 地址锁已损坏。".to_string())?
+                .clone()
+                .ok_or("Harness 尚未启动完成。")?
+                .parse::<tauri::Url>()
+                .map_err(|error| format!("Harness 地址无效：{error}"))?,
+        )
+    } else {
+        None
+    };
+    let paths = harness_paths();
+    let token = rotate_lan_remote_credential(&lan_remote_credential_path(&paths.dsh_home))?;
+    if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+        *saved = Some(token);
+    }
+    if let Some(harness_url) = harness_url {
+        if let Err(error) = sync_lan_remote(&handle, &harness_url) {
+            LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.lan_enabled = false;
+                state.lan_busy = false;
+                state.lan_endpoint.clear();
+                state.lan_pairing_url.clear();
+                state.lan_qr_svg.clear();
+            }
+            return Err(error);
+        }
+    } else if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_busy = false;
+        state.lan_error.clear();
+    }
+    emit_remote_status(&handle);
+    Ok(())
+}
+
 fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
     let already_busy = REMOTE_STATE
         .lock()
@@ -2715,6 +2873,50 @@ fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
         if let Err(error) = result {
             if let Ok(mut state) = REMOTE_STATE.lock() {
                 state.lan_enabled = false;
+                state.lan_busy = false;
+                state.lan_error = error.clone();
+            }
+            emit_bridge_event(
+                &handle,
+                "remote-error",
+                serde_json::json!({
+                    "message": error,
+                    "transport": "lan",
+                }),
+            );
+        }
+        emit_remote_status(&handle);
+    });
+}
+
+fn begin_lan_remote_reset(handle: tauri::AppHandle) {
+    let already_busy = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
+                true
+            } else {
+                state.lan_busy = true;
+                state.lan_error.clear();
+                false
+            }
+        })
+        .unwrap_or(true);
+    if already_busy {
+        emit_bridge_event(
+            &handle,
+            "remote-error",
+            serde_json::json!({
+                "message": "另一项局域网 Remote 操作正在进行。",
+                "transport": "lan",
+            }),
+        );
+        return;
+    }
+    emit_remote_status(&handle);
+    thread::spawn(move || {
+        if let Err(error) = perform_lan_remote_reset(handle.clone()) {
+            if let Ok(mut state) = REMOTE_STATE.lock() {
                 state.lan_busy = false;
                 state.lan_error = error.clone();
             }
@@ -3039,6 +3241,7 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
         "remote-disable" => begin_remote_operation(handle, false),
         "remote-lan-enable" => begin_lan_remote_operation(handle, true),
         "remote-lan-disable" => begin_lan_remote_operation(handle, false),
+        "remote-lan-reset" => begin_lan_remote_reset(handle),
         "status" => match desktop_status_value() {
             Ok(status) => emit_bridge_event(&handle, "desktop-status", status),
             Err(error) => emit_action_error(&handle, error),
@@ -3305,6 +3508,8 @@ fn show_harness_window(
         if let Ok(mut state) = REMOTE_STATE.lock() {
             mark_remote_operation_presentation_handoff(&mut state, operation_id);
         }
+        emit_remote_status(handle);
+        schedule_remote_handoff_status(handle.clone());
     }
     Ok(())
 }
@@ -4111,22 +4316,26 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         append_remote_operation_resume_parameter, clear_presented_remote_operation,
         create_product_subagent_preset, desktop_preferences_path, detected_plugin,
         enable_product_subagent_tool, ensure_desktop_settings_module_link, installed_plugins,
+        lan_remote_credential_path, load_or_create_lan_remote_credential,
         mark_remote_operation_presentation_handoff, parse_lan_remote_readiness, parse_readiness,
         pending_change_outcome, plugin_profile_state, plugin_state_changes,
         plugin_state_fingerprint, product_subagent_marker, product_subagent_preset_ready,
-        product_subagent_status_value, read_desktop_preferences, redact_startup_line,
-        remote_transition_in_progress, resolve_modules_directory, restore_last_known_good,
-        safe_profile_manifest, same_file, smooth_stream_enabled_from,
-        update_remote_operation_state, usage_record_from_event, validate_plugin_spec,
-        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
-        RemoteOperationState, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK,
-        CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
+        product_subagent_status_value, read_desktop_preferences, read_lan_remote_credential,
+        redact_startup_line, remote_transition_in_progress, resolve_modules_directory,
+        restore_last_known_good, rotate_lan_remote_credential, safe_profile_manifest, same_file,
+        smooth_stream_enabled_from, update_remote_operation_state, usage_record_from_event,
+        valid_lan_remote_token, validate_plugin_spec, without_cli_path_block,
+        write_profile_snapshot, write_smooth_stream_preference, RemoteOperationState,
+        RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT,
+        LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -4328,6 +4537,70 @@ mod tests {
         let stored = read_desktop_preferences(&path).unwrap();
         assert!(!smooth_stream_enabled_from(&stored));
         assert!(!dsh_home.join("profiles/web").exists());
+        fs::remove_dir_all(dsh_home).unwrap();
+    }
+
+    #[test]
+    fn persists_and_rotates_the_lan_remote_credential_only_on_request() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-lan-credential-test-{}-{unique}",
+            std::process::id()
+        ));
+        let path = lan_remote_credential_path(&dsh_home);
+
+        let first = load_or_create_lan_remote_credential(&path).unwrap();
+        let after_restart = load_or_create_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&first));
+        assert_eq!(after_restart, first);
+        assert_eq!(
+            read_lan_remote_credential(&path).unwrap(),
+            Some(first.clone())
+        );
+
+        let rotated = rotate_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&rotated));
+        assert_ne!(rotated, first);
+        assert_eq!(read_lan_remote_credential(&path).unwrap(), Some(rotated));
+
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::metadata(path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(dsh_home).unwrap();
+    }
+
+    #[test]
+    fn repairs_an_unusable_persisted_lan_remote_credential() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-lan-credential-repair-test-{}-{unique}",
+            std::process::id()
+        ));
+        let path = lan_remote_credential_path(&dsh_home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "broken").unwrap();
+
+        let repaired = load_or_create_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&repaired));
+        assert_eq!(read_lan_remote_credential(&path).unwrap(), Some(repaired));
         fs::remove_dir_all(dsh_home).unwrap();
     }
 

@@ -9,6 +9,11 @@ struct RemoteSessionView: View {
     @State private var didChooseInitialExpansion = false
     @State private var didManuallyChangeExpansion = false
     @State private var previousProjectPathsByID: [String: String] = [:]
+    @State private var showsNewSessionSheet = false
+    @State private var creatingSessionProjectID: String?
+    @State private var newSessionErrorMessage: String?
+    @State private var pendingCreatedSession: RemoteSessionSummary?
+    @State private var createdSession: RemoteSessionSummary?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -99,11 +104,25 @@ struct RemoteSessionView: View {
                 title: viewModel.client.displayName,
                 subtitle: "项目与会话"
             ) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 44, height: 44)
-                        .accessibilityLabel("正在同步")
+                HStack(spacing: 8) {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 32, height: 44)
+                            .accessibilityLabel("正在同步")
+                    }
+
+                    Button {
+                        newSessionErrorMessage = nil
+                        showsNewSessionSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(RemoteIconButtonStyle(tint: RemoteTheme.accent, emphasized: true))
+                    .disabled(creatableProjectGroups.isEmpty)
+                    .opacity(creatableProjectGroups.isEmpty ? 0.42 : 1)
+                    .accessibilityLabel("新建会话")
+                    .accessibilityHint("选择项目并在电脑上创建会话")
                 }
             }
         }
@@ -112,6 +131,21 @@ struct RemoteSessionView: View {
         .task { await viewModel.monitor() }
         .onChange(of: projectExpansionKey, initial: true) { _, _ in
             synchronizeProjectExpansion()
+        }
+        .sheet(isPresented: $showsNewSessionSheet, onDismiss: openPendingCreatedSession) {
+            NewRemoteSessionSheet(
+                projects: creatableProjectGroups,
+                creatingProjectID: creatingSessionProjectID,
+                errorMessage: newSessionErrorMessage,
+                create: createSession
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(RemoteTheme.canvas)
+            .interactiveDismissDisabled(creatingSessionProjectID != nil)
+        }
+        .navigationDestination(item: $createdSession) { session in
+            RemoteConversationView(client: viewModel.client, session: session)
         }
     }
 
@@ -191,6 +225,10 @@ struct RemoteSessionView: View {
         })
     }
 
+    private var creatableProjectGroups: [RemoteProjectGroup] {
+        projectGroups.filter { $0.workspaceID != nil || $0.path != nil }
+    }
+
     private var projectExpansionKey: [String] {
         projectGroups.map { "\($0.id):\($0.sessions.count):\($0.runningCount)" }
     }
@@ -211,6 +249,7 @@ struct RemoteSessionView: View {
             }
             groups.append(RemoteProjectGroup(
                 id: "workspace:\(workspace.id)",
+                workspaceID: workspace.id,
                 title: displayProjectTitle(workspace.title, path: workspace.path),
                 path: workspace.path,
                 sessions: members
@@ -223,6 +262,7 @@ struct RemoteSessionView: View {
         if !ungrouped.isEmpty {
             groups.append(RemoteProjectGroup(
                 id: "workspace:__ungrouped__",
+                workspaceID: nil,
                 title: "未分组",
                 path: nil,
                 sessions: ungrouped
@@ -253,6 +293,7 @@ struct RemoteSessionView: View {
             guard let details = metadata[id] else { return nil }
             return RemoteProjectGroup(
                 id: id,
+                workspaceID: nil,
                 title: details.title,
                 path: details.path,
                 sessions: grouped[id] ?? []
@@ -361,16 +402,185 @@ struct RemoteSessionView: View {
     private func crossPlatformBasename(_ path: String) -> String {
         path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
     }
+
+    private func createSession(_ project: RemoteProjectGroup) {
+        guard creatingSessionProjectID == nil else { return }
+        creatingSessionProjectID = project.id
+        newSessionErrorMessage = nil
+
+        Task {
+            do {
+                let sessionID = try await viewModel.client.createSession(
+                    workspaceID: project.workspaceID,
+                    cwd: project.workspaceID == nil ? project.path : nil
+                )
+                pendingCreatedSession = RemoteSessionSummary(
+                    id: sessionID,
+                    title: "新会话",
+                    updatedAt: Date(),
+                    running: false,
+                    projectName: project.title,
+                    projectPath: project.path
+                )
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                creatingSessionProjectID = nil
+                showsNewSessionSheet = false
+                await viewModel.refresh(silently: true)
+            } catch {
+                newSessionErrorMessage = error.localizedDescription
+                creatingSessionProjectID = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func openPendingCreatedSession() {
+        guard let session = pendingCreatedSession else { return }
+        pendingCreatedSession = nil
+        createdSession = session
+    }
 }
 
 private struct RemoteProjectGroup: Identifiable {
     let id: String
+    let workspaceID: String?
     let title: String
     let path: String?
     let sessions: [RemoteSessionSummary]
 
     var runningCount: Int { sessions.count(where: \.running) }
 }
+
+private struct NewRemoteSessionSheet: View {
+    let projects: [RemoteProjectGroup]
+    let creatingProjectID: String?
+    let errorMessage: String?
+    let create: (RemoteProjectGroup) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            RemoteSheetHeader(
+                title: "新建会话",
+                subtitle: "选择会话所属的项目"
+            )
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let errorMessage {
+                        RemoteInlineNotice(
+                            title: "无法新建会话",
+                            message: errorMessage,
+                            icon: "exclamationmark.triangle.fill",
+                            tone: .danger
+                        )
+                        .padding(.bottom, 2)
+                    }
+
+                    RemoteSectionHeader(title: "项目", detail: "\(projects.count) 个")
+                        .padding(.horizontal, 2)
+
+                    ForEach(projects) { project in
+                        Button {
+                            create(project)
+                        } label: {
+                            projectRow(project)
+                        }
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
+                        .disabled(creatingProjectID != nil)
+                        .remoteSurface(cornerRadius: 14)
+                        .accessibilityLabel("在 \(project.title) 中新建会话")
+                    }
+
+                    Text("会话在电脑上的项目目录中创建，代码与执行环境仍保留在电脑上。")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
+                        .padding(.top, 4)
+                }
+                .padding(.horizontal, RemoteTheme.pagePadding)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
+            }
+        }
+        .background(RemoteTheme.canvas.ignoresSafeArea())
+    }
+
+    private func projectRow(_ project: RemoteProjectGroup) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 40, height: 40)
+                .background(RemoteTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(project.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if let path = project.path {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if creatingProjectID == project.id {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在新建会话")
+            } else {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(RemoteTheme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 64)
+        .contentShape(Rectangle())
+    }
+}
+
+#if DEBUG
+@ViewBuilder
+func newRemoteSessionPreview() -> some View {
+    NewRemoteSessionSheet(
+        projects: [
+            RemoteProjectGroup(
+                id: "workspace:video",
+                workspaceID: "video",
+                title: "video",
+                path: "/Users/demo/Documents/ChatGPT/video",
+                sessions: []
+            ),
+            RemoteProjectGroup(
+                id: "workspace:dsh-plugin-app",
+                workspaceID: "dsh-plugin-app",
+                title: "dsh-plugin-app",
+                path: "/Users/demo/Documents/ChatGPT/dsh-plugin-app",
+                sessions: []
+            ),
+            RemoteProjectGroup(
+                id: "workspace:deepseek-harness-desktop",
+                workspaceID: "deepseek-harness-desktop",
+                title: "deepseek-harness-desktop",
+                path: "/Users/demo/Documents/ChatGPT/deepseek-harness-desktop",
+                sessions: []
+            ),
+        ],
+        creatingProjectID: nil,
+        errorMessage: nil,
+        create: { _ in }
+    )
+}
+#endif
 
 private struct RemoteProjectCard: View {
     private let collapsedSessionLimit = 5
