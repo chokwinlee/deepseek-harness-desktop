@@ -1036,15 +1036,17 @@ test('Android Remote keeps its build, security boundary, protocol, and locales i
 })
 
 test('tagged releases require a signed installable Android APK', async () => {
+  const normalizeLineEndings = (source: string) => source.replaceAll('\r\n', '\n')
   const [workflow, ciWorkflow, dependabot, wrapper, build, readme, readmeChinese, signingGuide] = await Promise.all([
-    readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8'),
-    readFile(join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8'),
-    readFile(join(process.cwd(), '.github', 'dependabot.yml'), 'utf8'),
-    readFile(join(process.cwd(), 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8'),
-    readFile(join(process.cwd(), 'android', 'app', 'build.gradle.kts'), 'utf8'),
-    readFile(join(process.cwd(), 'README.md'), 'utf8'),
-    readFile(join(process.cwd(), 'README.zh-CN.md'), 'utf8'),
-    readFile(join(process.cwd(), 'docs', 'ANDROID_RELEASE_SIGNING.md'), 'utf8'),
+    readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), '.github', 'dependabot.yml'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8')
+      .then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'android', 'app', 'build.gradle.kts'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'README.md'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'README.zh-CN.md'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'docs', 'ANDROID_RELEASE_SIGNING.md'), 'utf8').then(normalizeLineEndings),
   ])
 
   assert.match(workflow, /name: Release desktop installers and Android companion/)
