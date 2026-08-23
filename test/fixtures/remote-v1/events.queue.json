@@ -1,0 +1,18 @@
+{
+  "rpcId": "fixture-queue-rpc",
+  "payload": {
+    "type": "session/queue",
+    "sessionId": "session-running",
+    "items": [
+      {
+        "id": "queue-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Verify the Android build"
+          }
+        ]
+      }
+    ]
+  }
+}

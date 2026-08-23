@@ -315,11 +315,19 @@
   function updateSettingRow() {
     if (!settingRow || !settingText || !settingDescription || !settingButton || !settingState) return
     const copy = settingCopy(currentLanguage())
-    settingText.textContent = copy.title
-    settingDescription.textContent = snapshot.error ? copy.error : copy.description
-    settingState.textContent = snapshot.enabled ? copy.on : copy.off
-    settingButton.setAttribute('aria-checked', String(snapshot.enabled))
-    settingButton.setAttribute('aria-label', `${copy.title}: ${snapshot.enabled ? copy.on : copy.off}`)
+    const description = snapshot.error ? copy.error : copy.description
+    const state = snapshot.enabled ? copy.on : copy.off
+    const checked = String(snapshot.enabled)
+    const label = `${copy.title}: ${state}`
+    if (settingText.textContent !== copy.title) settingText.textContent = copy.title
+    if (settingDescription.textContent !== description) settingDescription.textContent = description
+    if (settingState.textContent !== state) settingState.textContent = state
+    if (settingButton.getAttribute('aria-checked') !== checked) {
+      settingButton.setAttribute('aria-checked', checked)
+    }
+    if (settingButton.getAttribute('aria-label') !== label) {
+      settingButton.setAttribute('aria-label', label)
+    }
     settingRow.toggleAttribute('data-error', Boolean(snapshot.error))
   }
 
@@ -518,7 +526,11 @@
     for (const mutation of mutations) {
       if (mutation.type === 'childList') processChildMutation(mutation)
     }
-    scheduleMount()
+    if (mutations.some(mutation => mutation.type === 'attributes' && mutation.attributeName === 'lang')) {
+      updateSettingRow()
+    }
+    const slot = document.querySelector(SETTINGS_SLOT_SELECTOR)
+    if (slot && (!settingRow?.isConnected || settingRow.parentElement !== slot)) scheduleMount()
   }
 
   function scheduleMount() {

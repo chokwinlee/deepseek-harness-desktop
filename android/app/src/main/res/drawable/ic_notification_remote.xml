@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Notification small icons are rendered as an alpha mask by Android. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M10,3.5 L20,3.5 Q21,3.5 21,4.5 L21,15.5 Q21,16.5 20,16.5 L10,16.5 Q9,16.5 9,15.5 L9,4.5 Q9,3.5 10,3.5 Z M4,7.5 L7,7.5 Q8,7.5 8,8.5 L8,19.5 Q8,20.5 7,20.5 L4,20.5 Q3,20.5 3,19.5 L3,8.5 Q3,7.5 4,7.5 Z M7.5,14 C11,14 11.5,10.5 15,10.5 C18,10.5 19.5,13 17.5,15 C15.5,17 12,15.5 8,16"
+        android:strokeColor="@android:color/white"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

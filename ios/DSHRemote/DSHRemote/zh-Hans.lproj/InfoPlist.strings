@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "DSH Remote";
+"NSCameraUsageDescription" = "扫描 DSH Desktop 显示的 Remote 配对二维码。";
+"NSLocalNetworkUsageDescription" = "连接到你自己局域网内运行 DSH Desktop 的电脑。";

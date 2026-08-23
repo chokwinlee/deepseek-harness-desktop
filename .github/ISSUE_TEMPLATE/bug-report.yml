@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible desktop application failure
+description: Report a reproducible DSH Desktop or DSH Remote failure
 title: "[Bug]: "
 labels:
   - bug
@@ -7,13 +7,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve the desktop app. Remove API keys, tokens, private paths, and workspace content from every field and attachment.
+        Thanks for helping improve DSH Desktop and DSH Remote. Remove API keys, pairing tokens, QR codes, private prompts, private paths, Tailnet details, and workspace content from every field, log, screenshot, and attachment.
   - type: input
     id: version
     attributes:
-      label: Desktop version
-      description: Find this in the release filename or application metadata.
-      placeholder: 0.1.2
+      label: DSH Desktop or Remote version
+      description: Find this in the release filename, Desktop sidebar, or Remote About and privacy screen.
+      placeholder: 0.4.0-beta.1
     validations:
       required: true
   - type: dropdown
@@ -25,6 +25,30 @@ body:
         - macOS (Intel)
         - Windows 11
         - Windows 10
+        - Android
+        - iOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: device-details
+    attributes:
+      label: Device and OS details
+      description: For mobile issues, include the manufacturer, model, and exact Android or iOS version. For Desktop, include the OS version.
+      placeholder: Google Pixel 9, Android 16 / iPhone 16, iOS 19.0 / macOS 15.6
+    validations:
+      required: true
+  - type: dropdown
+    id: remote-connection
+    attributes:
+      label: Remote connection type
+      description: Select the connection used when the problem occurred.
+      options:
+        - Same trusted Wi-Fi
+        - Tailscale Serve HTTPS
+        - Custom HTTPS
+        - Offline Demo
+        - Not applicable
     validations:
       required: true
   - type: textarea
@@ -48,14 +72,14 @@ body:
     id: output
     attributes:
       label: Relevant output
-      description: Paste the shortest useful, redacted log excerpt.
+      description: Paste only the shortest useful, redacted log excerpt. Never include a QR code, pairing token, API key, private prompt, source code, Tailnet name, or private address.
       render: shell
   - type: checkboxes
     id: checks
     attributes:
       label: Submission checks
       options:
-        - label: I reproduced this with the latest release.
+        - label: I reproduced this with the latest applicable stable release or GitHub pre-release.
           required: true
-        - label: I removed all credentials and private data.
+        - label: I removed all QR codes, credentials, tokens, private prompts, addresses, paths, and workspace data.
           required: true

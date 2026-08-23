@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      Adaptive icons are the API 26+ source of truth. These full-bleed legacy square fallbacks
+      deliberately carry the same opaque edge color as the iOS master; round fallbacks retain
+      transparent corners. Scope the exception to the five generated square files only.
+    -->
+    <issue id="IconLauncherShape">
+        <ignore path="src/main/res/mipmap-mdpi/ic_launcher.png" />
+        <ignore path="src/main/res/mipmap-hdpi/ic_launcher.png" />
+        <ignore path="src/main/res/mipmap-xhdpi/ic_launcher.png" />
+        <ignore path="src/main/res/mipmap-xxhdpi/ic_launcher.png" />
+        <ignore path="src/main/res/mipmap-xxxhdpi/ic_launcher.png" />
+    </issue>
+    <!-- minSdk is 26, but this qualifier is required so adaptive XML can coexist with OEM PNG fallbacks. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

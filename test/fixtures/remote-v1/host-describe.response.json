@@ -1,0 +1,10 @@
+{
+  "rpcId": "fixture-host-describe",
+  "result": {
+    "ok": true,
+    "value": {
+      "version": "0.1.0-rc.8",
+      "attachedSessions": 2
+    }
+  }
+}

@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "DSH Remote";
+"NSCameraUsageDescription" = "Scan the Remote pairing QR code shown by DSH Desktop.";
+"NSLocalNetworkUsageDescription" = "Connect to a computer running DSH Desktop on your local network.";

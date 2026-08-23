@@ -1,10 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod remote;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -36,8 +38,16 @@ const PENDING_CHANGE_FILE: &str = "pending-plugin-change.json";
 const LEGACY_PENDING_INSTALL_FILE: &str = "pending-plugin-install.json";
 const SNAPSHOT_FILES: [&str; 3] = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+const LAN_REMOTE_CREDENTIAL_DIR: &str = "desktop-secrets";
+const LAN_REMOTE_CREDENTIAL_FILE: &str = "lan-remote-token";
 const PRODUCT_NAME: &str = "DSH Desktop";
 const RECOVERY_TITLE: &str = "DSH Desktop — Recovery";
+const REMOTE_STATUS_CACHE_TTL: Duration = Duration::from_secs(8);
+const REMOTE_HANDOFF_STATUS_DELAYS: [Duration; 3] = [
+    Duration::from_millis(150),
+    Duration::from_millis(600),
+    Duration::from_millis(1_500),
+];
 
 #[derive(Clone, Copy)]
 struct ProductSubagent {
@@ -85,13 +95,24 @@ const SMOOTH_STREAM_SCRIPT: &str = include_str!("../../src/smooth-stream.js");
 /// Desktop-only text-selection boundary for app chrome and copyable content.
 const SELECTION_GUARD_SCRIPT: &str = include_str!("../../src/selection-guard.js");
 
+/// Private-network mobile Remote controls and pairing UI.
+const REMOTE_BRIDGE_SCRIPT: &str = include_str!("../../src/remote.js");
+
 /// Current shell version, kept in sync with package.json / tauri.conf.json.
 const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+static REMOTE_SERVE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+static LAN_REMOTE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static CHILD_GENERATION: AtomicU64 = AtomicU64::new(0);
+static REMOTE_SERVE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static LAN_REMOTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static REMOTE_OPERATION_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+static REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
+static LAN_REMOTE_DESIRED: AtomicBool = AtomicBool::new(false);
 static PROFILE_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static REMOTE_STATUS_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ALLOWED_HARNESS_ORIGIN: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 static CURRENT_HARNESS_URL: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 static LOADED_PLUGIN_STATE: LazyLock<Mutex<Option<serde_json::Value>>> =
@@ -104,6 +125,12 @@ static DESKTOP_ACTION_TOKEN: LazyLock<String> = LazyLock::new(|| {
 });
 static RECOVERY_STATE: LazyLock<Mutex<RecoveryState>> =
     LazyLock::new(|| Mutex::new(RecoveryState::default()));
+static REMOTE_TRUSTED_HOST: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
+static LAN_REMOTE_TOKEN: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
+static REMOTE_STATE: LazyLock<Mutex<RemoteRuntimeState>> =
+    LazyLock::new(|| Mutex::new(RemoteRuntimeState::default()));
+static TAILSCALE_STATUS_CACHE: LazyLock<Mutex<TailscaleStatusCache>> =
+    LazyLock::new(|| Mutex::new(TailscaleStatusCache::default()));
 
 type StartupTail = Arc<Mutex<VecDeque<String>>>;
 
@@ -133,6 +160,73 @@ struct RecoveryState {
     phase: String,
     error: String,
     safe_mode: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RemoteRuntimeState {
+    phase: String,
+    enabled: bool,
+    busy: bool,
+    dns_name: String,
+    endpoint: String,
+    pairing_url: String,
+    qr_svg: String,
+    error: String,
+    clear_error_when_tailscale_ready: bool,
+    lan_enabled: bool,
+    lan_busy: bool,
+    lan_endpoint: String,
+    lan_pairing_url: String,
+    lan_qr_svg: String,
+    lan_error: String,
+    operation: Option<RemoteOperationState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteOperationState {
+    id: u64,
+    transport: String,
+    action: String,
+    stage: String,
+    active: bool,
+    error: String,
+    presentation_handoff_ready: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TailscaleStatusCache {
+    installed: bool,
+    backend_state: String,
+    dns_name: String,
+    magic_dns: bool,
+    https_ready: bool,
+    error: String,
+    refreshed_at: Option<Instant>,
+}
+
+impl RemoteRuntimeState {
+    fn clear_recovered_transport_error(&mut self, tailscale_ready: bool) {
+        if tailscale_ready && self.clear_error_when_tailscale_ready && !self.enabled && !self.busy {
+            self.phase = "off".into();
+            self.endpoint.clear();
+            self.error.clear();
+            self.clear_error_when_tailscale_ready = false;
+        }
+    }
+}
+
+impl RemoteOperationState {
+    fn new(id: u64, action: &str, stage: &str) -> Self {
+        Self {
+            id,
+            transport: "tailscale".into(),
+            action: action.into(),
+            stage: stage.into(),
+            active: true,
+            error: String::new(),
+            presentation_handoff_ready: false,
+        }
+    }
 }
 
 impl Default for RecoveryState {
@@ -313,6 +407,100 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn desktop_preferences_path(dsh_home: &Path) -> PathBuf {
     dsh_home.join(DESKTOP_PREFERENCES_FILE)
+}
+
+fn lan_remote_credential_path(dsh_home: &Path) -> PathBuf {
+    dsh_home
+        .join(LAN_REMOTE_CREDENTIAL_DIR)
+        .join(LAN_REMOTE_CREDENTIAL_FILE)
+}
+
+fn valid_lan_remote_token(token: &str) -> bool {
+    token.len() == 64
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn generate_lan_remote_token() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+fn write_lan_remote_credential(path: &Path, token: &str) -> Result<(), String> {
+    if !valid_lan_remote_token(token) {
+        return Err("无法保存局域网 Remote 配对凭据：凭据格式无效。".into());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("局域网 Remote 配对凭据路径无效：{}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("无法创建 {}：{error}", parent.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("无法保护 {}：{error}", parent.display()))?;
+
+    let temporary = parent.join(format!(
+        ".{LAN_REMOTE_CREDENTIAL_FILE}.{}-{}",
+        std::process::id(),
+        Uuid::new_v4().simple()
+    ));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| format!("无法写入 {}：{error}", temporary.display()))?;
+    file.write_all(token.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("无法写入 {}：{error}", temporary.display()))?;
+    drop(file);
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| format!("无法替换 {}：{error}", path.display()))?;
+    }
+    fs::rename(&temporary, path)
+        .map_err(|error| format!("无法保存 {}：{error}", path.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("无法保护 {}：{error}", path.display()))?;
+    Ok(())
+}
+
+fn read_lan_remote_credential(path: &Path) -> Result<Option<String>, String> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("无法读取 {}：{error}", path.display())),
+    };
+    let token = contents.trim();
+    if !valid_lan_remote_token(token) {
+        return Err(format!("局域网 Remote 配对凭据已损坏：{}", path.display()));
+    }
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("无法保护 {}：{error}", path.display()))?;
+    Ok(Some(token.to_string()))
+}
+
+fn rotate_lan_remote_credential(path: &Path) -> Result<String, String> {
+    let token = generate_lan_remote_token();
+    write_lan_remote_credential(path, &token)?;
+    Ok(token)
+}
+
+fn load_or_create_lan_remote_credential(path: &Path) -> Result<String, String> {
+    match read_lan_remote_credential(path) {
+        Ok(Some(token)) => Ok(token),
+        Ok(None) => rotate_lan_remote_credential(path),
+        Err(error) => {
+            eprintln!("[dsh] {error}; replacing the unusable LAN Remote credential");
+            rotate_lan_remote_credential(path)
+        }
+    }
 }
 
 fn read_desktop_preferences(path: &Path) -> Result<serde_json::Value, String> {
@@ -1172,6 +1360,21 @@ fn resolve_onboarding_helper() -> PathBuf {
     PathBuf::from("scripts/acknowledge-onboarding.mjs")
 }
 
+fn resolve_lan_remote_proxy() -> PathBuf {
+    for root in resource_roots() {
+        for relative in [
+            "scripts/lan-remote-proxy.mjs",
+            "_up_/scripts/lan-remote-proxy.mjs",
+        ] {
+            let candidate = root.join(relative);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("scripts/lan-remote-proxy.mjs")
+}
+
 fn desktop_settings_patch_path() -> PathBuf {
     resolve_modules_directory()
         .join("dsh-desktop-settings-plugin")
@@ -1602,8 +1805,17 @@ fn spawn_harness(mode: LaunchMode) -> Result<Child, String> {
         }
     }
     command.arg("--patch").arg(&desktop_patch);
+    command.args(["--host", "127.0.0.1", "--port", "0", "--no-open"]);
+    if mode == LaunchMode::Normal {
+        if let Some(trusted_host) = REMOTE_TRUSTED_HOST
+            .lock()
+            .ok()
+            .and_then(|value| value.clone())
+        {
+            command.args(["--trusted-host", &trusted_host]);
+        }
+    }
     command
-        .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
         .current_dir(&paths.home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1742,6 +1954,983 @@ fn emit_bridge_event(handle: &tauri::AppHandle, event: &str, payload: serde_json
             eprintln!("[dsh] failed to emit desktop bridge event: {error}");
         }
     }
+}
+
+fn inspect_tailscale_and_cache() -> Result<remote::TailscaleInfo, String> {
+    let installed = remote::resolve_tailscale().is_some();
+    let inspected = remote::inspect_tailscale();
+    if let Ok(mut cache) = TAILSCALE_STATUS_CACHE.lock() {
+        cache.installed = installed;
+        cache.refreshed_at = Some(Instant::now());
+        match inspected.as_ref() {
+            Ok(info) => {
+                cache.backend_state = info.backend_state.clone();
+                cache.dns_name = info.dns_name.clone();
+                cache.magic_dns = info.magic_dns;
+                cache.https_ready = info.https_ready;
+                cache.error.clear();
+            }
+            Err(error) => {
+                cache.backend_state.clear();
+                cache.dns_name.clear();
+                cache.magic_dns = false;
+                cache.https_ready = false;
+                cache.error = error.clone();
+            }
+        }
+    }
+    inspected
+}
+
+fn remote_operation_value(operation: Option<&RemoteOperationState>) -> serde_json::Value {
+    operation.map_or(serde_json::Value::Null, |operation| {
+        serde_json::json!({
+            "id": operation.id,
+            "transport": operation.transport,
+            "action": operation.action,
+            "stage": operation.stage,
+            "active": operation.active,
+            "error": operation.error,
+            "presentationHandoffReady": operation.presentation_handoff_ready,
+        })
+    })
+}
+
+fn update_remote_operation_state(
+    state: &mut RemoteRuntimeState,
+    operation_id: u64,
+    stage: &str,
+    active: bool,
+    error: &str,
+) -> bool {
+    let Some(operation) = state
+        .operation
+        .as_mut()
+        .filter(|operation| operation.id == operation_id)
+    else {
+        return false;
+    };
+    operation.stage = stage.into();
+    operation.active = active;
+    operation.error = error.into();
+    true
+}
+
+fn publish_remote_operation_stage(
+    handle: &tauri::AppHandle,
+    operation_id: u64,
+    stage: &str,
+    active: bool,
+    error: &str,
+) {
+    let updated = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            update_remote_operation_state(&mut state, operation_id, stage, active, error)
+        })
+        .unwrap_or(false);
+    if updated {
+        emit_remote_status(handle);
+    }
+}
+
+fn active_tailscale_operation_id(action: &str) -> Option<u64> {
+    REMOTE_STATE.lock().ok().and_then(|state| {
+        state.operation.as_ref().and_then(|operation| {
+            (operation.active && operation.transport == "tailscale" && operation.action == action)
+                .then_some(operation.id)
+        })
+    })
+}
+
+fn clear_presented_remote_operation(state: &mut RemoteRuntimeState, operation_id: u64) -> bool {
+    let matches_presented = state
+        .operation
+        .as_ref()
+        .is_some_and(|operation| operation.id == operation_id && !operation.active);
+    if matches_presented {
+        state.operation = None;
+    }
+    matches_presented
+}
+
+fn remote_transition_in_progress(
+    state: &RemoteRuntimeState,
+    guarded_operation_active: bool,
+) -> bool {
+    state.busy
+        || state.lan_busy
+        || state
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.active)
+        || guarded_operation_active
+}
+
+fn mark_remote_operation_presentation_handoff(
+    state: &mut RemoteRuntimeState,
+    operation_id: u64,
+) -> bool {
+    let Some(operation) = state
+        .operation
+        .as_mut()
+        .filter(|operation| operation.id == operation_id)
+    else {
+        return false;
+    };
+    operation.presentation_handoff_ready = true;
+    true
+}
+
+fn append_remote_operation_resume_parameter(
+    url: &mut tauri::Url,
+    operation: Option<&RemoteOperationState>,
+) -> bool {
+    let Some(operation) = operation.filter(|operation| {
+        operation.transport == "tailscale"
+            && matches!(operation.action.as_str(), "enable" | "disable")
+    }) else {
+        return false;
+    };
+    url.query_pairs_mut()
+        .append_pair("dsh-desktop-remote-operation", &operation.id.to_string());
+    true
+}
+
+fn remote_status_value() -> serde_json::Value {
+    let cached = TAILSCALE_STATUS_CACHE
+        .lock()
+        .map(|cache| cache.clone())
+        .unwrap_or_default();
+    let installed = if cached.refreshed_at.is_some() {
+        cached.installed
+    } else {
+        remote::resolve_tailscale().is_some()
+    };
+    let tailscale_ready =
+        cached.error.is_empty() && cached.backend_state == "Running" && cached.magic_dns;
+    let state = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            state.clear_recovered_transport_error(tailscale_ready);
+            state.clone()
+        })
+        .unwrap_or_default();
+    let dns_name = if state.dns_name.is_empty() {
+        cached.dns_name.clone()
+    } else {
+        state.dns_name.clone()
+    };
+    let endpoint = if state.endpoint.is_empty() {
+        if cached.error.is_empty() && !cached.dns_name.is_empty() {
+            format!("https://{}:{}/", cached.dns_name, remote::REMOTE_PORT)
+        } else {
+            String::new()
+        }
+    } else {
+        state.endpoint.clone()
+    };
+    let error = if state.error.is_empty() {
+        cached.error.clone()
+    } else {
+        state.error.clone()
+    };
+    let lan_available = CURRENT_HARNESS_URL
+        .lock()
+        .map(|value| value.is_some())
+        .unwrap_or(false)
+        && !RECOVERY_STATE
+            .lock()
+            .map(|state| state.safe_mode)
+            .unwrap_or(true);
+    let operation = remote_operation_value(state.operation.as_ref());
+    serde_json::json!({
+        "statusReady": true,
+        "tailscaleStatusReady": cached.refreshed_at.is_some(),
+        "phase": if state.phase.is_empty() { "off" } else { &state.phase },
+        "installed": installed,
+        "backendState": cached.backend_state,
+        "magicDNS": cached.magic_dns,
+        "httpsReady": cached.https_ready,
+        "enabled": state.enabled,
+        "busy": state.busy,
+        "dnsName": dns_name,
+        "url": endpoint,
+        "pairingURL": state.pairing_url,
+        "qrSvg": state.qr_svg,
+        "error": error,
+        "port": remote::REMOTE_PORT,
+        "lanAvailable": lan_available,
+        "lanEnabled": state.lan_enabled,
+        "lanBusy": state.lan_busy,
+        "lanURL": state.lan_endpoint,
+        "lanPairingURL": state.lan_pairing_url,
+        "lanQrSvg": state.lan_qr_svg,
+        "lanError": state.lan_error,
+        "lanPort": remote::LAN_REMOTE_PORT,
+        "operation": operation,
+    })
+}
+
+fn emit_remote_status(handle: &tauri::AppHandle) {
+    emit_bridge_event(handle, "remote-status", remote_status_value());
+}
+
+fn schedule_remote_handoff_status(handle: tauri::AppHandle) {
+    thread::spawn(move || {
+        let mut previous = Duration::ZERO;
+        for delay in REMOTE_HANDOFF_STATUS_DELAYS {
+            thread::sleep(delay.saturating_sub(previous));
+            emit_remote_status(&handle);
+            previous = delay;
+        }
+    });
+}
+
+struct RemoteStatusProbeGuard;
+
+impl Drop for RemoteStatusProbeGuard {
+    fn drop(&mut self) {
+        REMOTE_STATUS_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
+
+fn refresh_remote_status_async(handle: tauri::AppHandle, force: bool) {
+    let cache_is_fresh = TAILSCALE_STATUS_CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.refreshed_at)
+        .is_some_and(|refreshed_at| refreshed_at.elapsed() < REMOTE_STATUS_CACHE_TTL);
+    if !force && cache_is_fresh {
+        return;
+    }
+    if REMOTE_STATUS_PROBE_ACTIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    thread::spawn(move || {
+        let _guard = RemoteStatusProbeGuard;
+        let _ = inspect_tailscale_and_cache();
+        emit_remote_status(&handle);
+    });
+}
+
+fn stop_remote_serve_process() {
+    REMOTE_SERVE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut guard) = REMOTE_SERVE_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            remote::terminate_serve(&mut child);
+        }
+    }
+}
+
+fn stop_lan_remote_process() {
+    LAN_REMOTE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut guard) = LAN_REMOTE_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            remote::terminate_serve(&mut child);
+        }
+    }
+}
+
+fn parse_lan_remote_readiness(line: &str) -> Result<String, String> {
+    let raw = line
+        .trim()
+        .strip_prefix("dsh lan remote:")
+        .map(str::trim)
+        .ok_or("局域网 Remote 代理没有返回有效的就绪地址。")?;
+    let url: tauri::Url = raw
+        .parse()
+        .map_err(|error| format!("局域网 Remote 返回了无效地址：{error}"))?;
+    let host = url.host_str().ok_or("局域网 Remote 地址缺少主机。")?;
+    let octets: Vec<u8> = host
+        .split('.')
+        .map(str::parse::<u8>)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "局域网 Remote 只接受私有 IPv4 地址。".to_string())?;
+    let private = octets.len() == 4
+        && (octets[0] == 10
+            || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+            || (octets[0] == 192 && octets[1] == 168));
+    if url.scheme() != "http"
+        || !private
+        || url.port() != Some(remote::LAN_REMOTE_PORT)
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("局域网 Remote 拒绝了非私有网络地址。".into());
+    }
+    Ok(url.to_string())
+}
+
+fn spawn_lan_remote_proxy(
+    harness_url: &tauri::Url,
+    token: &str,
+) -> Result<(Child, String), String> {
+    if harness_url.scheme() != "http" || harness_url.host_str() != Some("127.0.0.1") {
+        return Err("局域网 Remote 拒绝代理非 loopback Harness 地址。".into());
+    }
+    let port = harness_url
+        .port()
+        .ok_or("Harness 没有返回可代理的 loopback 端口。")?;
+    let target = format!("http://127.0.0.1:{port}");
+    let script = resolve_lan_remote_proxy();
+    if !script.is_file() {
+        return Err(format!(
+            "Desktop 缺少局域网 Remote 代理：{}",
+            script.display()
+        ));
+    }
+
+    let mut command = Command::new(resolve_node());
+    command
+        .arg(script)
+        .args(["--target", &target, "--token", token, "--port"])
+        .arg(remote::LAN_REMOTE_PORT.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("无法启动局域网 Remote：{error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("无法读取局域网 Remote 启动状态。")?;
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut line = String::new();
+        let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+        let _ = sender.send(result);
+    });
+    let readiness = match receiver.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok(readiness)) => readiness,
+        Ok(Err(error)) => {
+            remote::terminate_serve(&mut child);
+            return Err(format!("无法读取局域网 Remote 启动状态：{error}"));
+        }
+        Err(_) => {
+            remote::terminate_serve(&mut child);
+            return Err("等待局域网 Remote 启动超时。".into());
+        }
+    };
+    match parse_lan_remote_readiness(&readiness) {
+        Ok(endpoint) => Ok((child, endpoint)),
+        Err(error) => {
+            remote::terminate_serve(&mut child);
+            Err(error)
+        }
+    }
+}
+
+fn start_lan_remote_monitor(handle: tauri::AppHandle, generation: u64) {
+    thread::spawn(move || loop {
+        thread::sleep(MONITOR_INTERVAL);
+        if LAN_REMOTE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let status = match LAN_REMOTE_CHILD.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(child) => child.try_wait(),
+                None => return,
+            },
+            Err(_) => Err(std::io::Error::other("LAN Remote supervisor lock poisoned")),
+        };
+        match status {
+            Ok(Some(exit)) => {
+                LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+                if let Ok(mut child) = LAN_REMOTE_CHILD.lock() {
+                    *child = None;
+                }
+                if let Ok(mut state) = REMOTE_STATE.lock() {
+                    state.lan_enabled = false;
+                    state.lan_busy = false;
+                    state.lan_pairing_url.clear();
+                    state.lan_qr_svg.clear();
+                    state.lan_error = format!("局域网 Remote 已退出（{exit}），入口已自动关闭。");
+                }
+                emit_remote_status(&handle);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+                if let Ok(mut state) = REMOTE_STATE.lock() {
+                    state.lan_enabled = false;
+                    state.lan_busy = false;
+                    state.lan_error = format!("无法监控局域网 Remote：{error}");
+                }
+                emit_remote_status(&handle);
+                return;
+            }
+        }
+    });
+}
+
+fn sync_lan_remote(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Result<(), String> {
+    let token = LAN_REMOTE_TOKEN
+        .lock()
+        .map_err(|_| "局域网 Remote 凭据锁已损坏。".to_string())?
+        .clone()
+        .ok_or("局域网 Remote 缺少配对凭据。")?;
+    stop_lan_remote_process();
+    let (child, endpoint) = spawn_lan_remote_proxy(harness_url, &token)?;
+    let pairing_url = remote::authenticated_pairing_url(&endpoint, &token)?;
+    let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
+    *LAN_REMOTE_CHILD
+        .lock()
+        .map_err(|_| "局域网 Remote supervisor lock poisoned".to_string())? = Some(child);
+    let generation = LAN_REMOTE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_enabled = true;
+        state.lan_busy = false;
+        state.lan_endpoint = endpoint;
+        state.lan_pairing_url = pairing_url;
+        state.lan_qr_svg = qr_svg;
+        state.lan_error.clear();
+    }
+    start_lan_remote_monitor(handle.clone(), generation);
+    emit_remote_status(handle);
+    Ok(())
+}
+
+fn start_remote_serve_monitor(handle: tauri::AppHandle, generation: u64) {
+    thread::spawn(move || loop {
+        thread::sleep(MONITOR_INTERVAL);
+        if REMOTE_SERVE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let status = match REMOTE_SERVE_CHILD.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(child) => child.try_wait(),
+                None => return,
+            },
+            Err(_) => Err(std::io::Error::other(
+                "Remote Serve supervisor lock poisoned",
+            )),
+        };
+        match status {
+            Ok(Some(exit)) => {
+                if REMOTE_SERVE_GENERATION.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                let clear_error_when_tailscale_ready = inspect_tailscale_and_cache().is_err();
+                deactivate_remote_transport(
+                    Some(format!(
+                        "Tailscale Serve 已退出（{exit}），Remote 已自动关闭。"
+                    )),
+                    clear_error_when_tailscale_ready,
+                    &handle,
+                );
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                deactivate_remote_transport(
+                    Some(format!("无法监控 Tailscale Serve：{error}")),
+                    false,
+                    &handle,
+                );
+                return;
+            }
+        }
+    });
+}
+
+fn set_remote_trusted_host(value: Option<String>) {
+    if let Ok(mut trusted) = REMOTE_TRUSTED_HOST.lock() {
+        *trusted = value;
+    }
+}
+
+fn deactivate_remote_transport(
+    error: Option<String>,
+    clear_error_when_tailscale_ready: bool,
+    handle: &tauri::AppHandle,
+) {
+    stop_remote_serve_process();
+    REMOTE_DESIRED.store(false, Ordering::SeqCst);
+    set_remote_trusted_host(None);
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.enabled = false;
+        state.busy = false;
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+        if let Some(error) = error {
+            state.phase = "error".into();
+            state.error = error;
+            state.clear_error_when_tailscale_ready = clear_error_when_tailscale_ready;
+        } else {
+            state.phase = "off".into();
+            state.error.clear();
+            state.endpoint.clear();
+            state.clear_error_when_tailscale_ready = false;
+        }
+    }
+    emit_remote_status(handle);
+}
+
+fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Result<(), String> {
+    let info = inspect_tailscale_and_cache()?;
+    if !info.https_ready {
+        return Err("当前 Tailnet 尚未启用 HTTPS。请在 Tailscale 授权页完成 Enable HTTPS。".into());
+    }
+    if harness_url.scheme() != "http" || harness_url.host_str() != Some("127.0.0.1") {
+        return Err("Remote 拒绝代理非 loopback Harness 地址。".into());
+    }
+    let port = harness_url
+        .port()
+        .ok_or("Harness 没有返回可代理的 loopback 端口。")?;
+    let target = format!("http://127.0.0.1:{port}");
+
+    stop_remote_serve_process();
+    remote::wait_until_port_clear(&info)?;
+    let status = remote::serve_status(&info)?;
+    if remote::remote_port_configured(&status, &info) {
+        return Err(format!(
+            "Tailscale Serve 端口 {} 已被其他配置占用；Desktop 没有覆盖它。",
+            remote::REMOTE_PORT
+        ));
+    }
+
+    let mut child = remote::spawn_serve(&info, &target)?;
+    if let Err(error) = remote::wait_until_serving(&mut child, &info, &target) {
+        remote::terminate_serve(&mut child);
+        return Err(error);
+    }
+    if let Some(operation_id) = active_tailscale_operation_id("enable") {
+        publish_remote_operation_stage(handle, operation_id, "generating-pairing", true, "");
+    }
+    let endpoint = remote::endpoint_url(&info);
+    let pairing_url = remote::pairing_url(&endpoint)?;
+    let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
+    *REMOTE_SERVE_CHILD
+        .lock()
+        .map_err(|_| "Remote Serve supervisor lock poisoned".to_string())? = Some(child);
+    let generation = REMOTE_SERVE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.phase = "on".into();
+        state.enabled = true;
+        state.busy = false;
+        state.dns_name = info.dns_name;
+        state.endpoint = endpoint;
+        state.pairing_url = pairing_url;
+        state.qr_svg = qr_svg;
+        state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
+    }
+    start_remote_serve_monitor(handle.clone(), generation);
+    emit_remote_status(handle);
+    Ok(())
+}
+
+fn relaunch_normal_harness(handle: &tauri::AppHandle) -> Result<(), String> {
+    let (child, url, tail) = start_harness(LaunchMode::Normal)?;
+    register_harness(handle, child, &url, LaunchMode::Normal, tail)?;
+    show_harness_window(handle, url, LaunchMode::Normal, None)
+}
+
+fn rollback_remote_enable(
+    handle: &tauri::AppHandle,
+    operation_id: u64,
+    reason: &str,
+) -> Result<(), String> {
+    publish_remote_operation_stage(handle, operation_id, "restoring-harness", true, "");
+    stop_remote_serve_process();
+    REMOTE_DESIRED.store(false, Ordering::SeqCst);
+    set_remote_trusted_host(None);
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.enabled = false;
+        state.endpoint.clear();
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+    }
+    stop_managed_child();
+    relaunch_normal_harness(handle).map_err(|fallback_error| {
+        format!(
+            "Remote 启动失败，恢复普通 Harness 也未完成。\nRemote：{reason}\n恢复：{fallback_error}"
+        )
+    })
+}
+
+fn perform_remote_enable(handle: tauri::AppHandle, operation_id: u64) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    let paths = harness_paths();
+    if read_pending_install(&paths.dsh_home)?.is_some() {
+        return Err("请先完成等待中的插件重启验证，再开启 Remote。".into());
+    }
+    if RECOVERY_STATE
+        .lock()
+        .map(|state| state.safe_mode)
+        .unwrap_or(true)
+    {
+        return Err("安全模式下不能开启 Remote；请先恢复普通 Harness。".into());
+    }
+    let info = inspect_tailscale_and_cache()?;
+    if !info.https_ready {
+        return Err(
+            "当前 Tailnet 尚未启用 HTTPS。请先完成 Tailscale 的 Enable HTTPS 授权。".into(),
+        );
+    }
+    let status = remote::serve_status(&info)?;
+    if remote::remote_port_configured(&status, &info) {
+        return Err(format!(
+            "Tailscale Serve 端口 {} 已被其他配置占用；Desktop 没有覆盖它。",
+            remote::REMOTE_PORT
+        ));
+    }
+
+    publish_remote_operation_stage(&handle, operation_id, "restarting-harness", true, "");
+
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.phase = "starting".into();
+        state.busy = true;
+        state.enabled = false;
+        state.dns_name = info.dns_name.clone();
+        state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
+    }
+    let trusted_host = format!("{}:{}", info.dns_name, remote::REMOTE_PORT);
+    set_remote_trusted_host(Some(trusted_host));
+    REMOTE_DESIRED.store(true, Ordering::SeqCst);
+    stop_managed_child();
+
+    let launch = relaunch_normal_harness(&handle);
+    let enabled = REMOTE_STATE
+        .lock()
+        .map(|state| state.enabled)
+        .unwrap_or(false);
+    if let Err(error) = launch {
+        rollback_remote_enable(&handle, operation_id, &error)?;
+        return Err(error);
+    }
+    if !enabled {
+        let error = REMOTE_STATE
+            .lock()
+            .ok()
+            .map(|state| state.error.clone())
+            .filter(|error| !error.is_empty())
+            .unwrap_or_else(|| "Tailscale Serve 未能进入可用状态。".into());
+        rollback_remote_enable(&handle, operation_id, &error)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn perform_remote_disable(handle: tauri::AppHandle, operation_id: u64) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.phase = "stopping".into();
+        state.busy = true;
+        state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
+    }
+    stop_remote_serve_process();
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.enabled = false;
+        state.endpoint.clear();
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+    }
+    let serve_stop_error = inspect_tailscale_and_cache()
+        .ok()
+        .and_then(|info| remote::wait_until_port_clear(&info).err());
+    publish_remote_operation_stage(&handle, operation_id, "restoring-harness", true, "");
+    REMOTE_DESIRED.store(false, Ordering::SeqCst);
+    set_remote_trusted_host(None);
+    stop_managed_child();
+    relaunch_normal_harness(&handle)?;
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.phase = "off".into();
+        state.enabled = false;
+        state.busy = false;
+        state.endpoint.clear();
+        state.pairing_url.clear();
+        state.qr_svg.clear();
+        state.error.clear();
+        state.clear_error_when_tailscale_ready = false;
+    }
+    emit_remote_status(&handle);
+    match serve_stop_error {
+        Some(error) => Err(format!("Remote 已关闭，但 {error}")),
+        None => Ok(()),
+    }
+}
+
+fn begin_remote_operation(handle: tauri::AppHandle, enable: bool) {
+    let mut operation_id = None;
+    let already_busy = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
+                true
+            } else {
+                let id = REMOTE_OPERATION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+                operation_id = Some(id);
+                state.busy = true;
+                state.phase = if enable { "starting" } else { "stopping" }.into();
+                state.error.clear();
+                state.clear_error_when_tailscale_ready = false;
+                state.operation = Some(RemoteOperationState::new(
+                    id,
+                    if enable { "enable" } else { "disable" },
+                    if enable {
+                        "checking-tailscale"
+                    } else {
+                        "stopping-serve"
+                    },
+                ));
+                false
+            }
+        })
+        .unwrap_or(true);
+    if already_busy {
+        emit_bridge_event(
+            &handle,
+            "remote-error",
+            serde_json::json!({
+                "message": "另一项 Remote 操作正在进行。",
+                "transport": "tailscale",
+            }),
+        );
+        return;
+    }
+    let Some(operation_id) = operation_id else {
+        return;
+    };
+    emit_remote_status(&handle);
+    thread::spawn(move || {
+        let result = if enable {
+            perform_remote_enable(handle.clone(), operation_id)
+        } else {
+            perform_remote_disable(handle.clone(), operation_id)
+        };
+        if let Err(error) = result {
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.phase = "error".into();
+                state.busy = false;
+                state.error = error.clone();
+                state.clear_error_when_tailscale_ready = false;
+                update_remote_operation_state(&mut state, operation_id, "failed", false, &error);
+            }
+            emit_bridge_event(
+                &handle,
+                "remote-error",
+                serde_json::json!({
+                    "message": error,
+                    "transport": "tailscale",
+                    "operationId": operation_id,
+                }),
+            );
+            emit_remote_status(&handle);
+        } else {
+            publish_remote_operation_stage(&handle, operation_id, "ready", false, "");
+        }
+    });
+}
+
+fn perform_lan_remote_enable(handle: tauri::AppHandle) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    let paths = harness_paths();
+    if RECOVERY_STATE
+        .lock()
+        .map(|state| state.safe_mode)
+        .unwrap_or(true)
+    {
+        return Err("安全模式下不能开启局域网 Remote。".into());
+    }
+    let harness_url: tauri::Url = CURRENT_HARNESS_URL
+        .lock()
+        .map_err(|_| "Harness 地址锁已损坏。".to_string())?
+        .clone()
+        .ok_or("Harness 尚未启动完成。")?
+        .parse()
+        .map_err(|error| format!("Harness 地址无效：{error}"))?;
+    let token = load_or_create_lan_remote_credential(&lan_remote_credential_path(&paths.dsh_home))?;
+    if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+        *saved = Some(token);
+    }
+    LAN_REMOTE_DESIRED.store(true, Ordering::SeqCst);
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_busy = true;
+        state.lan_enabled = false;
+        state.lan_error.clear();
+    }
+    if let Err(error) = sync_lan_remote(&handle, &harness_url) {
+        LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+        if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+            *saved = None;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn perform_lan_remote_disable(handle: tauri::AppHandle) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_busy = true;
+        state.lan_error.clear();
+    }
+    LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+    stop_lan_remote_process();
+    if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+        *saved = None;
+    }
+    if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_enabled = false;
+        state.lan_busy = false;
+        state.lan_endpoint.clear();
+        state.lan_pairing_url.clear();
+        state.lan_qr_svg.clear();
+        state.lan_error.clear();
+    }
+    emit_remote_status(&handle);
+    Ok(())
+}
+
+fn perform_lan_remote_reset(handle: tauri::AppHandle) -> Result<(), String> {
+    let _operation = OperationGuard::acquire()?;
+    let was_enabled = LAN_REMOTE_DESIRED.load(Ordering::SeqCst)
+        && REMOTE_STATE
+            .lock()
+            .map(|state| state.lan_enabled)
+            .unwrap_or(false);
+    let harness_url = if was_enabled {
+        Some(
+            CURRENT_HARNESS_URL
+                .lock()
+                .map_err(|_| "Harness 地址锁已损坏。".to_string())?
+                .clone()
+                .ok_or("Harness 尚未启动完成。")?
+                .parse::<tauri::Url>()
+                .map_err(|error| format!("Harness 地址无效：{error}"))?,
+        )
+    } else {
+        None
+    };
+    let paths = harness_paths();
+    let token = rotate_lan_remote_credential(&lan_remote_credential_path(&paths.dsh_home))?;
+    if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+        *saved = Some(token);
+    }
+    if let Some(harness_url) = harness_url {
+        if let Err(error) = sync_lan_remote(&handle, &harness_url) {
+            LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.lan_enabled = false;
+                state.lan_busy = false;
+                state.lan_endpoint.clear();
+                state.lan_pairing_url.clear();
+                state.lan_qr_svg.clear();
+            }
+            return Err(error);
+        }
+    } else if let Ok(mut state) = REMOTE_STATE.lock() {
+        state.lan_busy = false;
+        state.lan_error.clear();
+    }
+    emit_remote_status(&handle);
+    Ok(())
+}
+
+fn begin_lan_remote_operation(handle: tauri::AppHandle, enable: bool) {
+    let already_busy = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
+                true
+            } else {
+                state.lan_busy = true;
+                state.lan_error.clear();
+                false
+            }
+        })
+        .unwrap_or(true);
+    if already_busy {
+        emit_bridge_event(
+            &handle,
+            "remote-error",
+            serde_json::json!({
+                "message": "另一项局域网 Remote 操作正在进行。",
+                "transport": "lan",
+            }),
+        );
+        return;
+    }
+    emit_remote_status(&handle);
+    thread::spawn(move || {
+        let result = if enable {
+            perform_lan_remote_enable(handle.clone())
+        } else {
+            perform_lan_remote_disable(handle.clone())
+        };
+        if let Err(error) = result {
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.lan_enabled = false;
+                state.lan_busy = false;
+                state.lan_error = error.clone();
+            }
+            emit_bridge_event(
+                &handle,
+                "remote-error",
+                serde_json::json!({
+                    "message": error,
+                    "transport": "lan",
+                }),
+            );
+        }
+        emit_remote_status(&handle);
+    });
+}
+
+fn begin_lan_remote_reset(handle: tauri::AppHandle) {
+    let already_busy = REMOTE_STATE
+        .lock()
+        .map(|mut state| {
+            if remote_transition_in_progress(&state, OPERATION_ACTIVE.load(Ordering::SeqCst)) {
+                true
+            } else {
+                state.lan_busy = true;
+                state.lan_error.clear();
+                false
+            }
+        })
+        .unwrap_or(true);
+    if already_busy {
+        emit_bridge_event(
+            &handle,
+            "remote-error",
+            serde_json::json!({
+                "message": "另一项局域网 Remote 操作正在进行。",
+                "transport": "lan",
+            }),
+        );
+        return;
+    }
+    emit_remote_status(&handle);
+    thread::spawn(move || {
+        if let Err(error) = perform_lan_remote_reset(handle.clone()) {
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.lan_busy = false;
+                state.lan_error = error.clone();
+            }
+            emit_bridge_event(
+                &handle,
+                "remote-error",
+                serde_json::json!({
+                    "message": error,
+                    "transport": "lan",
+                }),
+            );
+        }
+        emit_remote_status(&handle);
+    });
 }
 
 fn usage_record_from_event(value: &serde_json::Value, cutoff_ms: u64) -> Option<serde_json::Value> {
@@ -1997,6 +3186,62 @@ fn handle_desktop_action(handle: tauri::AppHandle, destination: &tauri::Url) {
                 ),
             }
         }
+        "remote-status" => {
+            emit_remote_status(&handle);
+            let force = parameters.get("force").is_some_and(|value| value == "1");
+            refresh_remote_status_async(handle, force);
+        }
+        "remote-presented" => {
+            let Some(operation_id) = parameters
+                .get("id")
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                emit_bridge_event(
+                    &handle,
+                    "remote-error",
+                    serde_json::json!({
+                        "message": "Remote 操作编号无效。",
+                        "transport": "tailscale",
+                    }),
+                );
+                return;
+            };
+            let cleared = REMOTE_STATE
+                .lock()
+                .map(|mut state| clear_presented_remote_operation(&mut state, operation_id))
+                .unwrap_or(false);
+            if cleared {
+                emit_remote_status(&handle);
+            }
+        }
+        "remote-open-https" => {
+            thread::spawn(move || {
+                let result = inspect_tailscale_and_cache()
+                    .and_then(|info| remote::https_setup_url(&info))
+                    .and_then(|url| {
+                        handle
+                            .opener()
+                            .open_url(url, None::<&str>)
+                            .map_err(|error| format!("无法打开 Tailscale HTTPS 设置页：{error}"))
+                    });
+                if let Err(error) = result {
+                    emit_bridge_event(
+                        &handle,
+                        "remote-error",
+                        serde_json::json!({
+                            "message": error,
+                            "transport": "tailscale",
+                        }),
+                    );
+                }
+                emit_remote_status(&handle);
+            });
+        }
+        "remote-enable" => begin_remote_operation(handle, true),
+        "remote-disable" => begin_remote_operation(handle, false),
+        "remote-lan-enable" => begin_lan_remote_operation(handle, true),
+        "remote-lan-disable" => begin_lan_remote_operation(handle, false),
+        "remote-lan-reset" => begin_lan_remote_reset(handle),
         "status" => match desktop_status_value() {
             Ok(status) => emit_bridge_event(&handle, "desktop-status", status),
             Err(error) => emit_action_error(&handle, error),
@@ -2124,6 +3369,8 @@ fn build_main_window(
             },
         )
         .replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
+    let remote_bridge_script =
+        REMOTE_BRIDGE_SCRIPT.replace("__DSH_ACTION_TOKEN__", &DESKTOP_ACTION_TOKEN);
     let (title, width, height, min_width, min_height) = if recovery {
         (RECOVERY_TITLE, 820.0, 680.0, 640.0, 520.0)
     } else {
@@ -2139,6 +3386,7 @@ fn build_main_window(
         .initialization_script(usage_meter_script)
         .initialization_script(SELECTION_GUARD_SCRIPT)
         .initialization_script(smooth_stream_script)
+        .initialization_script(remote_bridge_script)
         .on_navigation(move |destination| {
             if destination.scheme() == "dsh-desktop" {
                 handle_desktop_action(navigation_handle.clone(), destination);
@@ -2230,6 +3478,15 @@ fn show_harness_window(
         };
         url.query_pairs_mut().append_pair(key, &value);
     }
+    let remote_operation = REMOTE_STATE
+        .lock()
+        .ok()
+        .and_then(|state| state.operation.clone());
+    let internal_remote_restart =
+        append_remote_operation_resume_parameter(&mut url, remote_operation.as_ref());
+    let remote_operation_id = internal_remote_restart
+        .then(|| remote_operation.as_ref().map(|operation| operation.id))
+        .flatten();
     if let Ok(mut origin) = ALLOWED_HARNESS_ORIGIN.lock() {
         *origin = Some(url.origin().ascii_serialization());
     }
@@ -2238,12 +3495,21 @@ fn show_harness_window(
             .navigate(url)
             .map_err(|error| format!("failed to open Harness: {error}"))?;
         let _ = window.set_title(PRODUCT_NAME);
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
-        let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
-        let _ = window.show();
-        let _ = window.set_focus();
+        if !internal_remote_restart {
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(960.0, 640.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(1440.0, 900.0));
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     } else {
         build_main_window(handle, WebviewUrl::External(url), false)?;
+    }
+    if let Some(operation_id) = remote_operation_id {
+        if let Ok(mut state) = REMOTE_STATE.lock() {
+            mark_remote_operation_presentation_handoff(&mut state, operation_id);
+        }
+        emit_remote_status(handle);
+        schedule_remote_handoff_status(handle.clone());
     }
     Ok(())
 }
@@ -2310,7 +3576,7 @@ fn launch_normal_with_pending_fallback(handle: &tauri::AppHandle) -> Result<(), 
 
     match start_harness(LaunchMode::Normal) {
         Ok((child, url, tail)) => {
-            register_harness(handle, child, LaunchMode::Normal, tail)?;
+            register_harness(handle, child, &url, LaunchMode::Normal, tail)?;
             show_harness_window(handle, url, LaunchMode::Normal, notice)
         }
         Err(first_error) if should_fallback => {
@@ -2324,7 +3590,7 @@ fn launch_normal_with_pending_fallback(handle: &tauri::AppHandle) -> Result<(), 
                     "新插件启动失败；profile 已回滚，但 Harness 仍无法启动。\n首次错误：{first_error}\n回滚后错误：{rollback_error}"
                 )
             })?;
-            register_harness(handle, child, LaunchMode::Normal, tail)?;
+            register_harness(handle, child, &url, LaunchMode::Normal, tail)?;
             show_harness_window(
                 handle,
                 url,
@@ -2347,7 +3613,7 @@ fn rollback_runtime_plugin_failure(handle: &tauri::AppHandle, first_error: &str)
     stop_managed_child();
     let result = rollback_pending_install(&paths.dsh_home).and_then(|label| {
         let (child, url, tail) = start_harness(LaunchMode::Normal)?;
-        register_harness(handle, child, LaunchMode::Normal, tail)?;
+        register_harness(handle, child, &url, LaunchMode::Normal, tail)?;
         show_harness_window(
             handle,
             url,
@@ -2405,6 +3671,24 @@ fn start_child_monitor(
                         && rollback_runtime_plugin_failure(&handle, &error)
                     {
                         return;
+                    }
+                    if REMOTE_DESIRED.load(Ordering::SeqCst) {
+                        deactivate_remote_transport(
+                            Some("Harness 已退出，Remote 已自动关闭。".into()),
+                            false,
+                            &handle,
+                        );
+                    }
+                    if LAN_REMOTE_DESIRED.swap(false, Ordering::SeqCst) {
+                        stop_lan_remote_process();
+                        if let Ok(mut state) = REMOTE_STATE.lock() {
+                            state.lan_enabled = false;
+                            state.lan_busy = false;
+                            state.lan_pairing_url.clear();
+                            state.lan_qr_svg.clear();
+                            state.lan_error = "Harness 已退出，局域网 Remote 已自动关闭。".into();
+                        }
+                        emit_remote_status(&handle);
                     }
                     set_recovery_state("failed", error, mode == LaunchMode::Safe);
                     if let Err(error) = show_recovery_window(&handle) {
@@ -2470,6 +3754,7 @@ fn start_child_monitor(
 fn register_harness(
     handle: &tauri::AppHandle,
     child: Child,
+    url: &tauri::Url,
     mode: LaunchMode,
     tail: StartupTail,
 ) -> Result<(), String> {
@@ -2494,6 +3779,25 @@ fn register_harness(
         }
     }
     start_child_monitor(handle.clone(), generation, mode, tail);
+    if mode == LaunchMode::Normal && REMOTE_DESIRED.load(Ordering::SeqCst) {
+        if let Some(operation_id) = active_tailscale_operation_id("enable") {
+            publish_remote_operation_stage(handle, operation_id, "starting-serve", true, "");
+        }
+        if let Err(error) = sync_remote_serve(handle, url) {
+            deactivate_remote_transport(Some(error), false, handle);
+        }
+    }
+    if mode == LaunchMode::Normal && LAN_REMOTE_DESIRED.load(Ordering::SeqCst) {
+        if let Err(error) = sync_lan_remote(handle, url) {
+            LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+            if let Ok(mut state) = REMOTE_STATE.lock() {
+                state.lan_enabled = false;
+                state.lan_busy = false;
+                state.lan_error = error;
+            }
+            emit_remote_status(handle);
+        }
+    }
     println!("[dsh] harness registered under supervisor (generation {generation})");
     Ok(())
 }
@@ -2626,6 +3930,32 @@ fn perform_recovery_action(handle: tauri::AppHandle, action: RecoveryAction) -> 
     let _operation = OperationGuard::acquire()?;
     let paths = harness_paths();
     set_recovery_state("restarting", "", matches!(action, RecoveryAction::SafeMode));
+    if matches!(action, RecoveryAction::SafeMode) {
+        REMOTE_DESIRED.store(false, Ordering::SeqCst);
+        stop_remote_serve_process();
+        set_remote_trusted_host(None);
+        LAN_REMOTE_DESIRED.store(false, Ordering::SeqCst);
+        stop_lan_remote_process();
+        if let Ok(mut saved) = LAN_REMOTE_TOKEN.lock() {
+            *saved = None;
+        }
+        if let Ok(mut state) = REMOTE_STATE.lock() {
+            state.phase = "off".into();
+            state.enabled = false;
+            state.busy = false;
+            state.endpoint.clear();
+            state.pairing_url.clear();
+            state.qr_svg.clear();
+            state.error.clear();
+            state.lan_enabled = false;
+            state.lan_busy = false;
+            state.lan_endpoint.clear();
+            state.lan_pairing_url.clear();
+            state.lan_qr_svg.clear();
+            state.lan_error.clear();
+            state.operation = None;
+        }
+    }
     stop_managed_child();
 
     if matches!(action, RecoveryAction::Restore) {
@@ -2648,7 +3978,7 @@ fn perform_recovery_action(handle: tauri::AppHandle, action: RecoveryAction) -> 
     };
     let result = if let Some(mode) = mode {
         start_harness(mode).and_then(|(child, url, tail)| {
-            register_harness(&handle, child, mode, tail)?;
+            register_harness(&handle, child, &url, mode, tail)?;
             if let Err(error) = show_harness_window(&handle, url, mode, None) {
                 stop_managed_child();
                 return Err(error);
@@ -2955,7 +4285,9 @@ fn main() {
         .expect("failed to build tauri app")
         .run(|app_handle, event| match event {
             tauri::RunEvent::Exit => {
-                println!("[dsh] exiting, stopping harness");
+                println!("[dsh] exiting, stopping Remote and harness");
+                stop_remote_serve_process();
+                stop_lan_remote_process();
                 stop_managed_child();
             }
             tauri::RunEvent::WindowEvent { label, event, .. } =>
@@ -2984,19 +4316,131 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
+        append_remote_operation_resume_parameter, clear_presented_remote_operation,
         create_product_subagent_preset, desktop_preferences_path, detected_plugin,
         enable_product_subagent_tool, ensure_desktop_settings_module_link, installed_plugins,
-        parse_readiness, pending_change_outcome, plugin_profile_state, plugin_state_changes,
+        lan_remote_credential_path, load_or_create_lan_remote_credential,
+        mark_remote_operation_presentation_handoff, parse_lan_remote_readiness, parse_readiness,
+        pending_change_outcome, plugin_profile_state, plugin_state_changes,
         plugin_state_fingerprint, product_subagent_marker, product_subagent_preset_ready,
-        product_subagent_status_value, read_desktop_preferences, redact_startup_line,
-        resolve_modules_directory, restore_last_known_good, safe_profile_manifest, same_file,
-        smooth_stream_enabled_from, usage_record_from_event, validate_plugin_spec,
-        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
-        CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
+        product_subagent_status_value, read_desktop_preferences, read_lan_remote_credential,
+        redact_startup_line, remote_transition_in_progress, resolve_modules_directory,
+        restore_last_known_good, rotate_lan_remote_credential, safe_profile_manifest, same_file,
+        smooth_stream_enabled_from, update_remote_operation_state, usage_record_from_event,
+        valid_lan_remote_token, validate_plugin_spec, without_cli_path_block,
+        write_profile_snapshot, write_smooth_stream_preference, RemoteOperationState,
+        RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT,
+        LEGACY_CLI_PATH_BLOCK,
     };
+
+    #[test]
+    fn remote_operation_stages_are_id_scoped_and_acknowledged_once() {
+        let mut state = RemoteRuntimeState {
+            operation: Some(RemoteOperationState::new(
+                41,
+                "enable",
+                "checking-tailscale",
+            )),
+            ..RemoteRuntimeState::default()
+        };
+
+        assert!(!update_remote_operation_state(
+            &mut state,
+            40,
+            "restarting-harness",
+            true,
+            "",
+        ));
+        assert_eq!(
+            state.operation.as_ref().unwrap().stage,
+            "checking-tailscale"
+        );
+        for stage in [
+            "restarting-harness",
+            "starting-serve",
+            "generating-pairing",
+            "restoring-harness",
+        ] {
+            assert!(update_remote_operation_state(
+                &mut state, 41, stage, true, ""
+            ));
+            assert_eq!(state.operation.as_ref().unwrap().stage, stage);
+            assert!(state.operation.as_ref().unwrap().active);
+            assert!(remote_transition_in_progress(&state, false));
+        }
+        assert!(update_remote_operation_state(
+            &mut state, 41, "ready", false, ""
+        ));
+        assert!(!remote_transition_in_progress(&state, false));
+        assert!(remote_transition_in_progress(&state, true));
+        state.lan_busy = true;
+        assert!(remote_transition_in_progress(&state, false));
+        state.lan_busy = false;
+        assert!(!state.operation.as_ref().unwrap().presentation_handoff_ready);
+        assert!(mark_remote_operation_presentation_handoff(&mut state, 41));
+        assert!(state.operation.as_ref().unwrap().presentation_handoff_ready);
+        assert!(!mark_remote_operation_presentation_handoff(&mut state, 40));
+        assert!(!clear_presented_remote_operation(&mut state, 40));
+        assert!(clear_presented_remote_operation(&mut state, 41));
+        assert!(state.operation.is_none());
+    }
+
+    #[test]
+    fn remote_operation_resume_parameter_survives_ready_and_disable_restarts() {
+        let mut ready = RemoteOperationState::new(51, "enable", "checking-tailscale");
+        ready.stage = "ready".into();
+        ready.active = false;
+        let mut ready_url: tauri::Url = "http://127.0.0.1:4001/".parse().unwrap();
+        assert!(append_remote_operation_resume_parameter(
+            &mut ready_url,
+            Some(&ready),
+        ));
+        assert_eq!(
+            ready_url
+                .query_pairs()
+                .find(|(key, _)| key == "dsh-desktop-remote-operation")
+                .map(|(_, value)| value.into_owned()),
+            Some("51".into()),
+        );
+
+        let disable = RemoteOperationState::new(52, "disable", "stopping-serve");
+        let mut disable_url: tauri::Url = "http://127.0.0.1:4002/".parse().unwrap();
+        assert!(append_remote_operation_resume_parameter(
+            &mut disable_url,
+            Some(&disable),
+        ));
+        assert!(disable_url
+            .as_str()
+            .contains("dsh-desktop-remote-operation=52"));
+    }
+
+    #[test]
+    fn clears_only_recovered_transient_remote_errors() {
+        let mut state = RemoteRuntimeState {
+            phase: "error".into(),
+            error: "Tailscale Serve exited".into(),
+            clear_error_when_tailscale_ready: true,
+            ..RemoteRuntimeState::default()
+        };
+        state.clear_recovered_transport_error(false);
+        assert_eq!(state.phase, "error");
+        assert!(!state.error.is_empty());
+
+        state.clear_recovered_transport_error(true);
+        assert_eq!(state.phase, "off");
+        assert!(state.error.is_empty());
+        assert!(!state.clear_error_when_tailscale_ready);
+
+        state.phase = "error".into();
+        state.error = "Port conflict".into();
+        state.clear_recovered_transport_error(true);
+        assert_eq!(state.error, "Port conflict");
+    }
 
     #[test]
     fn accepts_only_explicit_loopback_readiness_urls() {
@@ -3013,6 +4457,23 @@ mod tests {
             "dsh web: http://127.0.0.1:3210/?token=secret",
         ] {
             assert!(parse_readiness(line).is_none(), "accepted {line}");
+        }
+    }
+
+    #[test]
+    fn accepts_only_private_lan_proxy_readiness_urls() {
+        assert_eq!(
+            parse_lan_remote_readiness("dsh lan remote: http://192.168.1.20:8765/").unwrap(),
+            "http://192.168.1.20:8765/"
+        );
+        assert!(parse_lan_remote_readiness("dsh lan remote: http://10.0.0.4:8765/").is_ok());
+        for line in [
+            "dsh lan remote: http://8.8.8.8:8765/",
+            "dsh lan remote: https://192.168.1.20:8765/",
+            "dsh lan remote: http://192.168.1.20:8080/",
+            "dsh lan remote: http://192.168.1.20:8765/?token=secret",
+        ] {
+            assert!(parse_lan_remote_readiness(line).is_err(), "accepted {line}");
         }
     }
 
@@ -3076,6 +4537,70 @@ mod tests {
         let stored = read_desktop_preferences(&path).unwrap();
         assert!(!smooth_stream_enabled_from(&stored));
         assert!(!dsh_home.join("profiles/web").exists());
+        fs::remove_dir_all(dsh_home).unwrap();
+    }
+
+    #[test]
+    fn persists_and_rotates_the_lan_remote_credential_only_on_request() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-lan-credential-test-{}-{unique}",
+            std::process::id()
+        ));
+        let path = lan_remote_credential_path(&dsh_home);
+
+        let first = load_or_create_lan_remote_credential(&path).unwrap();
+        let after_restart = load_or_create_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&first));
+        assert_eq!(after_restart, first);
+        assert_eq!(
+            read_lan_remote_credential(&path).unwrap(),
+            Some(first.clone())
+        );
+
+        let rotated = rotate_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&rotated));
+        assert_ne!(rotated, first);
+        assert_eq!(read_lan_remote_credential(&path).unwrap(), Some(rotated));
+
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::metadata(path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(dsh_home).unwrap();
+    }
+
+    #[test]
+    fn repairs_an_unusable_persisted_lan_remote_credential() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dsh_home = std::env::temp_dir().join(format!(
+            "dsh-desktop-lan-credential-repair-test-{}-{unique}",
+            std::process::id()
+        ));
+        let path = lan_remote_credential_path(&dsh_home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "broken").unwrap();
+
+        let repaired = load_or_create_lan_remote_credential(&path).unwrap();
+        assert!(valid_lan_remote_token(&repaired));
+        assert_eq!(read_lan_remote_credential(&path).unwrap(), Some(repaired));
         fs::remove_dir_all(dsh_home).unwrap();
     }
 

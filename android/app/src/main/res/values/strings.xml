@@ -1,0 +1,523 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH Remote</string>
+
+    <!-- Shared actions and states -->
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_retry">Try again</string>
+    <string name="label_optional">Optional</string>
+    <string name="label_recommended">Recommended</string>
+    <string name="state_connection_failed">Connection failed</string>
+    <string name="state_showing_saved_results">Showing the last available result</string>
+    <string name="metadata_separator">· %1$s</string>
+    <string name="time_now">Now</string>
+
+    <plurals name="computer_count">
+        <item quantity="one">%1$d computer</item>
+        <item quantity="other">%1$d computers</item>
+    </plurals>
+    <plurals name="project_count">
+        <item quantity="one">%1$d project</item>
+        <item quantity="other">%1$d projects</item>
+    </plurals>
+    <plurals name="session_count">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+    <plurals name="running_count">
+        <item quantity="one">%1$d running</item>
+        <item quantity="other">%1$d running</item>
+    </plurals>
+
+    <!-- Computers and onboarding -->
+    <string name="computers_subtitle_onboarding">Continue Harness from your phone</string>
+    <string name="computers_subtitle_saved">Your computers</string>
+    <string name="computers_section_title">Computers</string>
+    <string name="computers_loading_title">Loading computers</string>
+    <string name="computers_loading_message">Reading connection details saved on this phone</string>
+    <string name="computers_remove_hint">Removing a computer only deletes connection details from this phone.</string>
+    <string name="computer_add_action">Add computer</string>
+    <string name="computer_manage">Manage %1$s</string>
+    <string name="computer_remove_title">Remove “%1$s”?</string>
+    <string name="computer_remove_message">This removes the connection from this phone. Projects, sessions, and tasks on the computer are not changed.</string>
+    <string name="computer_remove_confirm">Remove computer</string>
+    <string name="onboarding_title">Connect a computer on the same Wi-Fi</string>
+    <string name="onboarding_message">When this phone and your computer are on the same trusted Wi-Fi, scan the Desktop QR code. Tailscale is not required.</string>
+    <string name="onboarding_step_desktop_title">Open Mobile Remote in DSH Desktop</string>
+    <string name="onboarding_step_desktop_message">Choose Connect phone, then start local pairing.</string>
+    <string name="onboarding_step_qr_title">Scan the Desktop QR code</string>
+    <string name="onboarding_step_qr_message">The phone verifies the computer and saves the connection.</string>
+    <string name="onboarding_primary_action">Start same-Wi-Fi pairing</string>
+    <string name="onboarding_demo_action">No computer yet? Try the demo</string>
+    <string name="onboarding_demo_message">Explore projects, conversations, trajectory, and approvals offline.</string>
+    <string name="onboarding_remote_title">Need to connect across networks?</string>
+    <string name="onboarding_remote_message">Tailscale or your own HTTPS is optional after you leave the same Wi-Fi.</string>
+
+    <!-- Transports and connection state -->
+    <string name="transport_same_wifi">Same Wi-Fi</string>
+    <string name="transport_tailscale">Tailscale</string>
+    <string name="transport_custom_https">HTTPS</string>
+    <string name="transport_demo">Demo</string>
+    <string name="connection_unknown">Connection not checked</string>
+    <string name="connection_checking">Checking connection</string>
+    <string name="connection_reachable">Computer is reachable</string>
+    <string name="connection_unreachable">Computer is unreachable</string>
+
+    <!-- Add computer -->
+    <string name="computer_add_title">Add computer</string>
+    <string name="computer_add_subtitle">Pair locally or use private HTTPS</string>
+    <string name="pairing_local_section">Same Wi-Fi</string>
+    <string name="pairing_scan_title">Scan Desktop QR code</string>
+    <string name="pairing_scan_message">On your computer, open Mobile Remote, choose Connect phone, then start local pairing.</string>
+    <string name="pairing_no_tailscale_needed">Tailscale is not required on the phone</string>
+    <string name="pairing_camera_unavailable_title">Camera scanning is unavailable</string>
+    <string name="pairing_camera_unavailable_message">Local pairing requires a Desktop QR code. You can still configure a private HTTPS address below.</string>
+    <string name="remote_access_section">Not on the same Wi-Fi?</string>
+    <string name="remote_access_title">Tailscale or your own HTTPS</string>
+    <string name="remote_access_message">Use this away from your home or office network</string>
+    <string name="remote_access_expand">Configure remote access</string>
+    <string name="remote_access_collapse">Hide remote access</string>
+    <string name="remote_access_notice_title">Private remote access</string>
+    <string name="remote_access_notice_message">Enable remote access in Desktop first. Only enter an HTTPS endpoint you control; Tailscale Serve addresses usually end in .ts.net.</string>
+    <string name="computer_name_label">Display name</string>
+    <string name="computer_name_placeholder">For example, MacBook Pro</string>
+    <string name="computer_address_label">HTTPS address</string>
+    <string name="computer_address_placeholder">https://computer-name.tailnet.ts.net</string>
+    <string name="computer_address_supporting">Manual entry accepts HTTPS only. Same-Wi-Fi HTTP connections must be imported by QR code.</string>
+    <string name="computer_verify_action">Verify &amp; Save</string>
+    <string name="computer_verifying_action">Verifying computer…</string>
+    <string name="security_note_title">Connection details stay on this phone</string>
+    <string name="security_note_message">The app does not store model API keys, project files, or Tailscale account credentials.</string>
+    <string name="scanner_title">Scan computer QR code</string>
+    <string name="scanner_subtitle">Point the camera at the code shown by DSH Desktop</string>
+    <string name="scanner_placeholder_message">Camera scanning is unavailable on this device. Enter a private HTTPS address instead.</string>
+    <string name="scanner_manual_action">Enter HTTPS address instead</string>
+
+    <!-- Projects and sessions -->
+    <string name="projects_default_computer">Computer</string>
+    <string name="projects_screen_subtitle">Projects and sessions</string>
+    <string name="projects_section_title">Projects</string>
+    <string name="projects_summary">%1$s · %2$s</string>
+    <string name="projects_loading_title">Loading projects</string>
+    <string name="projects_loading_message">Syncing project groups and sessions from your computer</string>
+    <string name="projects_empty_title">No projects yet</string>
+    <string name="projects_empty_message">Add a project or open a directory in DSH Desktop first.</string>
+    <string name="projects_unavailable_title">Projects are temporarily unavailable</string>
+    <string name="projects_unavailable_message">The session service responded, but project groups could not be loaded. Try again.</string>
+    <string name="projects_directory_fallback">Project groups are unavailable; showing directory-based groups instead.</string>
+    <string name="project_expanded_state">Sessions expanded</string>
+    <string name="project_collapsed_state">Sessions collapsed</string>
+    <string name="sessions_empty_message">No sessions in this project yet.</string>
+    <plurals name="sessions_show_more">
+        <item quantity="one">Show %1$d more session</item>
+        <item quantity="other">Show %1$d more sessions</item>
+    </plurals>
+    <string name="sessions_show_less">Show fewer sessions</string>
+    <string name="session_new_action">New session</string>
+    <string name="session_new_title">New session</string>
+    <string name="session_new_subtitle">Choose the project for this session</string>
+    <string name="session_new_privacy_note">The session is created in the project directory on your computer. Code and execution stay there.</string>
+    <string name="session_new_default_title">New session</string>
+    <string name="session_creating">Creating session…</string>
+    <string name="session_create_failed_title">Could not create session</string>
+    <string name="session_state_idle">Ready</string>
+    <string name="session_state_running">Running</string>
+    <string name="session_state_waiting">Needs approval</string>
+    <string name="session_state_completed">Completed</string>
+    <string name="session_state_failed">Failed</string>
+
+    <!-- Conversation shell -->
+    <string name="session_default_title">Session</string>
+    <string name="session_screen_subtitle">Conversation</string>
+    <string name="session_more_actions">More session actions</string>
+    <string name="session_details_label">Session details</string>
+    <string name="session_planning_active">Planning mode on</string>
+    <string name="session_planning_inactive">Planning mode off</string>
+    <string name="session_planning_pending">Updating planning mode…</string>
+    <string name="session_loading_title">Loading conversation</string>
+    <string name="session_loading_message">Reading the latest transcript from your computer</string>
+    <string name="session_unavailable_title">Session unavailable</string>
+    <string name="session_unavailable_message">Return to the project and select the session again.</string>
+    <string name="conversation_empty_title">Start the conversation</string>
+    <string name="conversation_empty_message">Send an instruction to Harness running on your computer.</string>
+    <string name="conversation_streaming">Harness is working…</string>
+    <string name="conversation_jump_latest">Jump to latest activity</string>
+    <string name="conversation_send">Send message</string>
+    <string name="conversation_stop">Stop task</string>
+    <string name="conversation_assistant_label">Harness</string>
+    <string name="conversation_status_label">Status</string>
+    <string name="composer_placeholder">Tell Harness what to do next</string>
+    <string name="composer_input_label">Instruction for Harness</string>
+
+    <!-- Full conversation controls -->
+    <string name="action_save">Save</string>
+    <string name="action_open_settings">Open system settings</string>
+    <string name="history_load_older">Load earlier activity</string>
+    <string name="conversation_tab">Conversation</string>
+    <string name="trajectory_tab">Trajectory</string>
+    <plurals name="session_stats_turns">
+        <item quantity="one">%1$d turn</item>
+        <item quantity="other">%1$d turns</item>
+    </plurals>
+    <plurals name="session_stats_steps">
+        <item quantity="one">%1$d step</item>
+        <item quantity="other">%1$d steps</item>
+    </plurals>
+    <string name="session_stats">%1$s · %2$s · %3$s</string>
+    <string name="item_state_info">Info</string>
+    <string name="item_state_running">Running</string>
+    <string name="item_state_succeeded">Succeeded</string>
+    <string name="item_state_failed">Failed</string>
+    <string name="item_state_stopped">Stopped</string>
+    <string name="tool_default_title">Tool</string>
+    <string name="context_default_title">Context</string>
+    <string name="reasoning_title">Reasoning</string>
+    <string name="detail_default_title">Details</string>
+    <string name="detail_state_expanded">Expanded</string>
+    <string name="detail_state_collapsed">Collapsed</string>
+    <string name="attachment_image">Image</string>
+    <string name="attachment_preview_close">Close image preview</string>
+    <string name="attachment_remove">Remove image</string>
+    <string name="attachment_preparing">Preparing image…</string>
+    <string name="attachment_error_cache_limit">This attachment is too large to cache safely.</string>
+
+    <!-- Local task notifications -->
+    <string name="notification_channel_name">Task updates</string>
+    <string name="notification_channel_description">Status changes for tasks running on your computer</string>
+    <string name="notification_public_title">DSH Remote</string>
+    <string name="notification_public_body">Task update</string>
+    <string name="image_error_unreadable">This image could not be read. Choose another image.</string>
+    <string name="image_error_too_large">This image is too large after safe processing. Choose a smaller image.</string>
+    <string name="image_error_invalid">This image has invalid or unsafe dimensions.</string>
+    <string name="image_error_unsupported">The computer does not accept a safe image format available on this device.</string>
+    <string name="image_error_message_limit">The selected images exceed the computer’s per-message limit.</string>
+    <string name="image_error_clipboard_empty">The clipboard does not contain an image this app can read.</string>
+    <string name="composer_paste_image">Paste image from clipboard</string>
+    <string name="composer_choose_images">Choose images</string>
+
+    <!-- Queued prompts -->
+    <string name="queue_title">Next instructions</string>
+    <plurals name="queue_count">
+        <item quantity="one">%1$d queued item</item>
+        <item quantity="other">%1$d queued items</item>
+    </plurals>
+    <plurals name="queue_images">
+        <item quantity="one">%1$d image</item>
+        <item quantity="other">%1$d images</item>
+    </plurals>
+    <string name="queue_placement_queued">Queued</string>
+    <string name="queue_placement_steering">Steering now</string>
+    <string name="queue_placement_context">Context</string>
+    <string name="queue_edit">Edit queued instruction</string>
+    <string name="queue_edit_images_disabled">Image instructions cannot be edited</string>
+    <string name="queue_image_edit_hint">To change this instruction, remove it and send the images again.</string>
+    <string name="queue_image_edit_error">An instruction with images cannot be edited as text. Remove it and send the images again.</string>
+    <string name="queue_edit_title">Edit instruction</string>
+    <string name="queue_edit_input_label">Queued instruction</string>
+    <string name="queue_remove">Remove queued instruction</string>
+    <string name="queue_steer">Steer now</string>
+    <string name="queue_message_fallback">Queued message</string>
+
+    <!-- Approvals and structured questions -->
+    <string name="approval_tool">Tool: %1$s</string>
+    <string name="approval_allow_once">Allow once</string>
+    <string name="approval_reject">Reject</string>
+    <string name="interaction_failed">Could not send response</string>
+    <string name="interaction_pending_label">Needs your response</string>
+    <string name="question_number">Question %1$d</string>
+    <string name="question_custom_answer">Custom answer</string>
+    <string name="question_custom_add">Other answer</string>
+    <string name="question_custom_edit">Edit other answer</string>
+    <string name="question_submit">Submit answers</string>
+
+    <!-- Composer, images, references, and model routing -->
+    <string name="composer_add_images">Add images</string>
+    <string name="composer_add_reference">Mention a file or session</string>
+    <string name="composer_delivery_options">Choose delivery</string>
+    <string name="composer_queue">Queue</string>
+    <string name="composer_steer">Steer</string>
+    <string name="composer_queue_hint">This instruction will run after the current task.</string>
+    <string name="composer_steer_hint">This instruction will guide the current task at the next safe point.</string>
+    <string name="composer_disabled_interaction">Answer the pending request before sending another instruction.</string>
+    <string name="reference_title">References</string>
+    <string name="reference_failed">Could not search references</string>
+    <string name="reference_notice_title">Reference not added</string>
+    <string name="reference_path_invalid">This path contains unsupported control characters or quotation marks.</string>
+    <plurals name="reference_session_limit">
+        <item quantity="one">Each message can reference up to %1$d session.</item>
+        <item quantity="other">Each message can reference up to %1$d sessions.</item>
+    </plurals>
+    <string name="model_open">Choose model and reasoning</string>
+    <string name="model_default_label">Model</string>
+    <string name="model_picker_title">Model and reasoning</string>
+    <string name="model_unroutable_title">Current model is unavailable</string>
+    <string name="model_unroutable_message">Choose another model from this computer to recover the next request.</string>
+    <string name="model_scope_title">Applies to the next request</string>
+    <string name="model_scope_message">Desktop will also try to save this choice as the Harness default model.</string>
+    <string name="model_load_failed">Could not load models</string>
+    <string name="model_empty">No models are available from this computer.</string>
+    <string name="model_use_action">Use model</string>
+    <string name="reasoning_effort_title">Reasoning effort</string>
+    <string name="model_selection_applied_title">Model updated</string>
+    <string name="model_selection_applied">Using %1$s for the next request.</string>
+    <string name="demo_model_description">Fast everyday coding and analysis</string>
+    <string name="demo_reasoning_off_description">Disable deep reasoning</string>
+    <string name="demo_reasoning_high_description">Complex coding tasks</string>
+    <string name="demo_reasoning_max_description">Use the largest reasoning budget</string>
+    <string name="composer_error_title">Could not complete that action</string>
+
+    <!-- Goal inspector -->
+    <string name="goal_detail_open">View Goal details</string>
+    <string name="goal_detail_title">Current Goal</string>
+    <string name="goal_detail_objective">Objective</string>
+    <string name="goal_detail_phase">Phase</string>
+    <string name="goal_detail_rounds">Rounds</string>
+    <string name="goal_detail_revision">Revision</string>
+    <string name="goal_detail_blocked_reason">Needs attention</string>
+    <string name="goal_phase_active">Active Goal</string>
+    <string name="goal_phase_paused">Paused Goal</string>
+    <string name="goal_phase_blocked">Blocked Goal</string>
+    <string name="goal_phase_complete">Completed Goal</string>
+    <plurals name="goal_rounds_value">
+        <item quantity="one">%1$d / %2$d round</item>
+        <item quantity="other">%1$d / %2$d rounds</item>
+    </plurals>
+    <plurals name="goal_accessibility_value">
+        <item quantity="one">%1$s. %2$s. %3$d / %4$d round</item>
+        <item quantity="other">%1$s. %2$s. %3$d / %4$d rounds</item>
+    </plurals>
+
+    <!-- Trajectory ledger -->
+    <string name="trajectory_empty_title">No trajectory yet</string>
+    <string name="trajectory_empty_message">Requests, model responses, tools, and lifecycle events will appear here.</string>
+    <string name="trajectory_search_placeholder">Search trajectory</string>
+    <string name="trajectory_search_description">Search titles, summaries, and full event details</string>
+    <string name="trajectory_search_clear">Clear trajectory search</string>
+    <string name="trajectory_no_results_title">No matching trajectory</string>
+    <string name="trajectory_no_results_message">Try another title, summary, or detail keyword.</string>
+    <string name="trajectory_overview_events">Events</string>
+    <string name="trajectory_overview_turns">Turns</string>
+    <string name="trajectory_overview_tools">Tool calls</string>
+    <string name="trajectory_context_group">Session context</string>
+    <string name="trajectory_copy_all">Copy all</string>
+    <string name="trajectory_copied">Copied</string>
+    <string name="trajectory_copy_kind">Kind</string>
+    <string name="trajectory_copy_sequence">Sequence</string>
+    <string name="trajectory_copy_summary">Summary</string>
+    <string name="trajectory_copy_details">Details</string>
+    <string name="trajectory_copy_attachments">Attachments</string>
+    <plurals name="trajectory_group_event_count">
+        <item quantity="one">%1$d event</item>
+        <item quantity="other">%1$d events</item>
+    </plurals>
+    <string name="trajectory_turn">Turn %1$d</string>
+    <string name="trajectory_step">Step %1$d</string>
+    <string name="trajectory_kind_input">Input</string>
+    <string name="trajectory_kind_context">Context</string>
+    <string name="trajectory_kind_request">Model request</string>
+    <string name="trajectory_kind_assistant">Assistant</string>
+    <string name="trajectory_kind_tool">Tool</string>
+    <string name="trajectory_kind_goal">Goal</string>
+    <string name="trajectory_kind_plan">Plan</string>
+    <string name="trajectory_kind_lifecycle">Lifecycle</string>
+
+    <!-- Subagents -->
+    <string name="subagent_open">Open subagents</string>
+    <string name="subagent_title">Subagents</string>
+    <string name="subagent_subtitle">Inspect delegated work and continue supported tasks</string>
+    <string name="subagent_empty_title">No subagents</string>
+    <string name="subagent_empty_message">Delegated tasks will appear here when Harness creates them.</string>
+    <string name="subagent_nested_title">Nested subagents</string>
+    <string name="subagent_nested_subtitle">Delegated by %1$s</string>
+    <string name="subagent_nested_empty_title">No nested subagents</string>
+    <string name="subagent_nested_empty_message">This task has not delegated any additional work.</string>
+    <string name="subagent_load_failed">Could not load subagents</string>
+    <string name="subagent_parent_unavailable_title">Parent is unavailable</string>
+    <string name="subagent_parent_unavailable_message">History remains readable, but controls may be unavailable.</string>
+    <string name="subagent_continue_unavailable">This subagent cannot be continued until its parent is available.</string>
+    <string name="subagent_has_children">Has nested subagents</string>
+    <string name="subagent_open_children">Open nested subagents</string>
+    <string name="subagent_mode_one_shot">One-shot task</string>
+    <string name="subagent_mode_continuable">Continuable</string>
+    <string name="subagent_mode_unknown">Capability unknown</string>
+    <string name="subagent_activity_running">Running</string>
+    <string name="subagent_activity_inactive">Inactive</string>
+    <string name="subagent_activity_unavailable">Unavailable</string>
+    <string name="subagent_history_empty_title">No history yet</string>
+    <string name="subagent_history_empty_message">This subagent has not produced visible activity.</string>
+    <string name="subagent_continue_placeholder">Continue this subagent</string>
+    <string name="subagent_input_label">Instruction for subagent</string>
+    <string name="subagent_continue_send">Send to subagent</string>
+    <string name="subagent_stop">Stop subagent</string>
+    <plurals name="subagent_new_updates">
+        <item quantity="one">%1$d new update</item>
+        <item quantity="other">%1$d new updates</item>
+    </plurals>
+
+    <!-- Protocol-owned fallback copy -->
+    <string name="remote_untitled_task">Untitled task</string>
+    <string name="remote_computer_fallback">Computer</string>
+    <string name="remote_question_fallback">Question</string>
+    <string name="remote_context_harness">Harness context</string>
+    <string name="remote_context_model">Model context</string>
+    <string name="remote_context_project">Project instructions</string>
+    <string name="remote_context_plugin">Plugin context</string>
+    <string name="remote_context_capabilities">Available capabilities</string>
+    <string name="remote_context_skill">Skill context</string>
+    <string name="remote_context_session">Referenced session</string>
+    <string name="remote_context_goal">Goal continuation</string>
+    <string name="remote_context_system">System context</string>
+    <string name="remote_trajectory_user">User input</string>
+    <string name="remote_trajectory_model">Model response</string>
+    <string name="remote_trajectory_tool">Tool</string>
+    <string name="remote_trajectory_lifecycle">Lifecycle</string>
+    <string name="remote_metadata_stopped">Stopped</string>
+    <plurals name="remote_token_count">
+        <item quantity="one">%1$d token</item>
+        <item quantity="other">%1$d tokens</item>
+    </plurals>
+    <string name="remote_error_invalid_response">The computer returned invalid Harness data.</string>
+    <string name="remote_error_mismatched_response">The computer returned a response for a different request. Try again.</string>
+    <string name="remote_error_pairing_expired">The LAN pairing credential expired. Scan the Desktop QR code again.</string>
+    <string name="remote_error_too_large">The image or message exceeds the computer’s remote transfer limit.</string>
+    <string name="remote_error_http">The computer returned HTTP %1$d.</string>
+    <string name="remote_error_unsupported_decision">This request does not support that action.</string>
+    <string name="remote_error_attachment_not_found">This image is no longer available.</string>
+    <string name="remote_error_interaction_rejected">The computer rejected this response. Refresh and try again.</string>
+    <string name="remote_error_model_unavailable">This model or reasoning option is unavailable.</string>
+    <string name="remote_error_session_not_found">This session is no longer available on the computer.</string>
+    <string name="remote_error_subagent_not_resumable">This subagent cannot be continued or stopped remotely.</string>
+    <string name="endpoint_error_empty">Enter the Remote address shown by your computer.</string>
+    <string name="endpoint_error_invalid">This is not a valid DSH Remote address or pairing code.</string>
+    <string name="endpoint_error_insecure">Public addresses require HTTPS. HTTP is limited to authenticated local pairing.</string>
+    <string name="endpoint_error_unsupported_host">This is not a recognized private-network address. Use HTTPS instead.</string>
+    <string name="endpoint_error_credentials">A Remote address cannot contain an embedded user name or password.</string>
+    <string name="endpoint_error_pairing_required">Same-Wi-Fi HTTP requires scanning the Desktop pairing QR code.</string>
+    <string name="local_network_permission_denied">Allow Nearby devices access in Android settings to connect directly on the same Wi-Fi. Tailscale HTTPS remains available.</string>
+    <string name="remote_subagent_corrupt">Subagent data is incomplete</string>
+    <string name="remote_subagent_unsupported">Subagent type is unsupported</string>
+    <string name="remote_subagent_unavailable">Subagent is unavailable</string>
+    <string name="remote_system_prompt">System prompt</string>
+    <string name="remote_model_request">Model request</string>
+    <string name="remote_reasoning">Reasoning</string>
+    <string name="remote_answer">Answer</string>
+    <string name="remote_model_reasoning">Model reasoning</string>
+    <string name="remote_model_output">Model output</string>
+    <string name="remote_tool_running">Running on your computer</string>
+    <string name="remote_execution_failed">Execution failed</string>
+    <string name="remote_completed">Completed</string>
+    <string name="remote_input">Input</string>
+    <string name="remote_terminal_output">Terminal output</string>
+    <string name="remote_result">Result</string>
+    <string name="remote_goal_cleared">Goal cleared</string>
+    <string name="remote_goal_cleared_message">This session will no longer continue the goal automatically.</string>
+    <string name="remote_goal_created">Goal created</string>
+    <string name="remote_goal_paused">Goal paused</string>
+    <string name="remote_goal_resumed">Goal resumed</string>
+    <string name="remote_goal_completed">Goal completed</string>
+    <string name="remote_goal_attention">Goal needs attention</string>
+    <string name="remote_goal_updated">Goal updated</string>
+    <string name="remote_goal_updated_message">Harness updated the current goal.</string>
+    <plurals name="remote_goal_rounds">
+        <item quantity="one">%1$d/%2$d round</item>
+        <item quantity="other">%1$d/%2$d rounds</item>
+    </plurals>
+    <string name="remote_revision">revision %1$d</string>
+    <string name="remote_plan_enabled">Plan mode enabled</string>
+    <string name="remote_plan_disabled">Plan mode disabled</string>
+    <string name="remote_plan_enabled_message">Harness will prepare a plan before asking to execute it.</string>
+    <string name="remote_plan_disabled_message">Harness returned to normal execution mode.</string>
+    <string name="remote_model_retrying">Model request retrying</string>
+    <string name="remote_waiting_request">Waiting for the next request</string>
+    <string name="remote_retry_message">The connection or model request failed temporarily; Harness will retry.</string>
+    <string name="remote_retrying_in">Retrying in %1$s</string>
+    <string name="remote_context_compacted">Context compacted</string>
+    <string name="remote_context_compacted_message">Older content was compressed into a summary.</string>
+    <string name="remote_compaction_summary">Compaction summary</string>
+    <string name="remote_turn_completed">Turn completed</string>
+    <string name="remote_turn_ended">Turn ended</string>
+    <string name="remote_turn_completed_message">Harness completed this turn</string>
+    <string name="remote_turn_failed">Turn failed</string>
+    <string name="remote_model_error">The model returned an error.</string>
+    <string name="remote_output_limit">Output limit reached</string>
+    <string name="remote_output_limit_message">The model reached the output token limit.</string>
+    <string name="remote_turn_stopped">Turn stopped</string>
+    <string name="remote_turn_stopped_message">Execution was cancelled; existing output is retained.</string>
+    <string name="remote_turn_blocked">Turn blocked</string>
+    <string name="remote_turn_blocked_message">Harness cannot continue this step.</string>
+    <string name="remote_turn_interrupted">Turn interrupted</string>
+    <string name="remote_turn_interrupted_message">The session ended before completion.</string>
+    <string name="demo_host_name">Demo</string>
+    <string name="demo_host_description">Offline Demo</string>
+    <string name="demo_workspace_title">Sample App</string>
+    <string name="demo_session_review_title">Login flow release review</string>
+    <string name="demo_review_prompt">Review the login flow before release.</string>
+    <string name="demo_tool_read_title">Read project files</string>
+    <string name="demo_tool_read_summary">Read four authentication files</string>
+    <string name="demo_tool_files_title">Files</string>
+    <string name="demo_review_result">I found two release risks: session restoration is not covered by a regression test, and the offline error does not explain how to reconnect. I can fix both after you confirm.</string>
+    <string name="demo_subagent_label">Login regression test</string>
+    <string name="demo_subagent_result">The existing login tests do not cover process recreation.</string>
+    <string name="demo_received">Received. All execution still happens on your computer.</string>
+    <string name="demo_task_stopped">You stopped the task</string>
+    <string name="demo_allowed_once">Allowed once</string>
+    <string name="demo_rejected">Rejected</string>
+    <string name="demo_answer_submitted">Answer submitted</string>
+    <string name="demo_question_dismissed">Question dismissed</string>
+    <string name="demo_confirmation">Confirmation</string>
+    <string name="demo_apply_fixes_question">Apply the fixes before release?</string>
+    <string name="demo_apply_fixes_detail">1. Restore login state\n2. Improve offline guidance\n3. Add regression tests</string>
+    <string name="demo_approve_option">Approve</string>
+    <string name="demo_approve_description">Continue on the computer</string>
+    <string name="demo_not_yet_option">Not yet</string>
+    <string name="demo_not_yet_description">Keep the current result</string>
+    <string name="demo_goal_objective">Prepare the login flow for release</string>
+
+    <!-- About, privacy, and built-in remote guide -->
+    <string name="about_action">About and privacy</string>
+    <string name="about_title">About DSH Remote</string>
+    <string name="about_subtitle">GitHub beta · %1$s</string>
+    <string name="about_local_first_title">Your computer remains the host</string>
+    <string name="about_local_first_message">DSH Remote has no project-operated relay, account, analytics, advertising, push service, or model gateway. Code, credentials, session history, and execution stay on your computer.</string>
+    <string name="about_tailscale_title">Use Tailscale away from Wi-Fi</string>
+    <string name="about_tailscale_step_1">Install Tailscale on this Android device and the computer, then sign in to the same Tailnet.</string>
+    <string name="about_tailscale_step_2">Open the Tailnet device list and confirm both devices are connected before continuing.</string>
+    <string name="about_tailscale_step_3">If Desktop requests it, enable MagicDNS and HTTPS certificates. Device names used by certificates are recorded in public certificate logs.</string>
+    <string name="about_tailscale_step_4">In Desktop, enable remote access. Desktop configures Tailscale Serve, the Harness address, and the QR code without terminal commands.</string>
+    <string name="about_tailscale_step_5">Scan the remote-access QR code, turn off Wi-Fi, keep cellular data and Tailscale connected, then open a session and send a message.</string>
+    <string name="about_tailscale_download_android">Install Tailscale on Android</string>
+    <string name="about_tailscale_download_computer">Download Tailscale for the computer</string>
+    <string name="about_tailscale_open_admin">Open Tailnet device management</string>
+    <string name="about_tailscale_open_dns">Open Tailnet DNS settings</string>
+    <string name="about_tailscale_https_guide">Read MagicDNS and HTTPS guidance</string>
+    <string name="about_tailscale_serve_guide">Read about Tailscale Serve</string>
+    <string name="about_tailscale_funnel_title">Do not use Funnel</string>
+    <string name="about_tailscale_funnel_message">DSH Remote uses Tailscale Serve inside your private Tailnet. Funnel would expose the endpoint to the public internet.</string>
+    <string name="about_privacy_title">Privacy and support</string>
+    <string name="about_privacy_message">Saved computers are encrypted by Android Keystore. Selected photos are resized and re-encoded before transfer. Camera frames are used only to scan a pairing code.</string>
+    <string name="about_notification_limit">Task notifications are best effort while the app process is alive. Android may stop them after process death or under manufacturer background restrictions.</string>
+    <string name="about_privacy_policy_action">Read privacy policy</string>
+    <string name="about_support_action">Open support</string>
+    <string name="about_local_data_title">Local computer data</string>
+    <plurals name="about_computer_count">
+        <item quantity="one">%1$d computer</item>
+        <item quantity="other">%1$d computers</item>
+    </plurals>
+    <string name="about_local_data_message">Removing saved computers deletes their local names, addresses, and LAN credentials. It does not delete sessions, repositories, credentials, or settings from Desktop.</string>
+    <string name="about_remove_all_action">Remove all saved computers</string>
+    <string name="about_remove_all_title">Remove all computers?</string>
+    <string name="about_remove_all_message">This removes local pairing data from this Android device. Your Desktop projects and sessions are unchanged.</string>
+    <string name="about_remove_all_confirm">Remove all</string>
+    <string name="about_independent_project">Independent community project. Not an official DeepSeek AI or Tailscale product.</string>
+
+    <!-- Offline preview data -->
+    <string name="demo_computer_name">Demo computer</string>
+    <string name="demo_project_name">DSH Remote</string>
+    <string name="demo_session_title">Android Remote implementation</string>
+    <string name="demo_older_session_title">Review connection security</string>
+    <string name="demo_user_message">Continue implementing the Android companion.</string>
+    <string name="demo_assistant_message">I will keep the runtime on your computer and build a compact native Android control surface around the existing Remote protocol.</string>
+</resources>

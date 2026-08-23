@@ -1,0 +1,24 @@
+{
+  "rpcId": "fixture-question-rpc",
+  "payload": {
+    "type": "question/requested",
+    "sessionId": "session-running",
+    "questions": [
+      {
+        "id": "release-channel",
+        "header": "Channel",
+        "question": "Which release channel should be used?",
+        "options": [
+          {
+            "label": "Internal",
+            "description": "Limit the build to the current team."
+          },
+          {
+            "label": "Public beta",
+            "description": "Prepare the external TestFlight group."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DSH Desktop",
-  "version": "0.3.0",
+  "version": "0.4.0-beta.1",
   "identifier": "com.chokwinlee.deepseek-harness-desktop",
   "build": {
     "frontendDist": "./ui"
@@ -17,7 +17,11 @@
     "active": true,
     "targets": ["app", "dmg"],
     "externalBin": ["binaries/node", "binaries/dsh", "binaries/pnpm"],
-    "resources": ["../node_modules/**/*", "scripts/acknowledge-onboarding.mjs"],
+    "resources": [
+      "../node_modules/**/*",
+      "scripts/acknowledge-onboarding.mjs",
+      "../scripts/lan-remote-proxy.mjs"
+    ],
     "icon": ["../build/icon.icns", "../build/icon.png", "../build/icon.ico"],
     "category": "public.app-category.developer-tools",
     "macOS": {

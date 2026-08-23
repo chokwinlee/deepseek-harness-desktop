@@ -15,3 +15,21 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 The packaged application also contains transitive dependencies of DeepSeek Harness and Electron. Their license metadata is available in the installed npm package tree and generated application resources.
+
+## Android Remote dependencies
+
+The Android source preview uses the following third-party components:
+
+- AndroidX, Jetpack Compose, Material 3, Navigation, Lifecycle, CameraX,
+  ExifInterface, and Android test libraries, licensed under the
+  [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- Kotlin, Kotlin Coroutines, and Kotlin Serialization, licensed under the
+  [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- [OkHttp and Okio](https://square.github.io/okhttp/), licensed under the
+  [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- The bundled [ML Kit barcode-scanning SDK](https://developers.google.com/ml-kit/vision/barcode-scanning/android),
+  used only for on-device QR pairing. Its use is governed by the applicable
+  Google APIs and Android SDK terms.
+
+The Compose Preview Screenshot Testing plugin is a build-time verification
+tool and is not packaged as an application runtime service.

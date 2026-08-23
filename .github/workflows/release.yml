@@ -1,4 +1,4 @@
-name: Release desktop installers
+name: Release desktop installers and Android companion
 
 on:
   push:
@@ -6,11 +6,34 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  release-guard:
+    name: verify release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.22.0
+      - name: Require a version-matched tag from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          tag_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main; then
+            echo "Refusing to release: ${GITHUB_REF_NAME} is not on origin/main." >&2
+            exit 1
+          fi
+          node scripts/check-version-sync.mjs "${GITHUB_REF_NAME}"
+
   macos:
     name: build (mac-${{ matrix.artifact_arch }}, Tauri)
+    needs: release-guard
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -24,8 +47,8 @@ jobs:
             artifact_arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22.22.0
           cache: npm
@@ -94,7 +117,7 @@ jobs:
             codesign -dvv "$app" 2>&1 | grep -F 'Signature=adhoc'
           fi
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: installers-mac-${{ matrix.artifact_arch }}
           path: |
@@ -104,11 +127,12 @@ jobs:
 
   windows:
     name: build (win-x64, Electron)
+    needs: release-guard
     timeout-minutes: 45
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22.22.0
           cache: npm
@@ -121,7 +145,7 @@ jobs:
         run: npm run verify:packaged
       - name: Enforce release size budget
         run: npm run check:release-size -- --platform win
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: installers-win-x64
           path: |
@@ -129,14 +153,156 @@ jobs:
             release/*.zip
           if-no-files-found: error
 
+  android:
+    name: build (android-arm64/universal)
+    needs: release-guard
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    environment: android-release
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle.kts
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/app/build.gradle.kts
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Install Android SDK 37
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0'
+
+      - name: Verify tagged Android version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python3 - "$version" <<'PY'
+          import json
+          import sys
+
+          expected = sys.argv[1]
+          with open("../package.json", encoding="utf-8") as source:
+              actual = json.load(source)["version"]
+          if actual != expected:
+              raise SystemExit(f"tag version {expected!r} does not match package version {actual!r}")
+          PY
+
+      - name: Verify Android quality gates
+        run: |
+          ./gradlew \
+            testDebugUnitTest \
+            compileDebugAndroidTestKotlin \
+            lintDebug \
+            lintRelease \
+            validateDebugScreenshotTest \
+            verifyReleaseVersionCodeOrdering \
+            --no-daemon
+
+      - name: Configure Android release signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?ANDROID_KEYSTORE_BASE64 is required for release APKs}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?ANDROID_KEYSTORE_PASSWORD is required for release APKs}"
+          : "${ANDROID_KEY_ALIAS:?ANDROID_KEY_ALIAS is required for release APKs}"
+          : "${ANDROID_KEY_PASSWORD:?ANDROID_KEY_PASSWORD is required for release APKs}"
+          keystore_path="$RUNNER_TEMP/dsh-remote-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          chmod 600 "$keystore_path"
+          echo "ANDROID_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
+      - name: Build and verify Android Remote
+        shell: bash
+        env:
+          DSH_RELEASE_VERSION: ${{ github.ref_name }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export DSH_RELEASE_VERSION="${DSH_RELEASE_VERSION#v}"
+          ./gradlew assembleRelease bundleRelease --no-daemon
+
+          apk='app/build/outputs/apk/release/app-release.apk'
+          aab='app/build/outputs/bundle/release/app-release.aab'
+          test -f "$apk"
+          test -f "$aab"
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" \
+            verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/android-apk-verify.log"
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' \
+            "$RUNNER_TEMP/android-apk-verify.log"
+          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 4 "$apk"
+          "$ANDROID_HOME/build-tools/37.0.0/aapt2" dump badging "$apk" | \
+            grep -F "versionName='${DSH_RELEASE_VERSION}'"
+
+          bundletool="$RUNNER_TEMP/bundletool-all-1.18.2.jar"
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar' \
+            --output "$bundletool"
+          echo '378b5434cd1378bef6b2bc527b8c7f0ff2584b273830335bce54d6d0813c8584  '"$bundletool" | \
+            sha256sum --check
+          java -jar "$bundletool" validate --bundle="$aab" \
+            > "$RUNNER_TEMP/android-aab-validate.log"
+          java -jar "$bundletool" dump config --bundle="$aab" | \
+            tee "$RUNNER_TEMP/android-aab-config.log"
+          grep -Fq 'PAGE_ALIGNMENT_16K' "$RUNNER_TEMP/android-aab-config.log"
+
+          jar tf "$aab" | awk '
+            $0 ~ /^META-INF\/[[:alnum:]_-]+\.(RSA|DSA|EC)$/ { found = 1 }
+            END { exit !found }
+          '
+          jarsigner -J-Duser.language=en -J-Duser.country=US -verify "$aab" \
+            > "$RUNNER_TEMP/android-aab-verify.log" 2>&1
+
+          apk_cert="$(
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$apk" | \
+              sed -n 's/^.*certificate SHA-256 digest: //p' | head -n 1 | \
+              tr -d ':' | tr '[:upper:]' '[:lower:]'
+          )"
+          aab_cert="$(
+            keytool -J-Duser.language=en -J-Duser.country=US -printcert -jarfile "$aab" | \
+              sed -n 's/.*SHA256: //p' | head -n 1 | \
+              tr -d ':' | tr '[:upper:]' '[:lower:]'
+          )"
+          expected_cert='521cef4ba06c39a5b704f55d13109c918f43358dd8af530701c73e793c293aaa'
+          test -n "$apk_cert"
+          test "$apk_cert" = "$aab_cert"
+          test "$apk_cert" = "$expected_cert"
+
+          output="$RUNNER_TEMP/android-release"
+          mkdir -p "$output"
+          cp "$apk" "$output/DSH-Remote-Android-${GITHUB_REF_NAME}.apk"
+          cp "$aab" "$output/DSH-Remote-Android-${GITHUB_REF_NAME}.aab"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installers-android
+          path: ${{ runner.temp }}/android-release/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: play-bundle-android
+          path: ${{ runner.temp }}/android-release/*.aab
+          if-no-files-found: error
+
   publish:
     name: publish release
-    needs: [macos, windows]
+    needs: [release-guard, macos, windows, android]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: installers-*
           path: installers
@@ -152,9 +318,14 @@ jobs:
           release_intro="$(cat RELEASE_NOTES.md)"
           cd installers
           sha256sum * > SHA256SUMS.txt
+          release_args=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" * \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --generate-notes \
             --notes "$release_intro" \
-            --title "DSH Desktop ${GITHUB_REF_NAME}"
+            --title "DSH Desktop ${GITHUB_REF_NAME}" \
+            "${release_args[@]}"

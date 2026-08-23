@@ -1,0 +1,6 @@
+{
+  "type": "client-request",
+  "rpcId": "fixture-host-describe",
+  "method": "host.describe",
+  "payload": {}
+}

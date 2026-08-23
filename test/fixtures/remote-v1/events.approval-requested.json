@@ -1,0 +1,10 @@
+{
+  "rpcId": "fixture-approval-rpc",
+  "payload": {
+    "type": "approval/requested",
+    "sessionId": "session-running",
+    "approvalId": "approval-1",
+    "toolName": "exec_command",
+    "reason": "Run the reviewed build command"
+  }
+}

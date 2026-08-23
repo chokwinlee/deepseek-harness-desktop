@@ -54,6 +54,14 @@ test('smooth streaming setting copy follows the active DSH language', async () =
   assert.equal(api.settingCopy('en').title, 'Smooth streaming')
 })
 
+test('smooth streaming settings observer does not self-trigger a frame loop', async () => {
+  const source = await readFile(join(process.cwd(), 'src', 'smooth-stream.js'), 'utf8')
+  assert.match(source, /settingText\.textContent !== copy\.title/)
+  assert.match(source, /settingDescription\.textContent !== description/)
+  assert.match(source, /settingRow\.parentElement !== slot\)\) scheduleMount\(\)/)
+  assert.doesNotMatch(source, /\n    scheduleMount\(\)\n  }\n\n  function scheduleMount/)
+})
+
 test('smooth streaming recognizes append-only assistant text and reveals it adaptively', async () => {
   const api = await loadTestApi()
   assert.equal(api.isAppendChange('雨后', '雨后的城市'), true)

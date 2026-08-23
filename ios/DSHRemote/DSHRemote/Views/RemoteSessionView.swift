@@ -1,0 +1,974 @@
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+struct RemoteSessionView: View {
+    @StateObject private var viewModel: RemoteHostViewModel
+    @State private var expandedProjectIDs: Set<String> = []
+    @State private var fullyExpandedProjectIDs: Set<String> = []
+    @State private var didChooseInitialExpansion = false
+    @State private var didManuallyChangeExpansion = false
+    @State private var previousProjectPathsByID: [String: String] = [:]
+    @State private var showsNewSessionSheet = false
+    @State private var creatingSessionProjectID: String?
+    @State private var newSessionErrorMessage: String?
+    @State private var pendingCreatedSession: RemoteSessionSummary?
+    @State private var createdSession: RemoteSessionSummary?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(host: RemoteHost) {
+        let client = LiveHarnessRemoteClient(
+            baseURL: host.baseURL,
+            displayName: host.name,
+            accessToken: host.accessToken
+        )
+        _viewModel = StateObject(wrappedValue: RemoteHostViewModel(client: client))
+    }
+
+    init(demoClient: DemoHarnessRemoteClient = DemoHarnessRemoteClient()) {
+        _viewModel = StateObject(wrappedValue: RemoteHostViewModel(client: demoClient))
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                if viewModel.isLoading && viewModel.lastUpdated == nil {
+                    ProjectsLoadingView()
+                } else if let error = viewModel.errorMessage, viewModel.lastUpdated == nil {
+                    ProjectsConnectionError(message: error) {
+                        Task { await viewModel.refresh() }
+                    }
+                } else {
+                    if let error = viewModel.errorMessage {
+                        StaleProjectsBanner(message: error) {
+                            Task { await viewModel.refresh() }
+                        }
+                    }
+
+                    if projectGroups.isEmpty, viewModel.isLoadingProjects {
+                        projectCatalogLoadingView
+                    } else if projectGroups.isEmpty, viewModel.usesDirectoryProjectFallback {
+                        projectCatalogUnavailableView
+                    } else if projectGroups.isEmpty {
+                        emptyProjectsView
+                    } else {
+                        projectsHeading
+
+                        if viewModel.usesDirectoryProjectFallback {
+                            Label("项目分组暂不可用，当前按目录显示", systemImage: "folder.badge.questionmark")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 2)
+                        } else if viewModel.workspaceSnapshot == nil, viewModel.isLoadingProjects {
+                            HStack(spacing: 7) {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                Text("正在读取电脑上的项目分组…")
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
+                        }
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(projectGroups.enumerated()), id: \.element.id) { index, project in
+                                RemoteProjectCard(
+                                    project: project,
+                                    client: viewModel.client,
+                                    isExpanded: expandedProjectIDs.contains(project.id),
+                                    showsAllSessions: fullyExpandedProjectIDs.contains(project.id),
+                                    toggleExpanded: { toggleProject(project.id) },
+                                    toggleAllSessions: { toggleAllSessions(project.id) }
+                                )
+
+                                if index < projectGroups.count - 1 {
+                                    Rectangle()
+                                        .fill(RemoteTheme.hairline)
+                                        .frame(height: 0.5)
+                                        .padding(.leading, 52)
+                                }
+                            }
+                        }
+                        .remoteSurface(cornerRadius: 14)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 28)
+        }
+        .background(RemoteTheme.canvas.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            RemotePageHeader(
+                title: viewModel.client.displayName,
+                subtitle: "项目与会话"
+            ) {
+                HStack(spacing: 8) {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 32, height: 44)
+                            .accessibilityLabel("正在同步")
+                    }
+
+                    Button {
+                        newSessionErrorMessage = nil
+                        showsNewSessionSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(RemoteIconButtonStyle(tint: RemoteTheme.accent, emphasized: true))
+                    .disabled(creatableProjectGroups.isEmpty)
+                    .opacity(creatableProjectGroups.isEmpty ? 0.42 : 1)
+                    .accessibilityLabel("新建会话")
+                    .accessibilityHint("选择项目并在电脑上创建会话")
+                }
+            }
+        }
+        .remoteNavigationChromeHidden()
+        .refreshable { await viewModel.refresh() }
+        .task { await viewModel.monitor() }
+        .onChange(of: projectExpansionKey, initial: true) { _, _ in
+            synchronizeProjectExpansion()
+        }
+        .sheet(isPresented: $showsNewSessionSheet, onDismiss: openPendingCreatedSession) {
+            NewRemoteSessionSheet(
+                projects: creatableProjectGroups,
+                creatingProjectID: creatingSessionProjectID,
+                errorMessage: newSessionErrorMessage,
+                create: createSession
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(RemoteTheme.canvas)
+            .interactiveDismissDisabled(creatingSessionProjectID != nil)
+        }
+        .navigationDestination(item: $createdSession) { session in
+            RemoteConversationView(client: viewModel.client, session: session)
+        }
+    }
+
+    @ViewBuilder
+    private var projectsHeading: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("项目")
+                    .font(.title2.weight(.bold))
+                Text(projectSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 2)
+            .accessibilityElement(children: .combine)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("项目")
+                    .font(.title2.weight(.bold))
+
+                Spacer(minLength: 8)
+
+                Text(projectSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            .padding(.horizontal, 2)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var emptyProjectsView: some View {
+        RemoteEmptyState(
+            icon: "folder",
+            title: "还没有项目",
+            message: "先在 DSH Desktop 中添加项目或打开一个目录。"
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.top, 72)
+    }
+
+    private var projectCatalogLoadingView: some View {
+        RemoteLoadingState(
+            icon: "folder",
+            title: "正在读取项目",
+            message: "从电脑同步项目分组和会话归属"
+        )
+        .padding(.top, 72)
+    }
+
+    private var projectCatalogUnavailableView: some View {
+        RemoteEmptyState(
+            icon: "folder.badge.questionmark",
+            title: "暂时无法读取项目",
+            message: "会话服务已响应，但项目分组暂不可用。下拉即可重试。"
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.top, 72)
+    }
+
+    private var projectSummary: String {
+        let sessionCount = projectGroups.reduce(0) { $0 + $1.sessions.count }
+        let runningCount = projectGroups.reduce(0) { $0 + $1.runningCount }
+        if runningCount > 0 {
+            return "\(remoteLocalizedCount(projectGroups.count, unit: "project")) · \(remoteLocalizedCount(runningCount, unit: "running"))"
+        }
+        return "\(remoteLocalizedCount(projectGroups.count, unit: "project")) · \(remoteLocalizedCount(sessionCount, unit: "session"))"
+    }
+
+    private var projectGroups: [RemoteProjectGroup] {
+        if let snapshot = viewModel.workspaceSnapshot {
+            return authoritativeGroups(snapshot: snapshot, sessions: viewModel.sessions)
+        }
+        return directoryFallbackGroups(sessions: viewModel.sessions.filter {
+            !viewModel.archivedSessionIDs.contains($0.id)
+        })
+    }
+
+    private var creatableProjectGroups: [RemoteProjectGroup] {
+        projectGroups.filter { $0.workspaceID != nil || $0.path != nil }
+    }
+
+    private var projectExpansionKey: [String] {
+        projectGroups.map { "\($0.id):\($0.sessions.count):\($0.runningCount)" }
+    }
+
+    private func authoritativeGroups(
+        snapshot: RemoteWorkspaceSnapshot,
+        sessions: [RemoteSessionSummary]
+    ) -> [RemoteProjectGroup] {
+        let sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        var claimedSessionIDs = Set<String>()
+        var groups: [RemoteProjectGroup] = []
+
+        for workspace in snapshot.items {
+            let members = workspace.sessionIDs.compactMap { sessionID -> RemoteSessionSummary? in
+                guard !snapshot.archivedSessionIDs.contains(sessionID),
+                      claimedSessionIDs.insert(sessionID).inserted else { return nil }
+                return sessionsByID[sessionID]
+            }
+            groups.append(RemoteProjectGroup(
+                id: "workspace:\(workspace.id)",
+                workspaceID: workspace.id,
+                title: displayProjectTitle(workspace.title, path: workspace.path),
+                path: workspace.path,
+                sessions: members
+            ))
+        }
+
+        let ungrouped = sessions.filter {
+            !snapshot.archivedSessionIDs.contains($0.id) && !claimedSessionIDs.contains($0.id)
+        }
+        if !ungrouped.isEmpty {
+            groups.append(RemoteProjectGroup(
+                id: "workspace:__ungrouped__",
+                workspaceID: nil,
+                title: remoteLocalized("未分组"),
+                path: nil,
+                sessions: ungrouped
+            ))
+        }
+        return groups
+    }
+
+    private func directoryFallbackGroups(sessions: [RemoteSessionSummary]) -> [RemoteProjectGroup] {
+        var groupOrder: [String] = []
+        var grouped: [String: [RemoteSessionSummary]] = [:]
+        var metadata: [String: (title: String, path: String?)] = [:]
+
+        for session in sessions {
+            let path = nonBlank(session.projectPath)
+            let id = path.map { "directory:\(fallbackPathIdentity($0))" } ?? "directory:__ungrouped__"
+            if grouped[id] == nil {
+                groupOrder.append(id)
+                metadata[id] = (
+                    path == nil
+                        ? remoteLocalized("未分组")
+                        : (session.projectName ?? path.map(crossPlatformBasename) ?? remoteLocalized("未命名项目")),
+                    path
+                )
+            }
+            grouped[id, default: []].append(session)
+        }
+
+        return groupOrder.compactMap { id in
+            guard let details = metadata[id] else { return nil }
+            return RemoteProjectGroup(
+                id: id,
+                workspaceID: nil,
+                title: details.title,
+                path: details.path,
+                sessions: grouped[id] ?? []
+            )
+        }
+    }
+
+    private func synchronizeProjectExpansion() {
+        let groups = projectGroups
+        guard !groups.isEmpty else { return }
+        let currentIDs = Set(groups.map(\.id))
+        let currentPathsByID = Dictionary(uniqueKeysWithValues: groups.map {
+            ($0.id, projectPathIdentity($0))
+        })
+
+        if didManuallyChangeExpansion,
+           !expandedProjectIDs.isSubset(of: currentIDs) {
+            let expandedPaths = Set(expandedProjectIDs.compactMap { previousProjectPathsByID[$0] })
+            let stableIDs = expandedProjectIDs.intersection(currentIDs)
+            let migratedIDs = Set(groups.compactMap { group in
+                expandedPaths.contains(projectPathIdentity(group)) ? group.id : nil
+            })
+            expandedProjectIDs = stableIDs.union(migratedIDs)
+        }
+
+        if !fullyExpandedProjectIDs.isSubset(of: currentIDs) {
+            let expandedPaths = Set(fullyExpandedProjectIDs.compactMap { previousProjectPathsByID[$0] })
+            let stableIDs = fullyExpandedProjectIDs.intersection(currentIDs)
+            let migratedIDs = Set(groups.compactMap { group in
+                expandedPaths.contains(projectPathIdentity(group)) ? group.id : nil
+            })
+            fullyExpandedProjectIDs = stableIDs.union(migratedIDs)
+        }
+
+        let needsInitialChoice = !didChooseInitialExpansion
+            || (!didManuallyChangeExpansion && expandedProjectIDs.isDisjoint(with: currentIDs))
+        if needsInitialChoice {
+            didChooseInitialExpansion = true
+            expandedProjectIDs = Set(groups.filter { $0.runningCount > 0 }.map(\.id))
+            expandedProjectIDs.insert(groups[0].id)
+        }
+        previousProjectPathsByID = currentPathsByID
+    }
+
+    private func toggleProject(_ id: String) {
+        didManuallyChangeExpansion = true
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
+            if expandedProjectIDs.contains(id) {
+                expandedProjectIDs.remove(id)
+            } else {
+                expandedProjectIDs.insert(id)
+            }
+        }
+    }
+
+    private func toggleAllSessions(_ id: String) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1)) {
+            if fullyExpandedProjectIDs.contains(id) {
+                fullyExpandedProjectIDs.remove(id)
+            } else {
+                fullyExpandedProjectIDs.insert(id)
+            }
+        }
+    }
+
+    private func displayProjectTitle(_ title: String, path: String) -> String {
+        normalized(title)
+            ?? normalized(path).map(crossPlatformBasename)
+            ?? remoteLocalized("未命名项目")
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func nonBlank(_ value: String?) -> String? {
+        guard let value,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return value
+    }
+
+    private func fallbackPathIdentity(_ path: String) -> String {
+        let thirdCharacter = path.count >= 3
+            ? path[path.index(path.startIndex, offsetBy: 2)]
+            : nil
+        let isDrivePath = path.count >= 3
+            && path[path.index(after: path.startIndex)] == ":"
+            && (thirdCharacter == "/" || thirdCharacter == "\\")
+        let isUNCPath = path.hasPrefix("\\\\")
+        var identity = (isDrivePath || isUNCPath)
+            ? path.replacingOccurrences(of: "\\", with: "/")
+            : path
+        while identity.count > 1 && identity.hasSuffix("/") {
+            identity.removeLast()
+        }
+        if isDrivePath {
+            identity = identity.prefix(1).lowercased() + identity.dropFirst()
+        }
+        return identity
+    }
+
+    private func projectPathIdentity(_ group: RemoteProjectGroup) -> String {
+        group.path.map(fallbackPathIdentity) ?? "__ungrouped__"
+    }
+
+    private func crossPlatformBasename(_ path: String) -> String {
+        path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
+    }
+
+    private func createSession(_ project: RemoteProjectGroup) {
+        guard creatingSessionProjectID == nil else { return }
+        creatingSessionProjectID = project.id
+        newSessionErrorMessage = nil
+
+        Task {
+            do {
+                let sessionID = try await viewModel.client.createSession(
+                    workspaceID: project.workspaceID,
+                    cwd: project.workspaceID == nil ? project.path : nil
+                )
+                pendingCreatedSession = RemoteSessionSummary(
+                    id: sessionID,
+                    title: remoteLocalized("新会话"),
+                    updatedAt: Date(),
+                    running: false,
+                    projectName: project.title,
+                    projectPath: project.path
+                )
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                creatingSessionProjectID = nil
+                showsNewSessionSheet = false
+                await viewModel.refresh(silently: true)
+            } catch {
+                newSessionErrorMessage = error.localizedDescription
+                creatingSessionProjectID = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func openPendingCreatedSession() {
+        guard let session = pendingCreatedSession else { return }
+        pendingCreatedSession = nil
+        createdSession = session
+    }
+}
+
+private struct RemoteProjectGroup: Identifiable {
+    let id: String
+    let workspaceID: String?
+    let title: String
+    let path: String?
+    let sessions: [RemoteSessionSummary]
+
+    var runningCount: Int { sessions.count(where: \.running) }
+}
+
+private struct NewRemoteSessionSheet: View {
+    let projects: [RemoteProjectGroup]
+    let creatingProjectID: String?
+    let errorMessage: String?
+    let create: (RemoteProjectGroup) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            RemoteSheetHeader(
+                title: "新建会话",
+                subtitle: "选择会话所属的项目"
+            )
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let errorMessage {
+                        RemoteInlineNotice(
+                            title: "无法新建会话",
+                            message: errorMessage,
+                            icon: "exclamationmark.triangle.fill",
+                            tone: .danger
+                        )
+                        .padding(.bottom, 2)
+                    }
+
+                    RemoteSectionHeader(
+                        title: "项目",
+                        detail: remoteLocalizedCount(projects.count, unit: "project")
+                    )
+                        .padding(.horizontal, 2)
+
+                    ForEach(projects) { project in
+                        Button {
+                            create(project)
+                        } label: {
+                            projectRow(project)
+                        }
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
+                        .disabled(creatingProjectID != nil)
+                        .remoteSurface(cornerRadius: 14)
+                        .accessibilityLabel(
+                            remoteLocalizedFormat("在 %@ 中新建会话", project.title)
+                        )
+                    }
+
+                    Text("会话在电脑上的项目目录中创建，代码与执行环境仍保留在电脑上。")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
+                        .padding(.top, 4)
+                }
+                .padding(.horizontal, RemoteTheme.pagePadding)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
+            }
+        }
+        .background(RemoteTheme.canvas.ignoresSafeArea())
+    }
+
+    private func projectRow(_ project: RemoteProjectGroup) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 40, height: 40)
+                .background(RemoteTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(project.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if let path = project.path {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if creatingProjectID == project.id {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在新建会话")
+            } else {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(RemoteTheme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 64)
+        .contentShape(Rectangle())
+    }
+}
+
+#if DEBUG
+@ViewBuilder
+func newRemoteSessionPreview() -> some View {
+    NewRemoteSessionSheet(
+        projects: [
+            RemoteProjectGroup(
+                id: "workspace:video",
+                workspaceID: "video",
+                title: "video",
+                path: "/Users/demo/Documents/ChatGPT/video",
+                sessions: []
+            ),
+            RemoteProjectGroup(
+                id: "workspace:dsh-plugin-app",
+                workspaceID: "dsh-plugin-app",
+                title: "dsh-plugin-app",
+                path: "/Users/demo/Documents/ChatGPT/dsh-plugin-app",
+                sessions: []
+            ),
+            RemoteProjectGroup(
+                id: "workspace:deepseek-harness-desktop",
+                workspaceID: "deepseek-harness-desktop",
+                title: "deepseek-harness-desktop",
+                path: "/Users/demo/Documents/ChatGPT/deepseek-harness-desktop",
+                sessions: []
+            ),
+        ],
+        creatingProjectID: nil,
+        errorMessage: nil,
+        create: { _ in }
+    )
+}
+#endif
+
+private struct RemoteProjectCard: View {
+    private let collapsedSessionLimit = 5
+
+    let project: RemoteProjectGroup
+    let client: any HarnessRemoteClient
+    let isExpanded: Bool
+    let showsAllSessions: Bool
+    let toggleExpanded: () -> Void
+    let toggleAllSessions: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: toggleExpanded) {
+                projectHeader
+            }
+            .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
+            .accessibilityLabel(project.title)
+            .accessibilityValue(projectAccessibilityValue)
+            .accessibilityHint(isExpanded ? "轻点收起会话" : "轻点展开会话")
+
+            if isExpanded {
+                Divider()
+                    .overlay(RemoteTheme.hairline)
+                    .padding(.leading, 48)
+
+                if project.sessions.isEmpty {
+                    Label("暂无会话", systemImage: "bubble.left")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 18)
+                } else {
+                    ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                        NavigationLink {
+                            RemoteConversationView(client: client, session: session)
+                        } label: {
+                            RemoteProjectSessionRow(session: session)
+                        }
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
+
+                        if index < visibleSessions.count - 1 || hasHiddenSessions || showsAllSessions {
+                            Divider()
+                                .overlay(RemoteTheme.hairline)
+                                .padding(.leading, 48)
+                        }
+                    }
+
+                    if hasHiddenSessions || showsAllSessions {
+                        Button(action: toggleAllSessions) {
+                            HStack(spacing: 6) {
+                                Text(
+                                    showsAllSessions
+                                        ? remoteLocalized("收起会话")
+                                        : remoteLocalizedFormat(
+                                            "查看其余 %lld 个会话",
+                                            project.sessions.count - collapsedSessionLimit
+                                        )
+                                )
+                                Image(systemName: showsAllSessions ? "chevron.up" : "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(RemoteTheme.accent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                        }
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 10))
+                    }
+                }
+            }
+        }
+        .background(isExpanded ? RemoteTheme.raisedSurface.opacity(0.45) : Color.clear)
+    }
+
+    @ViewBuilder
+    private var projectHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+                projectIdentity
+                statusBadge
+                    .padding(.leading, 56)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 12) {
+                projectIdentity
+                Spacer(minLength: 8)
+                statusBadge
+            }
+            .padding(16)
+            .frame(minHeight: 66)
+        }
+    }
+
+    private var projectIdentity: some View {
+        HStack(spacing: 11) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12)
+
+            Image(systemName: isExpanded ? "folder.fill" : "folder")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(RemoteTheme.accent)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(project.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+
+                if let path = project.path {
+                    Text(abbreviatedPath(path))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.setItems(
+                                    [[UTType.plainText.identifier: path]],
+                                    options: [.localOnly: true]
+                                )
+                            } label: {
+                                Label("复制完整路径", systemImage: "doc.on.doc")
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    private var statusBadge: some View {
+        Text(
+            project.runningCount > 0
+                ? remoteLocalizedCount(project.runningCount, unit: "running")
+                : remoteLocalizedCount(project.sessions.count, unit: "session")
+        )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(project.runningCount > 0 ? RemoteTheme.accent : .secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                project.runningCount > 0
+                    ? RemoteTheme.accent.opacity(0.13)
+                    : RemoteTheme.mutedSurface,
+                in: Capsule()
+            )
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var visibleSessions: [RemoteSessionSummary] {
+        if showsAllSessions { return project.sessions }
+        return Array(project.sessions.prefix(collapsedSessionLimit))
+    }
+
+    private var hasHiddenSessions: Bool {
+        !showsAllSessions && project.sessions.count > collapsedSessionLimit
+    }
+
+    private var projectAccessibilityValue: String {
+        let expansion = remoteLocalized(isExpanded ? "已展开" : "已收起")
+        if project.runningCount > 0 {
+            return remoteLocalizedFormat(
+                "%lld 个会话，%lld 个运行中，%@",
+                project.sessions.count,
+                project.runningCount,
+                expansion
+            )
+        }
+        return remoteLocalizedFormat("%lld 个会话，%@", project.sessions.count, expansion)
+    }
+
+    private func abbreviatedPath(_ path: String) -> String {
+        let separator = path.contains("\\") ? "\\" : "/"
+        let components = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).map(String.init)
+        guard components.count > 2 else { return path }
+        return "…\(separator)\(components.suffix(2).joined(separator: separator))"
+    }
+}
+
+private struct RemoteProjectSessionRow: View {
+    let session: RemoteSessionSummary
+
+    var body: some View {
+        HStack(spacing: 12) {
+            statusIndicator
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(session.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    if session.running {
+                        Text("执行中")
+                            .foregroundStyle(RemoteTheme.accent)
+                    }
+                    Text(relativeUpdate)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(session.title)
+        .accessibilityValue(
+            session.running
+                ? remoteLocalizedFormat("执行中，%@", relativeUpdate)
+                : relativeUpdate
+        )
+        .accessibilityHint("打开会话")
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        if session.running {
+            ZStack {
+                Circle()
+                    .fill(RemoteTheme.accent.opacity(0.16))
+                    .frame(width: 20, height: 20)
+                Image(systemName: "waveform")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(RemoteTheme.accent)
+            }
+        } else {
+            Color.clear
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var relativeUpdate: String {
+        let seconds = max(0, Date().timeIntervalSince(session.updatedAt))
+        if seconds < 60 { return remoteLocalized("刚刚更新") }
+        if seconds < 604_800 {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return formatter.localizedString(fromTimeInterval: -seconds)
+        }
+        return session.updatedAt.formatted(date: .abbreviated, time: .omitted)
+    }
+}
+
+private struct StaleProjectsBanner: View {
+    let message: String
+    let retry: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    bannerMessage
+                    Button("重试", action: retry)
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                        .foregroundStyle(RemoteTheme.accent)
+                        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 11) {
+                    bannerMessage
+                    Spacer(minLength: 8)
+                    Button("重试", action: retry)
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
+                        .foregroundStyle(RemoteTheme.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+            }
+        }
+        .padding(13)
+        .background(RemoteTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(RemoteTheme.warning.opacity(0.18), lineWidth: 1)
+        }
+    }
+
+    private var bannerMessage: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(RemoteTheme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("连接中断 · 显示上次结果")
+                    .font(.subheadline.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            }
+        }
+    }
+}
+
+private struct ProjectsConnectionError: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        RemoteEmptyState(
+            icon: "wifi.exclamationmark",
+            title: "无法连接这台电脑",
+            message: remoteLocalizedFormat(
+                "请确认 DSH Desktop 正在运行且手机 Remote 已开启。\n%@",
+                message
+            ),
+            action: retry
+        ) {
+            Label("重新连接", systemImage: "arrow.clockwise")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 72)
+    }
+}
+
+private struct ProjectsLoadingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("项目")
+                    .font(.title2.weight(.bold))
+                Spacer()
+                ProgressView()
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 2)
+
+            ForEach(0..<2, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "folder")
+                            .frame(width: 32)
+                        VStack(alignment: .leading, spacing: 7) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .frame(width: index == 0 ? 128 : 96, height: 15)
+                            RoundedRectangle(cornerRadius: 3)
+                                .frame(width: index == 0 ? 190 : 150, height: 10)
+                        }
+                    }
+                    Divider()
+                    RoundedRectangle(cornerRadius: 3)
+                        .frame(height: 42)
+                }
+                .foregroundStyle(.secondary.opacity(0.22))
+                .padding(16)
+                .background(RemoteTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(RemoteTheme.hairline, lineWidth: 1)
+                }
+                .accessibilityHidden(true)
+            }
+
+            Text("正在读取电脑上的项目与会话…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+}
