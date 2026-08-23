@@ -1,0 +1,21 @@
+{
+  "rpcId": "fixture-session-list",
+  "result": {
+    "ok": true,
+    "value": {
+      "items": [
+        {
+          "sessionId": "session-running",
+          "updatedAt": 1787450400000,
+          "running": true,
+          "blank": false,
+          "cwd": "/Users/demo/project",
+          "origin": "user",
+          "projections": {
+            "title": "Android parity fixture"
+          }
+        }
+      ]
+    }
+  }
+}

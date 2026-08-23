@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.3.0",
+  "version": "0.4.0-beta.1",
   "description": "Compact unofficial desktop host for DeepSeek Harness, powered by Tauri on macOS",
   "private": true,
   "license": "MIT",
@@ -36,6 +36,8 @@
     "verify:packaged": "node scripts/verify-packaged-runtime.mjs",
     "build:mac": "scripts/build-tauri.sh",
     "verify:tauri": "scripts/verify-tauri.sh",
+    "android:check": "cd android && ./gradlew testDebugUnitTest lintDebug lintRelease validateDebugScreenshotTest verifyReleaseVersionCodeOrdering --no-daemon",
+    "android:apk": "cd android && ./gradlew assembleDebug --no-daemon",
     "check:release-size": "node scripts/check-release-size.mjs",
     "check:version": "node scripts/check-version-sync.mjs"
   },

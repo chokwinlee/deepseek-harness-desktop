@@ -1,11 +1,12 @@
 <div align="center">
   <img src="build/icon.png" width="96" height="96" alt="DSH Desktop 图标">
   <h1>DSH Desktop</h1>
-  <p><strong>轻量、自包含的 DeepSeek Harness 桌面宿主，以及原生 iPhone Remote。</strong></p>
+  <p><strong>轻量、自包含的 DeepSeek Harness 桌面宿主，以及原生 iPhone 与 Android Remote。</strong></p>
   <p>
-    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest">下载</a>
+    <a href="#下载">下载</a>
     · <a href="#核心能力">核心能力</a>
     · <a href="#iphone-remote源码预览">iPhone Remote</a>
+    · <a href="#android-remotegithub-内测">Android Remote</a>
     · <a href="#开发">开发</a>
     · <a href="CONTRIBUTING.md">参与贡献</a>
   </p>
@@ -15,7 +16,7 @@
   </p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml"><img src="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
-    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/chokwinlee/deepseek-harness-desktop" alt="最新版本"></a>
+    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/chokwinlee/deepseek-harness-desktop" alt="最新稳定版本"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/chokwinlee/deepseek-harness-desktop" alt="MIT 许可证"></a>
   </p>
 </div>
@@ -24,7 +25,7 @@
 
 *macOS 下载包低于 90 MB，完整内置 Harness rc.8 运行时。*
 
-DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。本仓库还包含 DSH Remote，一个用于在 iPhone 上继续查看电脑项目、会话和运行任务的原生 SwiftUI 配套 App。当前构建使用 `@deepseek-ai/dsh@0.1.0-rc.8`，侧边栏会同时显示桌面版与内置 Harness 版本。桌面应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
+DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。本仓库还包含 DSH Remote 原生 iPhone 与 Android 配套 App，用于继续查看电脑项目、会话和运行任务。当前构建使用 `@deepseek-ai/dsh@0.1.0-rc.8`，侧边栏会同时显示桌面版与内置 Harness 版本。桌面应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
 > [!IMPORTANT]
 > 这是独立社区项目，与 DeepSeek AI 官方产品无关。DeepSeek Harness 仍处于开发者预览阶段，后续版本可能包含不兼容改动。
@@ -34,9 +35,9 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 - **多模态会话**　所选服务商与模型声明支持图片输入后，可以直接粘贴或附加图片，并沿用 Harness 的标准会话流程。图片消息会保留在会话历史中。
 - **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
 - **轻巧的 macOS 安装包**　低于 90 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
-- **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.3.0 · Harness rc.8`。
+- **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.4.0-beta.1 · Harness rc.8`。
 - **开箱即用**　启动 Harness 所需的内容已经完整内置，无需另装 Node.js，也不用执行终端命令。应用会自动启动和关闭本地运行时。
-- **原生 iPhone Remote**　可在受信任的同一 Wi-Fi 或用户自己的 Tailscale 网络中配对，随后浏览项目、新建会话、发送或追加指令、停止任务、处理审批与问题、发送图片并跟进子代理；执行始终留在电脑上。
+- **原生手机 Remote**　SwiftUI iPhone 客户端与 Kotlin/Compose Android 客户端可在受信任的同一 Wi-Fi 或用户自己的 Tailscale 网络中配对，随后浏览项目、新建会话、引导任务、处理审批、发送图片并跟进子代理；执行始终留在电脑上。
 
 费用来自本地 Token 记录和可用的公开模型价格，只作为估算。无法匹配价格的模型会明确显示为未定价，不会被当作免费。
 
@@ -51,7 +52,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 ## iPhone Remote（源码预览）
 
 > [!NOTE]
-> DSH Remote 当前属于 **iOS 源码预览**。目前还没有 App Store 或公开 TestFlight 构建，GitHub Release 也不包含可直接安装的 iOS App。公开 TestFlight 正在准备中。
+> DSH Remote 当前属于 **iOS 源码预览**。首个外部 TestFlight 构建已经提交 Beta App Review，但 Apple 批准前还没有公开链接；GitHub Release 也不包含可直接安装的 iOS App。
 
 <p align="center">
   <img src="docs/images/remote-home-zh.png" width="30%" alt="DSH Remote 中文同一 Wi-Fi 配对界面">
@@ -82,25 +83,50 @@ iOS 源码预览会跟随设备为 App 选择的语言，目前已完整覆盖�
 ### 配对和使用 Remote
 
 1. 安装并打开最新 DSH Desktop。
-2. 在 Desktop 打开 **设置 → 通用 → 手机 Remote → 连接 iPhone**。
+2. 在 Desktop 打开 **设置 → 通用 → 手机 Remote → 连接手机**。
 3. 同一受信任 Wi-Fi 下开启本地配对，并在 DSH Remote 扫描二维码。
 4. 使用蜂窝网络或其他外网时，在 Desktop 或 iPhone 打开内置 Tailscale 教程，开启跨网络连接，再扫描 HTTPS 二维码。
 5. 进入项目，新建或继续会话；所有执行仍由电脑完成。
 
 进一步阅读：[iOS 源码预览说明](ios/DSHRemote/README.zh-CN.md)、[Tailscale 中文教程](docs/TAILSCALE_REMOTE_SETUP.zh-CN.md)、[隐私政策](docs/PRIVACY.md)、[支持说明](docs/SUPPORT.md)和 [App Review 说明](docs/APP_REVIEW_NOTES.md)。
 
+## Android Remote（GitHub 内测）
+
+> [!IMPORTANT]
+> [`v0.4.0-beta.1`](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1) 是可安装的 **GitHub 测试预发布版**，要求 Android 8.0 或更高版本，并需要同一 Release 中配套的 DSH Desktop。当前尚未通过 Google Play 分发。
+
+<p align="center">
+  <img src="docs/images/android-remote-home-zh.png" width="42%" alt="DSH Remote Android 中文深色引导界面">
+  <img src="docs/images/android-remote-conversation-zh.png" width="42%" alt="DSH Remote Android 中文审批与对话界面">
+</p>
+<p align="center"><sub>本地优先配对与离线 Demo · 对话、队列和审批控制</sub></p>
+
+Android 与 iOS 复用相同的本地优先 Remote v1 协议、二维码格式、Desktop LAN 代理和 Tailscale HTTPS 流程。当前实现包括加密多电脑存储、项目和会话、完整对话与轨迹、queue/steer、审批与结构化问题、图片与引用、模型、Goal/Plan、多层子代理、本地通知、离线 Demo、英文、简体中文、深色外观和 TalkBack 语义。
+
+内测步骤：
+
+1. 打开 [`v0.4.0-beta.1` 预发布页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1)，在电脑安装该页面提供的 Desktop 包。
+2. 在 Android 8.0 或更高版本的设备下载 `DSH-Remote-Android-v0.4.0-beta.1.apk`。系统询问时，可以临时为打开文件的浏览器或文件管理器允许“安装未知应用”。
+3. 把 APK 的 SHA-256 与同一 Release 中 `SHA256SUMS.txt` 的对应记录进行比较。
+4. 先体验离线 Demo，或在 Desktop 选择 **设置 → 通用 → 手机 Remote → 连接手机** 并扫描二维码。
+
+同一 Wi-Fi 直连带认证但没有加密，只能用于受信任的私有网络。使用蜂窝网络、异地网络或不受信任的 Wi-Fi 时，请改用私有 Tailscale Serve HTTPS，绝对不要使用 Funnel。相机和通知权限均为可选。二维码图像只在设备端处理，但内置的 Google ML Kit 扫描组件会向 Google 发送[隐私政策](docs/PRIVACY.md#android-qr-scanner-and-google-ml-kit)所述的诊断与使用指标。
+
+电脑必须保持在线并运行 Desktop 与 Harness。本地通知只提供尽力提醒，内测期间仍在扩大 Android 真机覆盖。完整说明见 [Android 中文安装与测试指南](android/README.zh-CN.md)、[英文指南](android/README.md)、[支持说明](docs/SUPPORT.md)和[平台中立 Remote 协议](docs/REMOTE_PROTOCOL_V1.md)。
+
 ## 下载
 
-桌面安装包发布在[最新 GitHub Release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest)。当前 Release 尚不包含可直接安装的 iOS App。
+稳定版 Desktop 安装包仍放在[最新稳定 GitHub Release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest)。GitHub 的 `/releases/latest` 不会指向 Pre-release，因此 Android 测试者必须打开 [`v0.4.0-beta.1` 专属页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1)，并使用该页面配套的 Desktop 内测版。
 
-| 平台 | 架构 | 文件 |
+| 当前 GitHub 内测版 | 架构 | 文件 |
 | --- | --- | --- |
-| macOS | Apple Silicon | `mac-arm64.dmg` |
-| macOS | Intel | `mac-x64.dmg` |
-| Windows 10/11 | x64 安装版 | `win-x64.exe` |
-| Windows 10/11 | x64 便携版 | `win-x64.zip` |
+| macOS | Apple Silicon | `DSH-Desktop-0.4.0-beta.1-mac-arm64.dmg` |
+| macOS | Intel | `DSH-Desktop-0.4.0-beta.1-mac-x64.dmg` |
+| Windows 10/11 | x64 安装版 | `DSH-Desktop-0.4.0-beta.1-win-x64.exe` |
+| Windows 10/11 | x64 便携版 | `DSH-Desktop-0.4.0-beta.1-win-x64.zip` |
+| Android 8.0+ | 通用 APK | `DSH-Remote-Android-v0.4.0-beta.1.apk` |
 
-Release 同时提供 ZIP 和用于完整性校验的 `SHA256SUMS.txt`。请从本仓库的 GitHub Releases 页面下载安装包。
+该预发布版还提供 macOS ZIP 与用于完整性校验的 `SHA256SUMS.txt`。iOS 可安装版本仍通过 TestFlight 提供，不放入 GitHub 资产。
 
 ## Desktop 快速开始
 
@@ -126,6 +152,7 @@ dsh plugin --profile web add github:owner/repo
 
 ```text
 iPhone Remote ── 带认证的同一 Wi-Fi / Tailnet HTTPS ──┐
+Android Remote ─ 带认证的同一 Wi-Fi / Tailnet HTTPS ──┤
                                                        ↓
 桌面宿主 ─────────────→ 仅回环地址的 dsh web → 官方 Harness UI / 运行时
     └───────────────── 共用 DSH_HOME，保存设置、会话和插件
@@ -148,6 +175,13 @@ npm start
 运行 `npm run build:mac` 构建 macOS Tauri 发行包，运行 `npm run dist` 构建 Windows Electron 发行包。涉及打包的变更还应通过[发行工作流](.github/workflows/release.yml)中的真实运行时检查。
 
 在 Xcode 中打开 `ios/DSHRemote/DSHRemote.xcodeproj` 即可构建 iOS 源码预览。iOS App 没有第三方 package 依赖，要求 iOS 17 或更高版本。
+
+使用 JDK 17 与 Android SDK 37 构建 Android 内测源码：
+
+```bash
+cd android
+./gradlew testDebugUnitTest compileDebugAndroidTestKotlin lintDebug validateDebugScreenshotTest assembleDebug assembleRelease bundleRelease
+```
 
 ## 项目
 

@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Developers who want to use the official DeepSeek Harness runtime and Web UI as a self-contained desktop application on macOS or Windows, without installing Node.js or starting a terminal process manually, and who may want a narrow native iPhone companion for monitoring and steering work that continues on their computer.
+Developers who want to use the official DeepSeek Harness runtime and Web UI as a self-contained desktop application on macOS or Windows, without installing Node.js or starting a terminal process manually, and who may want narrow native iPhone or Android companions for monitoring and steering work that continues on their computer.
 
 ## Product Purpose
 
-Provide a compact, dependable native host that starts, displays, and stops the official Harness experience, plus a local-first Remote companion that never duplicates the Agent runtime. Success means desktop and phone-specific capabilities work without forking, reimplementing, or visually competing with the upstream Harness product.
+Provide a compact, dependable native host that starts, displays, and stops the official Harness experience, plus local-first iPhone and Android Remote companions that never duplicate the Agent runtime. Success means desktop and mobile-specific capabilities work without forking, reimplementing, or visually competing with the upstream Harness product.
 
 ## Brand Personality
 

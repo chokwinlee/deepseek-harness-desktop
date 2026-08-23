@@ -2,9 +2,9 @@
 
 ## Scope
 
-This document defines the visible product language for DSH Remote on iOS. DSH Desktop continues to host the upstream Harness Web UI and should not be reskinned by these rules.
+This document defines the visible product language for DSH Remote on iOS and Android. DSH Desktop continues to host the upstream Harness Web UI and should not be reskinned by these rules.
 
-DSH Remote is a mobile continuation surface for a developer's computer. It should feel like the same Harness product expressed with native iPhone ergonomics: compact, calm, information-rich, and explicit about remote state.
+DSH Remote is a mobile continuation surface for a developer's computer. It should feel like the same Harness product expressed with native iPhone and Android ergonomics: compact, calm, information-rich, and explicit about remote state.
 
 ## Product hierarchy
 
@@ -24,7 +24,7 @@ A task is not a separate top-level object. Running, waiting, completed, failed, 
 
 ## Tokens
 
-The source of truth is `RemoteDesignSystem.swift`.
+The platform sources of truth are `RemoteDesignSystem.swift` on iOS and `ui/theme/RemoteTheme.kt` plus `ui/components/RemoteComponents.kt` on Android.
 
 ### Color roles
 

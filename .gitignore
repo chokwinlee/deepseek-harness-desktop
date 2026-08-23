@@ -10,6 +10,10 @@ release/
 .env
 .env.*
 !.env.example
+# Android signing credentials
+*.jks
+*.keystore
+keystore.properties
 # tauri spike (experiment toolchain + build dirs)
 /src-tauri/target/
 /src-tauri/gen/

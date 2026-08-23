@@ -1,12 +1,12 @@
 # DSH Remote 的 Tailscale 跨网络设置
 
-Tailscale 只用于离开家庭或办公室网络后的跨网络连接。如果 iPhone 与电脑处于同一个受信任 Wi-Fi，请优先使用 Desktop 的“同一 Wi-Fi”配对，不需要安装或登录 Tailscale。
+Tailscale 只用于离开家庭或办公室网络后的跨网络连接。如果手机与电脑处于同一个受信任 Wi-Fi，请优先使用 Desktop 的“同一 Wi-Fi”配对，不需要安装或登录 Tailscale。
 
 DSH Remote 使用用户自己的 Tailnet，不经过项目方中继。代码、模型调用、API Key 和 Shell 始终留在电脑上。
 
 ## 开始前
 
-准备一台运行 DSH Desktop 的 Mac 和一台 iPhone。两台设备需要使用同一个 Tailscale 账号，或至少加入同一个允许互访的 Tailnet。
+准备一台运行 DSH Desktop 的 Mac，以及一台 iPhone 或 Android 手机。两台设备需要使用同一个 Tailscale 账号，或至少加入同一个允许互访的 Tailnet。
 
 Desktop 会自动配置 Tailscale Serve、Harness 的受信任地址和配对二维码。不要手动复制 `tailscale serve` 命令，也不要使用 Tailscale Funnel。
 
@@ -18,11 +18,11 @@ Desktop 会自动配置 Tailscale Serve、Harness 的受信任地址和配对二
 
 安装完成后，确认 Tailscale 显示为已连接。
 
-### 2. 在 iPhone 登录同一个 Tailnet
+### 2. 在手机登录同一个 Tailnet
 
-从 [iPhone 官方下载页](https://tailscale.com/download/ios) 安装 Tailscale，允许系统添加 VPN 配置，再使用与 Mac 相同的账号登录。
+从 [iPhone 官方下载页](https://tailscale.com/download/ios) 或 [Android 官方下载页](https://tailscale.com/download/android) 安装 Tailscale，允许系统添加 VPN 配置，再使用与 Mac 相同的账号登录。
 
-在 Tailscale 的设备列表中确认 Mac 和 iPhone 都在线。
+在 Tailscale 的设备列表中确认 Mac 和手机都在线。
 
 ### 3. 按 Desktop 提示完成 MagicDNS 与 HTTPS
 
@@ -53,7 +53,7 @@ Desktop 会按实际状态提示下一步：
 
 ### 5. 用蜂窝网络做真实验收
 
-扫码成功后，关闭 iPhone Wi-Fi，只保留蜂窝网络和 Tailscale：
+扫码成功后，关闭手机 Wi-Fi，只保留蜂窝网络和 Tailscale：
 
 1. 打开 DSH Remote；
 2. 进入电脑和任意会话；
@@ -79,7 +79,7 @@ Desktop 会按实际状态提示下一步：
 
 ### Desktop 显示 Tailscale 未连接
 
-打开 Tailscale，确认状态为 Connected，并检查 Mac 与 iPhone 是否属于同一个 Tailnet。
+打开 Tailscale，确认状态为 Connected，并检查 Mac 与手机是否属于同一个 Tailnet。
 
 ### Desktop 提示 MagicDNS 或 HTTPS 未开启
 
@@ -93,7 +93,7 @@ DSH Desktop 不会覆盖其他 Serve 配置。先检查现有 Tailscale Serve �
 
 依次确认：
 
-1. iPhone 的 Tailscale VPN 仍处于开启状态；
+1. 手机的 Tailscale VPN 仍处于开启状态；
 2. Mac 在线且没有休眠；
 3. 两台设备在同一个 Tailnet；
 4. Tailnet Grants 或 ACL 没有阻止 TCP `8443`；
@@ -103,6 +103,7 @@ DSH Desktop 不会覆盖其他 Serve 配置。先检查现有 Tailscale Serve �
 
 - [安装 Tailscale on macOS](https://tailscale.com/docs/install/mac)
 - [安装 Tailscale on iOS](https://tailscale.com/docs/install/ios)
+- [安装 Tailscale on Android](https://tailscale.com/download/android)
 - [MagicDNS](https://tailscale.com/docs/features/magicdns)
 - [启用 HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates)
 - [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)

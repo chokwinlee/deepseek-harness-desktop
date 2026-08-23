@@ -1,11 +1,12 @@
 <div align="center">
   <img src="build/icon.png" width="96" height="96" alt="DSH Desktop icon">
   <h1>DSH Desktop</h1>
-  <p><strong>A compact, self-contained DeepSeek Harness desktop host with a native iPhone Remote companion.</strong></p>
+  <p><strong>A compact, self-contained DeepSeek Harness desktop host with native iPhone and Android Remote companions.</strong></p>
   <p>
-    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest">Download</a>
+    <a href="#download">Download</a>
     · <a href="#highlights">Highlights</a>
     · <a href="#iphone-remote-source-preview">iPhone Remote</a>
+    · <a href="#android-remote-github-beta">Android Remote</a>
     · <a href="#development">Development</a>
     · <a href="CONTRIBUTING.md">Contributing</a>
   </p>
@@ -15,7 +16,7 @@
   </p>
   <p>
     <a href="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml"><img src="https://github.com/chokwinlee/deepseek-harness-desktop/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/chokwinlee/deepseek-harness-desktop" alt="Latest release"></a>
+    <a href="https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/chokwinlee/deepseek-harness-desktop" alt="Latest stable release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/chokwinlee/deepseek-harness-desktop" alt="MIT License"></a>
   </p>
 </div>
@@ -24,7 +25,7 @@
 
 *macOS downloads under 90 MB, with the complete Harness rc.8 runtime included.*
 
-DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. The repository also contains DSH Remote, a native SwiftUI companion for continuing the computer's projects, sessions, and running tasks from an iPhone. This build is aligned with `@deepseek-ai/dsh@0.1.0-rc.8` and shows that bundled Harness version in the sidebar. The desktop app manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
+DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI and runtime in a desktop window. The repository also contains DSH Remote native companions for continuing the computer's projects, sessions, and running tasks from iPhone and Android. This build is aligned with `@deepseek-ai/dsh@0.1.0-rc.8` and shows that bundled Harness version in the sidebar. The desktop app manages the local Harness process automatically, so users do not need to install Node.js or start `dsh web` themselves.
 
 > [!IMPORTANT]
 > This is an independent community project, not an official DeepSeek AI product. DeepSeek Harness is a developer preview and may introduce breaking changes.
@@ -34,9 +35,9 @@ DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/
 - **Multimodal sessions** — paste or attach images and send them through the normal Harness conversation flow when the selected provider and model declare image input support. Image messages remain visible in session history.
 - **Usage at a glance on macOS** — see today and seven-day token totals, estimated cost, active task count, and aggregate running throughput without leaving the current session.
 - **Compact macOS package** — stays under 90 MB while bundling the complete Harness runtime, using Tauri and the system WKWebView instead of shipping Chromium.
-- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.3.0 · Harness rc.8`.
+- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.4.0-beta.1 · Harness rc.8`.
 - **Ready to run** — includes everything needed to start Harness, with no separate Node.js installation or terminal command. The app starts and stops the local runtime automatically.
-- **Native iPhone Remote** — pair on a trusted Wi-Fi or through your own Tailscale network, then browse projects, create sessions, prompt or steer tasks, stop work, answer approvals and questions, send images, and follow subagents without moving execution off the computer.
+- **Native mobile Remote** — the SwiftUI iPhone client and Kotlin/Compose Android client pair on trusted Wi-Fi or the user's own Tailscale network, then browse projects, create sessions, steer tasks, handle approvals, send images, and follow subagents without moving execution off the computer.
 
 Cost figures are estimates derived from local token logs and available public model prices. Unmatched models stay visibly unpriced rather than being counted as free.
 
@@ -51,7 +52,7 @@ The compact title-bar summary stays visible while you work. Open it for input, o
 ## iPhone Remote (source preview)
 
 > [!NOTE]
-> DSH Remote is currently an **iOS source preview**. There is no App Store or public TestFlight build yet, and the GitHub Releases page does not contain an installable iOS app. A TestFlight public beta is planned.
+> DSH Remote is currently an **iOS source preview**. The first external TestFlight build has been submitted for Beta App Review, but no public link is available until Apple approves it. GitHub Releases do not contain an installable iOS app.
 
 <p align="center">
   <img src="docs/images/remote-home-en.png" width="30%" alt="DSH Remote same-Wi-Fi pairing in English">
@@ -82,25 +83,50 @@ A free Apple Account can use an Xcode Personal Team for personal on-device testi
 ### Pair and use Remote
 
 1. Install and open the latest DSH Desktop build.
-2. In Desktop, open **Settings → General → Mobile Remote → Connect iPhone**.
+2. In Desktop, open **Settings → General → Mobile Remote → Connect phone**.
 3. On the same trusted Wi-Fi, start local pairing and scan the QR code in DSH Remote.
 4. For cellular or other remote networks, open the built-in Tailscale setup guide on Desktop or iPhone, enable anywhere access, and scan the HTTPS QR code.
 5. Open a project, create or continue a session, and keep all execution on the computer.
 
 See the [iOS source-preview guide](ios/DSHRemote/README.md), [Chinese Tailscale setup guide](docs/TAILSCALE_REMOTE_SETUP.zh-CN.md), [privacy policy](docs/PRIVACY.md), [support notes](docs/SUPPORT.md), and [App Review notes](docs/APP_REVIEW_NOTES.md).
 
+## Android Remote (GitHub beta)
+
+> [!IMPORTANT]
+> [`v0.4.0-beta.1`](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1) is an installable **GitHub pre-release for testing**. It requires Android 8.0 or later and the matching DSH Desktop build from that same release. It is not yet available on Google Play.
+
+<p align="center">
+  <img src="docs/images/android-remote-home-en.png" width="42%" alt="DSH Remote Android onboarding in English">
+  <img src="docs/images/android-remote-conversation-en.png" width="42%" alt="DSH Remote Android approval and conversation controls in English">
+</p>
+<p align="center"><sub>Local-first pairing and offline Demo · Conversation, queue, and approval control</sub></p>
+
+Android uses the same local-first Remote v1 contract, QR format, Desktop LAN proxy, and Tailscale HTTPS flow as iOS. It includes encrypted multi-computer storage, projects and sessions, full conversation and Activity views, queue and steer controls, approvals and structured questions, images and references, models, Goal/Plan, nested subagents, local notifications, offline Demo, English, Simplified Chinese, dark appearance, and TalkBack semantics.
+
+To test it:
+
+1. Open the [`v0.4.0-beta.1` pre-release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1) and install its Desktop package on the computer.
+2. Download `DSH-Remote-Android-v0.4.0-beta.1.apk` on an Android 8.0+ device. If asked, temporarily allow **Install unknown apps** for the browser or file manager that opened it.
+3. Compare the APK's SHA-256 with its entry in `SHA256SUMS.txt` from the same release.
+4. Open the offline Demo, or in Desktop choose **Settings → General → Mobile Remote → Connect phone** and scan its QR code.
+
+Use direct same-Wi-Fi mode only on a trusted private network: it is authenticated but not encrypted. Use private Tailscale Serve HTTPS for cellular, remote, or untrusted networks, and never use Funnel. Camera and notification permissions are optional. QR images stay on-device, while the bundled Google ML Kit scanner sends Google the diagnostic and usage metrics described in the [privacy policy](docs/PRIVACY.md#android-qr-scanner-and-google-ml-kit).
+
+The computer must remain online with Desktop and Harness running. Local notifications are best effort, and physical-device coverage is still expanding during this beta. See the complete [Android beta install and test guide](android/README.md), [Simplified Chinese guide](android/README.zh-CN.md), [support guide](docs/SUPPORT.md), and [platform-neutral Remote contract](docs/REMOTE_PROTOCOL_V1.md).
+
 ## Download
 
-Desktop installers are published on the [latest GitHub Release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest). These releases do not currently include an installable iOS app.
+Stable Desktop installers remain on the [latest stable GitHub Release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/latest). GitHub's `/releases/latest` route does not select pre-releases, so Android testers must use the direct [`v0.4.0-beta.1` page](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1) and install the matching beta Desktop build from that page.
 
-| Platform | Architecture | File |
+| Current GitHub beta | Architecture | File |
 | --- | --- | --- |
-| macOS | Apple Silicon | `mac-arm64.dmg` |
-| macOS | Intel | `mac-x64.dmg` |
-| Windows 10/11 | x64 installer | `win-x64.exe` |
-| Windows 10/11 | x64 portable | `win-x64.zip` |
+| macOS | Apple Silicon | `DSH-Desktop-0.4.0-beta.1-mac-arm64.dmg` |
+| macOS | Intel | `DSH-Desktop-0.4.0-beta.1-mac-x64.dmg` |
+| Windows 10/11 | x64 installer | `DSH-Desktop-0.4.0-beta.1-win-x64.exe` |
+| Windows 10/11 | x64 portable | `DSH-Desktop-0.4.0-beta.1-win-x64.zip` |
+| Android 8.0+ | universal APK | `DSH-Remote-Android-v0.4.0-beta.1.apk` |
 
-Releases also include ZIP archives and `SHA256SUMS.txt` for integrity verification. Download installers from this repository's GitHub Releases page.
+The pre-release also includes macOS ZIP archives and `SHA256SUMS.txt` for integrity verification. Installable iOS builds continue through TestFlight rather than GitHub assets.
 
 ## Desktop quick start
 
@@ -125,8 +151,9 @@ Desktop parses supported install commands without running pasted text through a 
 ## Architecture
 
 ```text
-iPhone Remote ── authenticated same-Wi-Fi / Tailnet HTTPS ──┐
-                                                            ↓
+ iPhone Remote ── authenticated same-Wi-Fi / Tailnet HTTPS ──┐
+Android Remote ── authenticated same-Wi-Fi / Tailnet HTTPS ──┤
+                                                             ↓
 Desktop shell ─────────────→ loopback-only dsh web → official Harness UI/runtime
        └─────────────────── shared DSH_HOME for settings, sessions, and plugins
 ```
@@ -148,6 +175,13 @@ npm start
 Build the macOS Tauri release with `npm run build:mac`; build the Windows Electron release with `npm run dist`. Packaging changes should also pass the real packaged-runtime checks in [the release workflow](.github/workflows/release.yml).
 
 Open `ios/DSHRemote/DSHRemote.xcodeproj` in Xcode to build the iOS source preview. The iOS app has no third-party package dependency and requires iOS 17 or later.
+
+Build the Android beta source with JDK 17 and Android SDK 37:
+
+```bash
+cd android
+./gradlew testDebugUnitTest compileDebugAndroidTestKotlin lintDebug validateDebugScreenshotTest assembleDebug assembleRelease bundleRelease
+```
 
 ## Project
 

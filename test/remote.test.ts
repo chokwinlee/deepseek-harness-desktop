@@ -254,7 +254,8 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.languageFromTag('zh-CN'), 'zh')
   assert.equal(api.languageFromTag('en-US'), 'en')
   assert.equal(api.copyFor('zh').title, '手机 Remote')
-  assert.equal(api.copyFor('zh').connect, '连接 iPhone')
+  assert.equal(api.copyFor('zh').connect, '连接手机')
+  assert.equal(api.copyFor('zh').guideAndroidLink, '下载 Android 版')
   assert.equal(api.copyFor('zh').lanTitle, '同一 Wi-Fi')
   assert.equal(api.copyFor('zh').lanReset, '重置配对')
   assert.match(String(api.copyFor('zh').lanResetBody), /立即失效/)
@@ -271,6 +272,8 @@ test('Remote copy follows the active DSH language', async () => {
   assert.equal(api.copyFor('zh').confirmInterrupt, '正在运行的任务会中断。')
   assert.match(String(api.copyFor('zh').resumeTakingLong), /重新检查/)
   assert.equal(api.copyFor('en').title, 'Mobile Remote')
+  assert.equal(api.copyFor('en').connect, 'Connect phone')
+  assert.equal(api.copyFor('en').guideAndroidLink, 'Download for Android')
   assert.equal(api.copyFor('en').lanBadge, 'Recommended')
   assert.equal(api.copyFor('en').lanReset, 'Reset pairing')
   assert.equal(api.copyFor('en').guide, 'Setup guide')
@@ -913,4 +916,211 @@ test('iOS Remote ships complete English and Simplified Chinese product-copy cove
   assert.match(conversation, /return remoteLocalized\(title\)/)
   assert.match(conversation, /Text\(remoteLocalized\(record\.title\)\)/)
   assert.match(conversation, /accessibilityHint = remoteLocalized\("使用放大和缩小操作调整图片"\)/)
+})
+
+test('Remote v1 contract fixtures stay aligned with the reviewed mobile boundary', async () => {
+  const fixtureRoot = join(process.cwd(), 'test', 'fixtures', 'remote-v1')
+  const contract = await readFile(join(process.cwd(), 'docs', 'REMOTE_PROTOCOL_V1.md'), 'utf8')
+  const fixtureNames = (await readdir(fixtureRoot)).filter(name => name.endsWith('.json')).sort()
+
+  assert.deepEqual(fixtureNames, [
+    'events.approval-requested.json',
+    'events.question-requested.json',
+    'events.queue.json',
+    'host-describe.request.json',
+    'host-describe.response.json',
+    'session-list.response.json',
+  ])
+
+  const fixtures = await Promise.all(fixtureNames.map(async name => ({
+    name,
+    value: JSON.parse(await readFile(join(fixtureRoot, name), 'utf8')) as Record<string, unknown>,
+  })))
+  for (const fixture of fixtures) {
+    assert.equal(typeof fixture.value.rpcId, 'string', `${fixture.name} needs an rpcId`)
+  }
+
+  const request = fixtures.find(fixture => fixture.name === 'host-describe.request.json')?.value
+  assert.deepEqual(request, {
+    type: 'client-request',
+    rpcId: 'fixture-host-describe',
+    method: 'host.describe',
+    payload: {},
+  })
+
+  for (const path of EXPECTED_LAN_REMOTE_HTTP_PATHS) {
+    const method = path.replace('/api/', '')
+    assert.ok(contract.includes('`' + method + '`'), `contract is missing ${method}`)
+  }
+  assert.match(contract, /The only upgrade route is `events\.mux`/)
+
+  const eventTypes = fixtures
+    .filter(fixture => fixture.name.startsWith('events.'))
+    .map(fixture => {
+      const payload = fixture.value.payload as Record<string, unknown>
+      return payload.type
+    })
+    .sort()
+  assert.deepEqual(eventTypes, [
+    'approval/requested',
+    'question/requested',
+    'session/queue',
+  ])
+})
+
+test('Android Remote keeps its build, security boundary, protocol, and locales in sync', async () => {
+  const androidRoot = join(process.cwd(), 'android')
+  const appRoot = join(androidRoot, 'app')
+  const [build, manifest, englishSource, chineseSource, clientSource] = await Promise.all([
+    readFile(join(appRoot, 'build.gradle.kts'), 'utf8'),
+    readFile(join(appRoot, 'src', 'main', 'AndroidManifest.xml'), 'utf8'),
+    readFile(join(appRoot, 'src', 'main', 'res', 'values', 'strings.xml'), 'utf8'),
+    readFile(join(appRoot, 'src', 'main', 'res', 'values-zh-rCN', 'strings.xml'), 'utf8'),
+    readFile(join(
+      appRoot,
+      'src',
+      'main',
+      'java',
+      'com',
+      'chokwinlee',
+      'dshremote',
+      'remote',
+      'LiveHarnessRemoteClient.kt',
+    ), 'utf8'),
+  ])
+
+  assert.match(build, /namespace = "com\.chokwinlee\.dshremote"/)
+  assert.match(build, /applicationId = "com\.chokwinlee\.dshremote"/)
+  assert.match(build, /compileSdk = 37/)
+  assert.match(build, /minSdk = 26/)
+  assert.match(build, /com\.google\.mlkit:barcode-scanning:17\.3\.0/)
+  assert.match(build, /androidx\.exifinterface:exifinterface:1\.4\.2/)
+
+  assert.match(manifest, /android\.permission\.CAMERA/)
+  assert.match(manifest, /android\.permission\.ACCESS_LOCAL_NETWORK/)
+  assert.match(manifest, /android\.permission\.POST_NOTIFICATIONS/)
+  assert.match(manifest, /android:allowBackup="false"/)
+  assert.match(manifest, /android:dataExtractionRules="@xml\/data_extraction_rules"/)
+  assert.match(manifest, /android:scheme="harnessremote"/)
+  assert.match(manifest, /android:scheme="dshremote"/)
+
+  const resourceNames = (source: string): string[] => [
+    ...source.matchAll(/<(?:string|plurals)\s+name="([^"]+)"/g),
+  ].map(match => match[1] ?? '').filter(Boolean).sort()
+  const englishNames = resourceNames(englishSource)
+  const chineseNames = resourceNames(chineseSource)
+  assert.ok(englishNames.length >= 290, 'Android Remote should localize its complete product surface')
+  assert.deepEqual(chineseNames, englishNames, 'Android locale resource names must stay identical')
+
+  const androidMainJava = join(appRoot, 'src', 'main', 'java')
+  const androidKotlinPaths = (await readdir(androidMainJava, { recursive: true }))
+    .map(String)
+    .filter(path => path.endsWith('.kt'))
+  const hardcodedHan: string[] = []
+  for (const relativePath of androidKotlinPaths) {
+    const source = await readFile(join(androidMainJava, relativePath), 'utf8')
+    if (/[\u3400-\u9fff]/.test(source)) hardcodedHan.push(relativePath)
+  }
+  assert.deepEqual(hardcodedHan, [], 'Android product copy belongs in localized resources')
+
+  for (const path of EXPECTED_LAN_REMOTE_HTTP_PATHS) {
+    const method = path.replace('/api/', '')
+    assert.ok(
+      clientSource.includes(`"${method}"`) || clientSource.includes(`"api/${method}"`),
+      `Android client is missing ${method}`,
+    )
+  }
+  assert.match(clientSource, /events\.mux/)
+  assert.match(clientSource, /Authorization/)
+  assert.match(clientSource, /Bearer/)
+})
+
+test('tagged releases require a signed installable Android APK', async () => {
+  const [workflow, ciWorkflow, dependabot, wrapper, build, readme, readmeChinese, signingGuide] = await Promise.all([
+    readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8'),
+    readFile(join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8'),
+    readFile(join(process.cwd(), '.github', 'dependabot.yml'), 'utf8'),
+    readFile(join(process.cwd(), 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8'),
+    readFile(join(process.cwd(), 'android', 'app', 'build.gradle.kts'), 'utf8'),
+    readFile(join(process.cwd(), 'README.md'), 'utf8'),
+    readFile(join(process.cwd(), 'README.zh-CN.md'), 'utf8'),
+    readFile(join(process.cwd(), 'docs', 'ANDROID_RELEASE_SIGNING.md'), 'utf8'),
+  ])
+
+  assert.match(workflow, /name: Release desktop installers and Android companion/)
+  assert.match(workflow, /\n  release-guard:\n/)
+  assert.match(workflow, /fetch-depth: 0/)
+  assert.match(workflow, /git merge-base --is-ancestor "\$tag_commit" refs\/remotes\/origin\/main/)
+  assert.match(workflow, /environment: android-release/)
+  assert.match(workflow, /\n  android:\n/)
+  for (const secret of [
+    'ANDROID_KEYSTORE_BASE64',
+    'ANDROID_KEYSTORE_PASSWORD',
+    'ANDROID_KEY_ALIAS',
+    'ANDROID_KEY_PASSWORD',
+  ]) {
+    assert.match(workflow, new RegExp(`secrets\\.${secret}`))
+  }
+  assert.match(workflow, /assembleRelease/)
+  assert.match(workflow, /bundleRelease/)
+  assert.match(workflow, /lintRelease/)
+  assert.match(workflow, /validateDebugScreenshotTest/)
+  assert.match(workflow, /verifyReleaseVersionCodeOrdering/)
+  assert.match(workflow, /bundletool-all-1\.18\.2\.jar/)
+  assert.match(workflow, /java -jar "\$bundletool" validate --bundle="\$aab"/)
+  assert.match(workflow, /grep -Fq 'PAGE_ALIGNMENT_16K'/)
+  assert.match(workflow, /zipalign" -c -P 16 4 "\$apk"/)
+  assert.match(workflow, /verify --verbose --print-certs "\$apk"/)
+  assert.match(workflow, /jarsigner .* -verify "\$aab"/)
+  assert.match(workflow, /keytool .* -printcert -jarfile "\$aab"/)
+  assert.match(workflow, /test "\$apk_cert" = "\$aab_cert"/)
+  assert.match(
+    workflow,
+    /expected_cert='521cef4ba06c39a5b704f55d13109c918f43358dd8af530701c73e793c293aaa'/,
+  )
+  assert.match(workflow, /test "\$apk_cert" = "\$expected_cert"/)
+  assert.doesNotMatch(workflow, /jarsigner -verify -strict/)
+  for (const actionsWorkflow of [workflow, ciWorkflow]) {
+    assert.doesNotMatch(actionsWorkflow, /uses: [^\n]+@v\d+/)
+  }
+  assert.match(workflow, /release_args\+=\(--prerelease\)/)
+  assert.match(workflow, /DSH-Remote-Android-\$\{GITHUB_REF_NAME\}\.apk/)
+  assert.match(workflow, /name: installers-android/)
+  assert.match(workflow, /name: play-bundle-android/)
+  assert.match(workflow, /needs: \[release-guard, macos, windows, android\]/)
+  assert.match(workflow, /publish:[\s\S]*permissions:\n\s+contents: write/)
+
+  const qualityGateIndex = workflow.indexOf('- name: Verify Android quality gates')
+  const signingIndex = workflow.indexOf('- name: Configure Android release signing')
+  const releaseBuildIndex = workflow.indexOf('- name: Build and verify Android Remote')
+  assert.ok(qualityGateIndex > -1 && qualityGateIndex < signingIndex)
+  assert.ok(signingIndex < releaseBuildIndex)
+  assert.doesNotMatch(
+    workflow.slice(qualityGateIndex, signingIndex),
+    /DSH_RELEASE_VERSION/,
+    'screenshot validation must use the stable debug version, not the tagged BuildConfig version',
+  )
+
+  assert.match(build, /environmentVariable\("DSH_RELEASE_VERSION"\)/)
+  assert.match(build, /fun semverVersionCode\(version: String\)/)
+  assert.match(build, /"alpha" -> 1_000 \+ prereleaseNumber!!/)
+  assert.match(build, /"beta" -> 3_000 \+ prereleaseNumber!!/)
+  assert.match(build, /"rc" -> 5_000 \+ prereleaseNumber!!/)
+  assert.match(build, /"" -> 9_000/)
+  assert.match(build, /check\(semverVersionCode\("0\.4\.0-beta\.1"\) == 4_003_001\)/)
+  assert.match(build, /check\(semverVersionCode\("0\.4\.0"\) == 4_009_000\)/)
+  assert.match(build, /environmentVariable\("ANDROID_KEYSTORE_PATH"\)/)
+  assert.match(build, /signingConfig = signingConfigs\.getByName\("release"\)/)
+  assert.match(
+    wrapper,
+    /distributionSha256Sum=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb/,
+  )
+  assert.match(dependabot, /package-ecosystem: gradle\n\s+directory: \/android/)
+
+  for (const source of [readme, readmeChinese]) {
+    assert.match(source, /DSH-Remote-Android-v0\.4\.0-beta\.1\.apk/)
+  }
+  assert.match(signingGuide, /same persistent project key/)
+  assert.match(signingGuide, /Play App Signing/)
+  assert.match(signingGuide, /SHA256SUMS\.txt/)
 })

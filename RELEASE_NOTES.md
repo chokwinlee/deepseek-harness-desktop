@@ -1,17 +1,19 @@
-# DSH Desktop v0.3.0
+# DSH Desktop v0.4.0-beta.1
 
 <!-- dsh-summary:zh -->
 ## 中文
 
-- 内置 DeepSeek Harness rc.8，支持图片输入、Goal 与 Plan 图文命令，以及文件和会话引用。
-- macOS 标题栏增加 Token、费用、任务数与吞吐率统计，侧边栏同时显示 Desktop 与 Harness 版本。
-- Settings 支持按需安装 Codex 与 Claude Code 子代理，并为新会话创建独立 Agent 预设。
+- 首次提供 DSH Remote Android 内测 APK，可通过 Desktop 二维码连接同一局域网或 Tailscale 网络中的电脑。
+- Android 端支持项目与会话浏览、流式回复、图片输入、审批与结构化问题、任务队列、模型切换和断线恢复。
+- Desktop 增加内置 Remote 配对、连接状态、凭证轮换与 Tailscale 使用引导；代码、凭证和模型调用仍保留在用户电脑上。
+- 这是面向 GitHub 用户的预发布内测版本；使用前请先在 Desktop 打开 Remote，并优先在受信任的私有 Wi-Fi 下完成首次配对。
 <!-- /dsh-summary:zh -->
 
 <!-- dsh-summary:en -->
 ## English
 
-- Bundle DeepSeek Harness rc.8 with image input, image-aware Goal and Plan commands, plus file and session references.
-- Add macOS title-bar insights for tokens, estimated cost, active tasks, and throughput, with both Desktop and Harness versions in the sidebar.
-- Let users install Codex and Claude Code subagents on demand and create dedicated Agent presets for new sessions.
+- Ship the first DSH Remote Android beta APK for pairing with Desktop over the same LAN or a user-owned Tailscale network.
+- Support project and session browsing, streamed responses, image input, approvals, structured questions, queues, model switching, and reconnection on Android.
+- Add built-in Remote pairing, connection status, credential rotation, and Tailscale guidance to Desktop while keeping code, credentials, and model calls on the user's computer.
+- This is a GitHub prerelease for beta testing. Enable Remote in Desktop and complete the first pairing on trusted private Wi-Fi whenever possible.
 <!-- /dsh-summary:en -->

@@ -1,0 +1,506 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH Remote</string>
+
+    <!-- 通用操作与状态 -->
+    <string name="action_back">返回</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_close">关闭</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_retry">重试</string>
+    <string name="label_optional">可选</string>
+    <string name="label_recommended">推荐</string>
+    <string name="state_connection_failed">连接失败</string>
+    <string name="state_showing_saved_results">正在显示上次可用结果</string>
+    <string name="metadata_separator">· %1$s</string>
+    <string name="time_now">刚刚</string>
+
+    <plurals name="computer_count">
+        <item quantity="other">%1$d 台电脑</item>
+    </plurals>
+    <plurals name="project_count">
+        <item quantity="other">%1$d 个项目</item>
+    </plurals>
+    <plurals name="session_count">
+        <item quantity="other">%1$d 个会话</item>
+    </plurals>
+    <plurals name="running_count">
+        <item quantity="other">%1$d 个运行中</item>
+    </plurals>
+
+    <!-- 电脑与首次使用 -->
+    <string name="computers_subtitle_onboarding">从手机继续电脑上的 Harness</string>
+    <string name="computers_subtitle_saved">你的电脑</string>
+    <string name="computers_section_title">电脑</string>
+    <string name="computers_loading_title">正在读取电脑</string>
+    <string name="computers_loading_message">读取这台手机保存的连接信息</string>
+    <string name="computers_remove_hint">移除电脑只会删除这台手机保存的连接信息。</string>
+    <string name="computer_add_action">添加电脑</string>
+    <string name="computer_manage">管理 %1$s</string>
+    <string name="computer_remove_title">移除“%1$s”？</string>
+    <string name="computer_remove_message">这会从手机移除连接，不会改动电脑上的项目、会话或任务。</string>
+    <string name="computer_remove_confirm">移除电脑</string>
+    <string name="onboarding_title">先连接同一 Wi-Fi 的电脑</string>
+    <string name="onboarding_message">手机和电脑在同一个受信任 Wi-Fi 时，直接扫描 Desktop 二维码即可，不需要安装或登录 Tailscale。</string>
+    <string name="onboarding_step_desktop_title">在 DSH Desktop 打开手机 Remote</string>
+    <string name="onboarding_step_desktop_message">选择“连接手机”，再开始本地配对。</string>
+    <string name="onboarding_step_qr_title">扫描 Desktop 二维码</string>
+    <string name="onboarding_step_qr_message">手机会验证电脑并保存连接。</string>
+    <string name="onboarding_primary_action">开始同一 Wi-Fi 配对</string>
+    <string name="onboarding_demo_action">还没有电脑？先体验一下</string>
+    <string name="onboarding_demo_message">离线查看项目、对话、轨迹与确认流程。</string>
+    <string name="onboarding_remote_title">需要跨网络连接？</string>
+    <string name="onboarding_remote_message">Tailscale 或自有 HTTPS 是离开同一 Wi-Fi 后的可选方式。</string>
+
+    <!-- 连接方式与状态 -->
+    <string name="transport_same_wifi">同一 Wi-Fi</string>
+    <string name="transport_tailscale">Tailscale</string>
+    <string name="transport_custom_https">HTTPS</string>
+    <string name="transport_demo">演示</string>
+    <string name="connection_unknown">尚未检查连接</string>
+    <string name="connection_checking">正在检查连接</string>
+    <string name="connection_reachable">电脑可以连接</string>
+    <string name="connection_unreachable">电脑无法连接</string>
+
+    <!-- 添加电脑 -->
+    <string name="computer_add_title">添加电脑</string>
+    <string name="computer_add_subtitle">本地配对或使用私有 HTTPS</string>
+    <string name="pairing_local_section">同一 Wi-Fi</string>
+    <string name="pairing_scan_title">扫描 Desktop 二维码</string>
+    <string name="pairing_scan_message">在电脑打开手机 Remote，选择“连接手机”，再开始本地配对。</string>
+    <string name="pairing_no_tailscale_needed">手机无需安装或登录 Tailscale</string>
+    <string name="pairing_camera_unavailable_title">相机扫码不可用</string>
+    <string name="pairing_camera_unavailable_message">同一 Wi-Fi 配对必须扫描 Desktop 二维码。你仍可以在下方配置私有 HTTPS。</string>
+    <string name="remote_access_section">不在同一 Wi-Fi？</string>
+    <string name="remote_access_title">Tailscale 或自有 HTTPS</string>
+    <string name="remote_access_message">离开家庭或办公室网络时使用</string>
+    <string name="remote_access_expand">配置跨网络连接</string>
+    <string name="remote_access_collapse">收起跨网络连接</string>
+    <string name="remote_access_notice_title">私有跨网络连接</string>
+    <string name="remote_access_notice_message">先在 Desktop 开启跨网络连接。这里只输入你自己管理的 HTTPS 地址；Tailscale Serve 地址通常以 .ts.net 结尾。</string>
+    <string name="computer_name_label">显示名称</string>
+    <string name="computer_name_placeholder">例如 MacBook Pro</string>
+    <string name="computer_address_label">HTTPS 地址</string>
+    <string name="computer_address_placeholder">https://computer-name.tailnet.ts.net</string>
+    <string name="computer_address_supporting">手动输入只接受 HTTPS；同一 Wi-Fi 的 HTTP 连接必须通过二维码导入。</string>
+    <string name="computer_verify_action">验证并保存</string>
+    <string name="computer_verifying_action">正在验证电脑…</string>
+    <string name="security_note_title">连接信息留在这台手机</string>
+    <string name="security_note_message">App 不保存模型 API Key、项目文件或 Tailscale 账号凭证。</string>
+    <string name="scanner_title">扫描电脑二维码</string>
+    <string name="scanner_subtitle">将相机对准 DSH Desktop 显示的二维码</string>
+    <string name="scanner_placeholder_message">这台设备无法使用相机扫码，请改为输入私有 HTTPS 地址。</string>
+    <string name="scanner_manual_action">改为输入 HTTPS 地址</string>
+
+    <!-- 项目与会话 -->
+    <string name="projects_default_computer">电脑</string>
+    <string name="projects_screen_subtitle">项目与会话</string>
+    <string name="projects_section_title">项目</string>
+    <string name="projects_summary">%1$s · %2$s</string>
+    <string name="projects_loading_title">正在读取项目</string>
+    <string name="projects_loading_message">从电脑同步项目分组和会话</string>
+    <string name="projects_empty_title">还没有项目</string>
+    <string name="projects_empty_message">先在 DSH Desktop 中添加项目或打开一个目录。</string>
+    <string name="projects_unavailable_title">暂时无法读取项目</string>
+    <string name="projects_unavailable_message">会话服务已经响应，但项目分组暂不可用，请重试。</string>
+    <string name="projects_directory_fallback">项目分组暂不可用，当前按目录显示。</string>
+    <string name="project_expanded_state">会话已展开</string>
+    <string name="project_collapsed_state">会话已收起</string>
+    <string name="sessions_empty_message">这个项目还没有会话。</string>
+    <plurals name="sessions_show_more">
+        <item quantity="other">查看其余 %1$d 个会话</item>
+    </plurals>
+    <string name="sessions_show_less">收起会话</string>
+    <string name="session_new_action">新建会话</string>
+    <string name="session_new_title">新建会话</string>
+    <string name="session_new_subtitle">选择会话所属的项目</string>
+    <string name="session_new_privacy_note">会话在电脑的项目目录中创建，代码与执行环境仍留在电脑上。</string>
+    <string name="session_new_default_title">新会话</string>
+    <string name="session_creating">正在新建会话…</string>
+    <string name="session_create_failed_title">无法新建会话</string>
+    <string name="session_state_idle">可继续</string>
+    <string name="session_state_running">执行中</string>
+    <string name="session_state_waiting">需要确认</string>
+    <string name="session_state_completed">已完成</string>
+    <string name="session_state_failed">失败</string>
+
+    <!-- 会话界面 -->
+    <string name="session_default_title">会话</string>
+    <string name="session_screen_subtitle">对话</string>
+    <string name="session_more_actions">更多会话操作</string>
+    <string name="session_details_label">会话详情</string>
+    <string name="session_planning_active">计划模式已开启</string>
+    <string name="session_planning_inactive">计划模式已关闭</string>
+    <string name="session_planning_pending">正在更新计划模式…</string>
+    <string name="session_loading_title">正在读取会话</string>
+    <string name="session_loading_message">从电脑读取最新对话记录</string>
+    <string name="session_unavailable_title">会话不可用</string>
+    <string name="session_unavailable_message">请返回项目并重新选择会话。</string>
+    <string name="conversation_empty_title">开始对话</string>
+    <string name="conversation_empty_message">向电脑上运行的 Harness 发送指令。</string>
+    <string name="conversation_streaming">Harness 正在工作…</string>
+    <string name="conversation_jump_latest">跳到最新内容</string>
+    <string name="conversation_send">发送消息</string>
+    <string name="conversation_stop">停止任务</string>
+    <string name="conversation_assistant_label">Harness</string>
+    <string name="conversation_status_label">状态</string>
+    <string name="composer_placeholder">告诉 Harness 接下来要做什么</string>
+    <string name="composer_input_label">给 Harness 的指令</string>
+
+    <!-- 完整会话控制 -->
+    <string name="action_save">保存</string>
+    <string name="action_open_settings">打开系统设置</string>
+    <string name="history_load_older">加载更早的活动</string>
+    <string name="conversation_tab">对话</string>
+    <string name="trajectory_tab">轨迹</string>
+    <plurals name="session_stats_turns">
+        <item quantity="other">%1$d 轮</item>
+    </plurals>
+    <plurals name="session_stats_steps">
+        <item quantity="other">%1$d 步</item>
+    </plurals>
+    <string name="session_stats">%1$s · %2$s · %3$s</string>
+    <string name="item_state_info">信息</string>
+    <string name="item_state_running">执行中</string>
+    <string name="item_state_succeeded">成功</string>
+    <string name="item_state_failed">失败</string>
+    <string name="item_state_stopped">已停止</string>
+    <string name="tool_default_title">工具</string>
+    <string name="context_default_title">上下文</string>
+    <string name="reasoning_title">推理</string>
+    <string name="detail_default_title">详情</string>
+    <string name="detail_state_expanded">已展开</string>
+    <string name="detail_state_collapsed">已收起</string>
+    <string name="attachment_image">图片</string>
+    <string name="attachment_preview_close">关闭图片预览</string>
+    <string name="attachment_remove">移除图片</string>
+    <string name="attachment_preparing">正在处理图片…</string>
+    <string name="attachment_error_cache_limit">这个附件过大，无法安全缓存。</string>
+
+    <!-- 本地任务通知 -->
+    <string name="notification_channel_name">任务更新</string>
+    <string name="notification_channel_description">电脑上任务的状态变化</string>
+    <string name="notification_public_title">DSH Remote</string>
+    <string name="notification_public_body">任务更新</string>
+    <string name="image_error_unreadable">无法读取这张图片，请选择其他图片。</string>
+    <string name="image_error_too_large">安全处理后图片仍然过大，请选择更小的图片。</string>
+    <string name="image_error_invalid">图片尺寸无效或超出安全范围。</string>
+    <string name="image_error_unsupported">电脑不接受这台设备能够安全生成的图片格式。</string>
+    <string name="image_error_message_limit">所选图片超过电脑允许的单条消息上限。</string>
+    <string name="image_error_clipboard_empty">剪贴板中没有本 App 可以读取的图片。</string>
+    <string name="composer_paste_image">粘贴剪贴板图片</string>
+    <string name="composer_choose_images">选择图片</string>
+
+    <!-- 排队指令 -->
+    <string name="queue_title">后续指令</string>
+    <plurals name="queue_count">
+        <item quantity="other">%1$d 条排队中</item>
+    </plurals>
+    <plurals name="queue_images">
+        <item quantity="other">%1$d 张图片</item>
+    </plurals>
+    <string name="queue_placement_queued">排队中</string>
+    <string name="queue_placement_steering">正在引导</string>
+    <string name="queue_placement_context">上下文</string>
+    <string name="queue_edit">编辑排队指令</string>
+    <string name="queue_edit_images_disabled">带图片的指令不能编辑</string>
+    <string name="queue_image_edit_hint">如需修改，请移除后重新发送图片。</string>
+    <string name="queue_image_edit_error">带图片的指令不能只编辑文字，请移除后重新发送图片。</string>
+    <string name="queue_edit_title">编辑指令</string>
+    <string name="queue_edit_input_label">排队指令</string>
+    <string name="queue_remove">移除排队指令</string>
+    <string name="queue_steer">立即引导</string>
+    <string name="queue_message_fallback">排队指令</string>
+
+    <!-- 审批与结构化问题 -->
+    <string name="approval_tool">工具：%1$s</string>
+    <string name="approval_allow_once">仅允许一次</string>
+    <string name="approval_reject">拒绝</string>
+    <string name="interaction_failed">无法发送回复</string>
+    <string name="interaction_pending_label">需要你的回复</string>
+    <string name="question_number">问题 %1$d</string>
+    <string name="question_custom_answer">自定义回答</string>
+    <string name="question_custom_add">其他回答</string>
+    <string name="question_custom_edit">编辑其他回答</string>
+    <string name="question_submit">提交回答</string>
+
+    <!-- 输入、图片、引用与模型路由 -->
+    <string name="composer_add_images">添加图片</string>
+    <string name="composer_add_reference">引用文件或会话</string>
+    <string name="composer_delivery_options">选择发送方式</string>
+    <string name="composer_queue">排队</string>
+    <string name="composer_steer">引导</string>
+    <string name="composer_queue_hint">这条指令会在当前任务完成后执行。</string>
+    <string name="composer_steer_hint">这条指令会在下一个安全节点引导当前任务。</string>
+    <string name="composer_disabled_interaction">请先回答待处理请求，再发送新指令。</string>
+    <string name="reference_title">引用</string>
+    <string name="reference_failed">无法搜索引用</string>
+    <string name="reference_notice_title">未添加引用</string>
+    <string name="reference_path_invalid">这个路径包含不支持的控制字符或引号。</string>
+    <plurals name="reference_session_limit">
+        <item quantity="other">每条消息最多引用 %1$d 个会话。</item>
+    </plurals>
+    <string name="model_open">选择模型与推理强度</string>
+    <string name="model_default_label">模型</string>
+    <string name="model_picker_title">模型与推理强度</string>
+    <string name="model_unroutable_title">当前模型不可用</string>
+    <string name="model_unroutable_message">请选择这台电脑提供的其他模型，以恢复下一次请求。</string>
+    <string name="model_scope_title">从下一次请求生效</string>
+    <string name="model_scope_message">Desktop 也会尝试将此选择保存为 Harness 的默认模型。</string>
+    <string name="model_load_failed">无法加载模型</string>
+    <string name="model_empty">这台电脑没有提供可选模型。</string>
+    <string name="model_use_action">使用此模型</string>
+    <string name="reasoning_effort_title">推理强度</string>
+    <string name="model_selection_applied_title">模型已更新</string>
+    <string name="model_selection_applied">下一次请求将使用 %1$s。</string>
+    <string name="demo_model_description">适合日常编码与分析，响应更快</string>
+    <string name="demo_reasoning_off_description">关闭深度推理</string>
+    <string name="demo_reasoning_high_description">适合复杂编码任务</string>
+    <string name="demo_reasoning_max_description">使用最大的推理预算</string>
+    <string name="composer_error_title">操作未完成</string>
+
+    <!-- 目标详情 -->
+    <string name="goal_detail_open">查看目标详情</string>
+    <string name="goal_detail_title">当前目标</string>
+    <string name="goal_detail_objective">目标</string>
+    <string name="goal_detail_phase">阶段</string>
+    <string name="goal_detail_rounds">轮次</string>
+    <string name="goal_detail_revision">修订</string>
+    <string name="goal_detail_blocked_reason">需要处理</string>
+    <string name="goal_phase_active">目标进行中</string>
+    <string name="goal_phase_paused">目标已暂停</string>
+    <string name="goal_phase_blocked">目标受阻</string>
+    <string name="goal_phase_complete">目标已完成</string>
+    <plurals name="goal_rounds_value">
+        <item quantity="other">%1$d / %2$d 轮</item>
+    </plurals>
+    <plurals name="goal_accessibility_value">
+        <item quantity="other">%1$s。%2$s。%3$d / %4$d 轮</item>
+    </plurals>
+
+    <!-- 执行轨迹 -->
+    <string name="trajectory_empty_title">还没有轨迹</string>
+    <string name="trajectory_empty_message">请求、模型回复、工具与生命周期事件会显示在这里。</string>
+    <string name="trajectory_search_placeholder">搜索轨迹</string>
+    <string name="trajectory_search_description">搜索标题、摘要和完整事件详情</string>
+    <string name="trajectory_search_clear">清除轨迹搜索</string>
+    <string name="trajectory_no_results_title">没有匹配的轨迹</string>
+    <string name="trajectory_no_results_message">尝试其他标题、摘要或详情关键词。</string>
+    <string name="trajectory_overview_events">事件</string>
+    <string name="trajectory_overview_turns">轮次</string>
+    <string name="trajectory_overview_tools">工具调用</string>
+    <string name="trajectory_context_group">会话上下文</string>
+    <string name="trajectory_copy_all">复制全部</string>
+    <string name="trajectory_copied">已复制</string>
+    <string name="trajectory_copy_kind">类型</string>
+    <string name="trajectory_copy_sequence">序号</string>
+    <string name="trajectory_copy_summary">摘要</string>
+    <string name="trajectory_copy_details">详情</string>
+    <string name="trajectory_copy_attachments">附件</string>
+    <plurals name="trajectory_group_event_count">
+        <item quantity="other">%1$d 个事件</item>
+    </plurals>
+    <string name="trajectory_turn">第 %1$d 轮</string>
+    <string name="trajectory_step">第 %1$d 步</string>
+    <string name="trajectory_kind_input">输入</string>
+    <string name="trajectory_kind_context">上下文</string>
+    <string name="trajectory_kind_request">模型请求</string>
+    <string name="trajectory_kind_assistant">助手</string>
+    <string name="trajectory_kind_tool">工具</string>
+    <string name="trajectory_kind_goal">目标</string>
+    <string name="trajectory_kind_plan">计划</string>
+    <string name="trajectory_kind_lifecycle">生命周期</string>
+
+    <!-- 子代理 -->
+    <string name="subagent_open">打开子代理</string>
+    <string name="subagent_title">子代理</string>
+    <string name="subagent_subtitle">查看委派任务，并继续支持对话的工作</string>
+    <string name="subagent_empty_title">没有子代理</string>
+    <string name="subagent_empty_message">Harness 创建委派任务后会显示在这里。</string>
+    <string name="subagent_nested_title">下级子代理</string>
+    <string name="subagent_nested_subtitle">由“%1$s”派出</string>
+    <string name="subagent_nested_empty_title">没有下级子代理</string>
+    <string name="subagent_nested_empty_message">这项工作尚未继续派出其他任务。</string>
+    <string name="subagent_load_failed">无法加载子代理</string>
+    <string name="subagent_parent_unavailable_title">父会话不可用</string>
+    <string name="subagent_parent_unavailable_message">仍可查看历史，但部分控制暂不可用。</string>
+    <string name="subagent_continue_unavailable">父会话恢复前，暂时无法继续这个子代理。</string>
+    <string name="subagent_has_children">包含下级子代理</string>
+    <string name="subagent_open_children">打开下级子代理</string>
+    <string name="subagent_mode_one_shot">一次性任务</string>
+    <string name="subagent_mode_continuable">可继续对话</string>
+    <string name="subagent_mode_unknown">能力未知</string>
+    <string name="subagent_activity_running">执行中</string>
+    <string name="subagent_activity_inactive">未执行</string>
+    <string name="subagent_activity_unavailable">不可用</string>
+    <string name="subagent_history_empty_title">还没有历史</string>
+    <string name="subagent_history_empty_message">这个子代理尚未产生可见活动。</string>
+    <string name="subagent_continue_placeholder">继续这个子代理</string>
+    <string name="subagent_input_label">给子代理的指令</string>
+    <string name="subagent_continue_send">发送给子代理</string>
+    <string name="subagent_stop">停止子代理</string>
+    <plurals name="subagent_new_updates">
+        <item quantity="other">%1$d 条新内容</item>
+    </plurals>
+
+    <!-- 协议层产品文案 -->
+    <string name="remote_untitled_task">未命名任务</string>
+    <string name="remote_computer_fallback">电脑</string>
+    <string name="remote_question_fallback">问题</string>
+    <string name="remote_context_harness">Harness 上下文</string>
+    <string name="remote_context_model">模型上下文</string>
+    <string name="remote_context_project">项目指令</string>
+    <string name="remote_context_plugin">插件上下文</string>
+    <string name="remote_context_capabilities">可用能力</string>
+    <string name="remote_context_skill">Skill 上下文</string>
+    <string name="remote_context_session">引用的会话</string>
+    <string name="remote_context_goal">目标延续</string>
+    <string name="remote_context_system">系统上下文</string>
+    <string name="remote_trajectory_user">用户输入</string>
+    <string name="remote_trajectory_model">模型回复</string>
+    <string name="remote_trajectory_tool">工具</string>
+    <string name="remote_trajectory_lifecycle">生命周期</string>
+    <string name="remote_metadata_stopped">已停止</string>
+    <plurals name="remote_token_count">
+        <item quantity="other">%1$d Token</item>
+    </plurals>
+    <string name="remote_error_invalid_response">电脑没有返回有效的 Harness 数据。</string>
+    <string name="remote_error_mismatched_response">电脑返回了其他请求的响应，请重试。</string>
+    <string name="remote_error_pairing_expired">局域网配对凭据已失效，请重新扫描 Desktop 二维码。</string>
+    <string name="remote_error_too_large">图片或消息超过电脑允许的远程传输上限。</string>
+    <string name="remote_error_http">电脑返回了 HTTP %1$d。</string>
+    <string name="remote_error_unsupported_decision">当前请求不支持这个操作。</string>
+    <string name="remote_error_attachment_not_found">这张图片已不可用。</string>
+    <string name="remote_error_interaction_rejected">电脑拒绝了这个回复，请刷新后重试。</string>
+    <string name="remote_error_model_unavailable">这个模型或推理选项不可用。</string>
+    <string name="remote_error_session_not_found">这个会话已不在电脑上。</string>
+    <string name="remote_error_subagent_not_resumable">无法从手机继续或停止这个子代理。</string>
+    <string name="endpoint_error_empty">请输入电脑上显示的 Remote 地址。</string>
+    <string name="endpoint_error_invalid">这不是有效的 DSH Remote 地址或配对二维码。</string>
+    <string name="endpoint_error_insecure">公网地址必须使用 HTTPS；HTTP 只可用于带认证的本地配对。</string>
+    <string name="endpoint_error_unsupported_host">这个地址不是可识别的私有网络地址，请改用 HTTPS。</string>
+    <string name="endpoint_error_credentials">Remote 地址不能包含用户名或密码。</string>
+    <string name="endpoint_error_pairing_required">同一 Wi-Fi 的 HTTP 连接必须扫描 Desktop 配对二维码。</string>
+    <string name="local_network_permission_denied">请在 Android 设置中允许“附近的设备”，才能直接连接同一 Wi-Fi。Tailscale HTTPS 仍可使用。</string>
+    <string name="remote_subagent_corrupt">子代理数据不完整</string>
+    <string name="remote_subagent_unsupported">暂不支持这种子代理</string>
+    <string name="remote_subagent_unavailable">子代理不可用</string>
+    <string name="remote_system_prompt">系统提示</string>
+    <string name="remote_model_request">模型请求</string>
+    <string name="remote_reasoning">思考过程</string>
+    <string name="remote_answer">回答</string>
+    <string name="remote_model_reasoning">模型思考</string>
+    <string name="remote_model_output">模型输出</string>
+    <string name="remote_tool_running">正在你的电脑上执行</string>
+    <string name="remote_execution_failed">执行失败</string>
+    <string name="remote_completed">已完成</string>
+    <string name="remote_input">输入</string>
+    <string name="remote_terminal_output">终端输出</string>
+    <string name="remote_result">结果</string>
+    <string name="remote_goal_cleared">目标已清除</string>
+    <string name="remote_goal_cleared_message">此会话不会再自动延续这个目标。</string>
+    <string name="remote_goal_created">目标已创建</string>
+    <string name="remote_goal_paused">目标已暂停</string>
+    <string name="remote_goal_resumed">目标已恢复</string>
+    <string name="remote_goal_completed">目标已完成</string>
+    <string name="remote_goal_attention">目标需要处理</string>
+    <string name="remote_goal_updated">目标已更新</string>
+    <string name="remote_goal_updated_message">Harness 已更新当前目标。</string>
+    <plurals name="remote_goal_rounds">
+        <item quantity="other">第 %1$d/%2$d 轮</item>
+    </plurals>
+    <string name="remote_revision">修订 %1$d</string>
+    <string name="remote_plan_enabled">计划模式已开启</string>
+    <string name="remote_plan_disabled">计划模式已关闭</string>
+    <string name="remote_plan_enabled_message">Harness 会先准备计划，再请求执行。</string>
+    <string name="remote_plan_disabled_message">Harness 已恢复普通执行模式。</string>
+    <string name="remote_model_retrying">正在重试模型请求</string>
+    <string name="remote_waiting_request">等待下一次请求</string>
+    <string name="remote_retry_message">连接或模型请求暂时失败，Harness 将自动重试。</string>
+    <string name="remote_retrying_in">将在 %1$s 后重试</string>
+    <string name="remote_context_compacted">上下文已压缩</string>
+    <string name="remote_context_compacted_message">较早内容已压缩为摘要。</string>
+    <string name="remote_compaction_summary">压缩摘要</string>
+    <string name="remote_turn_completed">本轮已完成</string>
+    <string name="remote_turn_ended">本轮已结束</string>
+    <string name="remote_turn_completed_message">Harness 已完成本轮任务</string>
+    <string name="remote_turn_failed">本轮失败</string>
+    <string name="remote_model_error">模型返回了错误。</string>
+    <string name="remote_output_limit">已达到输出上限</string>
+    <string name="remote_output_limit_message">模型已达到输出 Token 上限。</string>
+    <string name="remote_turn_stopped">本轮已停止</string>
+    <string name="remote_turn_stopped_message">执行已取消，现有输出仍会保留。</string>
+    <string name="remote_turn_blocked">本轮被阻塞</string>
+    <string name="remote_turn_blocked_message">Harness 无法继续这个步骤。</string>
+    <string name="remote_turn_interrupted">本轮已中断</string>
+    <string name="remote_turn_interrupted_message">会话在完成前结束。</string>
+    <string name="demo_host_name">演示</string>
+    <string name="demo_host_description">离线演示</string>
+    <string name="demo_workspace_title">示例 App</string>
+    <string name="demo_session_review_title">登录流程发布检查</string>
+    <string name="demo_review_prompt">发布前检查登录流程。</string>
+    <string name="demo_tool_read_title">读取项目文件</string>
+    <string name="demo_tool_read_summary">读取了四个身份验证文件</string>
+    <string name="demo_tool_files_title">文件</string>
+    <string name="demo_review_result">我发现两个发布风险：会话恢复没有回归测试，离线错误也没有说明如何重新连接。确认后我可以修复这两项。</string>
+    <string name="demo_subagent_label">登录回归测试</string>
+    <string name="demo_subagent_result">现有登录测试没有覆盖进程重建。</string>
+    <string name="demo_received">已收到。所有执行仍在你的电脑上完成。</string>
+    <string name="demo_task_stopped">你已停止任务</string>
+    <string name="demo_allowed_once">已允许一次</string>
+    <string name="demo_rejected">已拒绝</string>
+    <string name="demo_answer_submitted">答案已提交</string>
+    <string name="demo_question_dismissed">问题已关闭</string>
+    <string name="demo_confirmation">确认</string>
+    <string name="demo_apply_fixes_question">发布前应用这些修复吗？</string>
+    <string name="demo_apply_fixes_detail">1. 恢复登录状态\n2. 改进离线引导\n3. 添加回归测试</string>
+    <string name="demo_approve_option">批准</string>
+    <string name="demo_approve_description">继续在电脑上执行</string>
+    <string name="demo_not_yet_option">暂不</string>
+    <string name="demo_not_yet_description">保留当前结果</string>
+    <string name="demo_goal_objective">准备登录流程发布</string>
+
+    <!-- 关于、隐私与内置远程教程 -->
+    <string name="about_action">关于与隐私</string>
+    <string name="about_title">关于 DSH Remote</string>
+    <string name="about_subtitle">GitHub 内测版 · %1$s</string>
+    <string name="about_local_first_title">电脑始终是运行宿主</string>
+    <string name="about_local_first_message">DSH Remote 没有项目方 relay、账号、分析、广告、推送服务或模型网关。代码、凭证、会话历史和执行都留在你的电脑。</string>
+    <string name="about_tailscale_title">离开同一 Wi-Fi 后使用 Tailscale</string>
+    <string name="about_tailscale_step_1">在这台 Android 设备和电脑上安装 Tailscale，然后登录同一个 Tailnet。</string>
+    <string name="about_tailscale_step_2">打开 Tailnet 设备管理后台，确认两台设备都已连接后再继续。</string>
+    <string name="about_tailscale_step_3">如果 Desktop 提示缺少权限，请启用 MagicDNS 与 HTTPS 证书。证书使用的设备名称会记录在公开证书日志中。</string>
+    <string name="about_tailscale_step_4">在 Desktop 开启跨网络连接。Desktop 会自动配置 Tailscale Serve、Harness 地址和二维码，无需终端命令。</string>
+    <string name="about_tailscale_step_5">扫描跨网络二维码，关闭 Wi-Fi，只保留蜂窝网络和 Tailscale，再打开会话并发送一条消息。</string>
+    <string name="about_tailscale_download_android">在 Android 安装 Tailscale</string>
+    <string name="about_tailscale_download_computer">下载电脑版 Tailscale</string>
+    <string name="about_tailscale_open_admin">打开 Tailnet 设备管理</string>
+    <string name="about_tailscale_open_dns">打开 Tailnet DNS 设置</string>
+    <string name="about_tailscale_https_guide">查看 MagicDNS 与 HTTPS 指南</string>
+    <string name="about_tailscale_serve_guide">查看 Tailscale Serve 说明</string>
+    <string name="about_tailscale_funnel_title">不要使用 Funnel</string>
+    <string name="about_tailscale_funnel_message">DSH Remote 只使用 Tailnet 内可访问的 Tailscale Serve。Funnel 会把入口暴露到公网。</string>
+    <string name="about_privacy_title">隐私与支持</string>
+    <string name="about_privacy_message">保存的电脑由 Android Keystore 加密。所选图片会在传输前缩放并重新编码。相机画面只用于扫描配对二维码。</string>
+    <string name="about_notification_limit">任务通知只在 App 进程存活时尽力提醒。进程被杀或受到厂商后台限制后，Android 可能停止提醒。</string>
+    <string name="about_privacy_policy_action">阅读隐私政策</string>
+    <string name="about_support_action">打开支持页面</string>
+    <string name="about_local_data_title">本地电脑数据</string>
+    <plurals name="about_computer_count">
+        <item quantity="other">%1$d 台电脑</item>
+    </plurals>
+    <string name="about_local_data_message">移除保存的电脑会删除这台 Android 设备上的名称、地址和局域网凭据，不会删除 Desktop 中的会话、仓库、凭证或设置。</string>
+    <string name="about_remove_all_action">移除全部已保存电脑</string>
+    <string name="about_remove_all_title">移除全部电脑？</string>
+    <string name="about_remove_all_message">这会删除这台 Android 设备上的本地配对数据，Desktop 项目和会话不受影响。</string>
+    <string name="about_remove_all_confirm">全部移除</string>
+    <string name="about_independent_project">独立社区项目，并非 DeepSeek AI 或 Tailscale 官方产品。</string>
+
+    <!-- 离线演示数据 -->
+    <string name="demo_computer_name">演示电脑</string>
+    <string name="demo_project_name">DSH Remote</string>
+    <string name="demo_session_title">开发 Android Remote</string>
+    <string name="demo_older_session_title">检查连接安全边界</string>
+    <string name="demo_user_message">继续实现 Android 手机控制端。</string>
+    <string name="demo_assistant_message">我会把运行时保留在电脑上，并围绕现有 Remote 协议实现紧凑的原生 Android 控制界面。</string>
+</resources>
