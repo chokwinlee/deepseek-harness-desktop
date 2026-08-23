@@ -211,9 +211,9 @@ struct RemoteSessionView: View {
         let sessionCount = projectGroups.reduce(0) { $0 + $1.sessions.count }
         let runningCount = projectGroups.reduce(0) { $0 + $1.runningCount }
         if runningCount > 0 {
-            return "\(projectGroups.count) 个项目 · \(runningCount) 个运行中"
+            return "\(remoteLocalizedCount(projectGroups.count, unit: "project")) · \(remoteLocalizedCount(runningCount, unit: "running"))"
         }
-        return "\(projectGroups.count) 个项目 · \(sessionCount) 个会话"
+        return "\(remoteLocalizedCount(projectGroups.count, unit: "project")) · \(remoteLocalizedCount(sessionCount, unit: "session"))"
     }
 
     private var projectGroups: [RemoteProjectGroup] {
@@ -263,7 +263,7 @@ struct RemoteSessionView: View {
             groups.append(RemoteProjectGroup(
                 id: "workspace:__ungrouped__",
                 workspaceID: nil,
-                title: "未分组",
+                title: remoteLocalized("未分组"),
                 path: nil,
                 sessions: ungrouped
             ))
@@ -282,7 +282,9 @@ struct RemoteSessionView: View {
             if grouped[id] == nil {
                 groupOrder.append(id)
                 metadata[id] = (
-                    path == nil ? "未分组" : (session.projectName ?? path.map(crossPlatformBasename) ?? "未命名项目"),
+                    path == nil
+                        ? remoteLocalized("未分组")
+                        : (session.projectName ?? path.map(crossPlatformBasename) ?? remoteLocalized("未命名项目")),
                     path
                 )
             }
@@ -360,7 +362,9 @@ struct RemoteSessionView: View {
     }
 
     private func displayProjectTitle(_ title: String, path: String) -> String {
-        normalized(title) ?? normalized(path).map(crossPlatformBasename) ?? "未命名项目"
+        normalized(title)
+            ?? normalized(path).map(crossPlatformBasename)
+            ?? remoteLocalized("未命名项目")
     }
 
     private func normalized(_ value: String?) -> String? {
@@ -416,7 +420,7 @@ struct RemoteSessionView: View {
                 )
                 pendingCreatedSession = RemoteSessionSummary(
                     id: sessionID,
-                    title: "新会话",
+                    title: remoteLocalized("新会话"),
                     updatedAt: Date(),
                     running: false,
                     projectName: project.title,
@@ -476,7 +480,10 @@ private struct NewRemoteSessionSheet: View {
                         .padding(.bottom, 2)
                     }
 
-                    RemoteSectionHeader(title: "项目", detail: "\(projects.count) 个")
+                    RemoteSectionHeader(
+                        title: "项目",
+                        detail: remoteLocalizedCount(projects.count, unit: "project")
+                    )
                         .padding(.horizontal, 2)
 
                     ForEach(projects) { project in
@@ -488,7 +495,9 @@ private struct NewRemoteSessionSheet: View {
                         .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 14))
                         .disabled(creatingProjectID != nil)
                         .remoteSurface(cornerRadius: 14)
-                        .accessibilityLabel("在 \(project.title) 中新建会话")
+                        .accessibilityLabel(
+                            remoteLocalizedFormat("在 %@ 中新建会话", project.title)
+                        )
                     }
 
                     Text("会话在电脑上的项目目录中创建，代码与执行环境仍保留在电脑上。")
@@ -635,9 +644,14 @@ private struct RemoteProjectCard: View {
                     if hasHiddenSessions || showsAllSessions {
                         Button(action: toggleAllSessions) {
                             HStack(spacing: 6) {
-                                Text(showsAllSessions
-                                     ? "收起会话"
-                                     : "查看其余 \(project.sessions.count - collapsedSessionLimit) 个会话")
+                                Text(
+                                    showsAllSessions
+                                        ? remoteLocalized("收起会话")
+                                        : remoteLocalizedFormat(
+                                            "查看其余 %lld 个会话",
+                                            project.sessions.count - collapsedSessionLimit
+                                        )
+                                )
                                 Image(systemName: showsAllSessions ? "chevron.up" : "chevron.down")
                                     .font(.caption.weight(.semibold))
                             }
@@ -715,9 +729,11 @@ private struct RemoteProjectCard: View {
     }
 
     private var statusBadge: some View {
-        Text(project.runningCount > 0
-             ? "\(project.runningCount) 个运行中"
-             : "\(project.sessions.count) 个会话")
+        Text(
+            project.runningCount > 0
+                ? remoteLocalizedCount(project.runningCount, unit: "running")
+                : remoteLocalizedCount(project.sessions.count, unit: "session")
+        )
             .font(.caption.weight(.semibold))
             .foregroundStyle(project.runningCount > 0 ? RemoteTheme.accent : .secondary)
             .padding(.horizontal, 9)
@@ -741,11 +757,16 @@ private struct RemoteProjectCard: View {
     }
 
     private var projectAccessibilityValue: String {
-        let expansion = isExpanded ? "已展开" : "已收起"
+        let expansion = remoteLocalized(isExpanded ? "已展开" : "已收起")
         if project.runningCount > 0 {
-            return "\(project.sessions.count) 个会话，\(project.runningCount) 个运行中，\(expansion)"
+            return remoteLocalizedFormat(
+                "%lld 个会话，%lld 个运行中，%@",
+                project.sessions.count,
+                project.runningCount,
+                expansion
+            )
         }
-        return "\(project.sessions.count) 个会话，\(expansion)"
+        return remoteLocalizedFormat("%lld 个会话，%@", project.sessions.count, expansion)
     }
 
     private func abbreviatedPath(_ path: String) -> String {
@@ -793,7 +814,11 @@ private struct RemoteProjectSessionRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(session.title)
-        .accessibilityValue(session.running ? "执行中，\(relativeUpdate)" : relativeUpdate)
+        .accessibilityValue(
+            session.running
+                ? remoteLocalizedFormat("执行中，%@", relativeUpdate)
+                : relativeUpdate
+        )
         .accessibilityHint("打开会话")
     }
 
@@ -817,10 +842,12 @@ private struct RemoteProjectSessionRow: View {
 
     private var relativeUpdate: String {
         let seconds = max(0, Date().timeIntervalSince(session.updatedAt))
-        if seconds < 60 { return "刚刚更新" }
-        if seconds < 3_600 { return "\(Int(seconds / 60)) 分钟前" }
-        if seconds < 86_400 { return "\(Int(seconds / 3_600)) 小时前" }
-        if seconds < 604_800 { return "\(Int(seconds / 86_400)) 天前" }
+        if seconds < 60 { return remoteLocalized("刚刚更新") }
+        if seconds < 604_800 {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return formatter.localizedString(fromTimeInterval: -seconds)
+        }
         return session.updatedAt.formatted(date: .abbreviated, time: .omitted)
     }
 }
@@ -886,7 +913,10 @@ private struct ProjectsConnectionError: View {
         RemoteEmptyState(
             icon: "wifi.exclamationmark",
             title: "无法连接这台电脑",
-            message: "请确认 DSH Desktop 正在运行且手机 Remote 已开启。\n\(message)",
+            message: remoteLocalizedFormat(
+                "请确认 DSH Desktop 正在运行且手机 Remote 已开启。\n%@",
+                message
+            ),
             action: retry
         ) {
             Label("重新连接", systemImage: "arrow.clockwise")

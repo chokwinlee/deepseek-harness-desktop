@@ -54,10 +54,15 @@ The compact title-bar summary stays visible while you work. Open it for input, o
 > DSH Remote is currently an **iOS source preview**. There is no App Store or public TestFlight build yet, and the GitHub Releases page does not contain an installable iOS app. A TestFlight public beta is planned.
 
 <p align="center">
-  <img src="docs/images/readme-remote.png" width="360" alt="DSH Remote native iPhone project and session interface">
+  <img src="docs/images/remote-home-en.png" width="30%" alt="DSH Remote same-Wi-Fi pairing in English">
+  <img src="docs/images/remote-projects-en.png" width="30%" alt="DSH Remote projects and running sessions in English">
+  <img src="docs/images/remote-conversation-en.png" width="30%" alt="DSH Remote approval handling in English">
 </p>
+<p align="center"><sub>Same-Wi-Fi pairing · Projects and running sessions · Approval handling</sub></p>
 
 DSH Remote is a native SwiftUI companion for a DSH Desktop computer you own or manage. It does not run an agent, repository, terminal, or model provider on the phone. Work continues on the computer; the iPhone is a narrow control surface.
+
+The iOS source preview follows the device's app-language setting and includes complete English and Simplified Chinese product copy, including setup, errors, notifications, approvals, models, Activity, and subagent flows.
 
 - **Same Wi-Fi (recommended):** Desktop exposes an opt-in, authenticated LAN endpoint on a trusted private network. No Tailscale account is required.
 - **Away from the local network:** both devices join the user's own tailnet, and Desktop configures a private Tailscale Serve HTTPS entry. Do not use Funnel.

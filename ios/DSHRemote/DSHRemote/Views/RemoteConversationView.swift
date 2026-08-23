@@ -403,7 +403,7 @@ struct RemoteConversationView: View {
             VStack(spacing: 0) {
                 RemotePageHeader(
                     title: viewModel.session.title,
-                    subtitle: viewModel.session.projectName ?? "Harness 会话"
+                    subtitle: viewModel.session.projectName ?? remoteLocalized("Harness 会话")
                 ) {
                     HStack(spacing: 6) {
                         Button {
@@ -431,7 +431,11 @@ struct RemoteConversationView: View {
                         }
                         .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 12))
                         .accessibilityLabel("子代理")
-                        .accessibilityValue(subagentCount > 0 ? "\(subagentCount) 个" : "暂无")
+                        .accessibilityValue(
+                            subagentCount > 0
+                                ? remoteLocalizedCount(subagentCount, unit: "subagent")
+                                : remoteLocalized("暂无")
+                        )
 
                         RemoteStatusPill(
                             text: viewModel.session.running ? "执行中" : "待命",
@@ -518,14 +522,14 @@ struct RemoteConversationView: View {
             guard let message, !message.isEmpty else { return }
             UIAccessibility.post(
                 notification: .announcement,
-                argument: "操作没有完成，\(message)"
+                argument: remoteLocalizedFormat("操作没有完成，%@", message)
             )
         }
         .onChange(of: viewModel.modelErrorMessage) { _, message in
             guard let message, !message.isEmpty else { return }
             UIAccessibility.post(
                 notification: .announcement,
-                argument: "模型操作没有完成，\(message)"
+                argument: remoteLocalizedFormat("模型操作没有完成，%@", message)
             )
         }
         .sheet(item: $selectedDetail) { item in
@@ -604,7 +608,7 @@ struct RemoteConversationView: View {
             if Task.isCancelled { return }
         }
         guard viewModel.hasLoadedConversationSnapshot else {
-            composerNotice = "真实验收未能读取会话。"
+            composerNotice = remoteLocalized("真实验收未能读取会话。")
             return
         }
 
@@ -626,9 +630,7 @@ struct RemoteConversationView: View {
                     model: "deepseek-v4-flash",
                     reasoningEffort: "off"
                 ))
-                let prompt = """
-                DSH Remote v0.3 端到端验收。请读取并引用 \(context)，随后使用 subagent 工具创建一个名为 remote-acceptance 的 continuable 子代理，让它检查本项目 Remote 的安全边界并返回一句结论。最后简短汇总。
-                """
+                let prompt = remoteLocalizedFormat("acceptance.references.prompt", context)
                 sent = await viewModel.send(prompt, images: [], steer: false)
             } else {
                 _ = await viewModel.selectModel(RemoteModelSelection(
@@ -645,13 +647,12 @@ struct RemoteConversationView: View {
                     name: "remote-acceptance.png",
                     limits: effectiveImageLimits
                 )
-                let prompt = """
-                图片与引用回归验收。请读取 \(context)，并用一句话说明附图的主要形状与配色。
-                """
+                let prompt = remoteLocalizedFormat("acceptance.image.prompt", context)
                 sent = await viewModel.send(prompt, images: [image], steer: false)
             }
             if !sent {
-                composerNotice = viewModel.errorMessage ?? "真实验收消息发送失败。"
+                composerNotice = viewModel.errorMessage
+                    ?? remoteLocalized("真实验收消息发送失败。")
             }
         } catch {
             composerNotice = error.localizedDescription
@@ -729,7 +730,9 @@ struct RemoteConversationView: View {
         if let stats = viewModel.stats, stats.turns > 0 {
             HStack {
                 Spacer(minLength: 8)
-                Text("\(stats.turns) 轮 · \(stats.steps) 次调用")
+                Text(
+                    "\(remoteLocalizedCount(stats.turns, unit: "turn")) · \(remoteLocalizedCount(stats.steps, unit: "call"))"
+                )
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -1156,7 +1159,11 @@ struct RemoteConversationView: View {
                 let image = try await RemoteImagePreparer.prepare(
                     data: data,
                     declaredMediaType: contentType?.preferredMIMEType,
-                    name: "照片-\(draftImages.count + index + 1).\(fileExtension)",
+                    name: remoteLocalizedFormat(
+                        "照片-%lld.%@",
+                        draftImages.count + index + 1,
+                        fileExtension
+                    ),
                     limits: limits
                 )
                 batchBytes += image.data.count
@@ -1184,7 +1191,7 @@ struct RemoteConversationView: View {
         }), let typeIdentifier = provider.registeredTypeIdentifiers.first(where: {
             UTType($0)?.conforms(to: .image) == true
         }) else {
-            composerNotice = "剪贴板中没有可用图片。"
+            composerNotice = remoteLocalized("剪贴板中没有可用图片。")
             return
         }
         isPreparingImages = true
@@ -1202,7 +1209,10 @@ struct RemoteConversationView: View {
                 let prepared = try await RemoteImagePreparer.prepare(
                     data: data,
                     declaredMediaType: type?.preferredMIMEType,
-                    name: "粘贴图片.\(type?.preferredFilenameExtension ?? "png")",
+                    name: remoteLocalizedFormat(
+                        "粘贴图片.%@",
+                        type?.preferredFilenameExtension ?? "png"
+                    ),
                     limits: limits
                 )
                 try appendPreparedImage(prepared, limits: limits)
@@ -1261,7 +1271,7 @@ struct RemoteConversationView: View {
     private func insertFileReference(_ candidate: RemoteFileReferenceCandidate) {
         guard let token = activeReferenceToken,
               let formatted = Self.formattedFileMention(candidate, preserveQuote: token.quoted) else {
-            composerNotice = "这个路径无法安全插入提示词。"
+            composerNotice = remoteLocalized("这个路径无法安全插入提示词。")
             return
         }
         if candidate.kind == .directory {
@@ -1279,7 +1289,7 @@ struct RemoteConversationView: View {
 
     private func insertSessionReference(_ candidate: RemoteSessionReferenceCandidate) {
         guard draftReferences.filter({ $0.kind == .session }).count < 3 else {
-            composerNotice = "每条消息最多引用 3 个会话。"
+            composerNotice = remoteLocalized("每条消息最多引用 3 个会话。")
             return
         }
         guard let token = activeReferenceToken else { return }
@@ -1405,28 +1415,34 @@ struct RemoteConversationView: View {
 
     private var modelTriggerName: String {
         if let selectedAdvertisedModel { return selectedAdvertisedModel.model.name }
-        if viewModel.isLoadingModels && viewModel.modelDirectory == nil { return "读取模型…" }
-        return "选择模型"
+        if viewModel.isLoadingModels && viewModel.modelDirectory == nil {
+            return remoteLocalized("读取模型…")
+        }
+        return remoteLocalized("选择模型")
     }
 
     private var selectedEffortName: String? {
         guard let directory = viewModel.modelDirectory,
               let reasoning = selectedAdvertisedModel?.model.reasoning else { return nil }
         let effortID = directory.current.reasoningEffort ?? reasoning.defaultEffort
-        guard let effortID else { return "默认" }
+        guard let effortID else { return remoteLocalized("默认") }
         return reasoning.efforts.first(where: { $0.id == effortID })?.name ?? effortID
     }
 
     private var modelAccessibilityLabel: String {
         if let effort = selectedEffortName {
-            return "模型，\(modelTriggerName)，推理强度 \(effort)"
+            return remoteLocalizedFormat(
+                "模型，%@，推理强度 %@",
+                modelTriggerName,
+                effort
+            )
         }
-        return "模型，\(modelTriggerName)"
+        return remoteLocalizedFormat("模型，%@", modelTriggerName)
     }
 
     private var sendAccessibilityLabel: String {
-        guard viewModel.session.running else { return "发送" }
-        return busyDelivery == .queue ? "排队发送" : "插话发送"
+        guard viewModel.session.running else { return remoteLocalized("发送") }
+        return remoteLocalized(busyDelivery == .queue ? "排队发送" : "插话发送")
     }
 
     private struct DSHConversationTabBar: View {
@@ -1439,7 +1455,7 @@ struct RemoteConversationView: View {
                         selection = mode
                     } label: {
                         VStack(spacing: 7) {
-                            Text(mode.rawValue)
+                            Text(remoteLocalized(mode.rawValue))
                                 .font(.subheadline.weight(selection == mode ? .semibold : .regular))
                                 .foregroundStyle(selection == mode ? Color.primary : Color.secondary)
                             Rectangle()
@@ -1478,7 +1494,7 @@ struct RemoteConversationView: View {
         return RemotePromptImage(
             data: data,
             mediaType: "image/png",
-            name: "界面草稿.png",
+            name: remoteLocalized("界面草稿.png"),
             width: 320,
             height: 180
         )
@@ -1488,20 +1504,20 @@ struct RemoteConversationView: View {
         RemoteConversationItem(
             id: "debug-instruction-detail",
             kind: .context,
-            title: "项目指令",
-            text: "AGENTS.md · 已载入",
+            title: remoteLocalized("项目指令"),
+            text: remoteLocalized("AGENTS.md · 已载入"),
             time: Date(),
             state: .succeeded,
             details: [
                 RemoteDetailSection(
                     id: "instruction-sources",
-                    title: "指令来源",
-                    content: "AGENTS.md\t已载入\ndocs/AGENTS.md\t已载入",
+                    title: remoteLocalized("指令来源"),
+                    content: remoteLocalized("AGENTS.md\t已载入\ndocs/AGENTS.md\t已载入"),
                     kind: .list
                 ),
                 RemoteDetailSection(
                     id: "context-raw",
-                    title: "模型接收的内容",
+                    title: remoteLocalized("模型接收的内容"),
                     content: """
                     <system-reminder>
                     The following workspace instructions may be relevant to your work.
@@ -1551,25 +1567,29 @@ struct RemoteConversationView: View {
     private func goalDetailItem(_ goal: RemoteGoalState) -> RemoteConversationItem {
         var details = [RemoteDetailSection(
             id: "goal-objective",
-            title: "目标",
+            title: remoteLocalized("目标"),
             content: goal.objective,
             kind: .text
         )]
         let stateRows = [
-            "状态\t\(goalPhaseLabel(goal.phase))",
-            "进度\t\(goal.roundsStarted) / \(goal.maxRounds) 轮",
-            "修订\t\(goal.revision)",
+            remoteLocalizedFormat("状态\t%@", goalPhaseLabel(goal.phase)),
+            remoteLocalizedFormat(
+                "进度\t%lld / %lld 轮",
+                goal.roundsStarted,
+                goal.maxRounds
+            ),
+            remoteLocalizedFormat("修订\t%lld", goal.revision),
         ]
         details.append(RemoteDetailSection(
             id: "goal-status",
-            title: "状态",
+            title: remoteLocalized("状态"),
             content: stateRows.joined(separator: "\n"),
             kind: .list
         ))
         if let message = goal.blockedReasonMessage, !message.isEmpty {
             details.append(RemoteDetailSection(
                 id: "goal-blocked",
-                title: "需要处理",
+                title: remoteLocalized("需要处理"),
                 content: message,
                 kind: .text
             ))
@@ -1577,23 +1597,28 @@ struct RemoteConversationView: View {
         return RemoteConversationItem(
             id: "current-goal:\(goal.id):\(goal.revision)",
             kind: .status,
-            title: "当前 Goal",
+            title: remoteLocalized("当前 Goal"),
             text: goal.objective,
             time: goal.updatedAt,
             state: goalConversationState(goal.phase),
             details: details,
-            metadata: ["\(goal.roundsStarted)/\(goal.maxRounds) 轮"],
+            metadata: [remoteLocalizedFormat(
+                "%lld/%lld 轮",
+                goal.roundsStarted,
+                goal.maxRounds
+            )],
             symbolName: "target"
         )
     }
 
     private func goalPhaseLabel(_ phase: RemoteGoalState.Phase) -> String {
-        switch phase {
+        let key: String = switch phase {
         case .active: "进行中"
         case .paused: "已暂停"
         case .blocked: "受阻"
         case .complete: "已完成"
         }
+        return remoteLocalized(key)
     }
 
     private func goalConversationState(
@@ -1607,7 +1632,7 @@ struct RemoteConversationView: View {
     }
 
     private func durationText(_ value: TimeInterval) -> String {
-        value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
+        value < 1 ? "\(Int(value * 1_000)) ms" : remoteLocalizedFormat("%.1f 秒", value)
     }
 
     private func restoreViewMode(_ mode: ViewMode, proxy: ScrollViewProxy) {
@@ -1706,8 +1731,8 @@ private struct RemoteComposerTextView: UIViewRepresentable {
         view.spellCheckingType = .yes
         view.showsVerticalScrollIndicator = false
         view.tintColor = UIColor(RemoteTheme.accent)
-        view.accessibilityLabel = "消息"
-        view.accessibilityHint = "输入发送给 Harness 的内容"
+        view.accessibilityLabel = remoteLocalized("消息")
+        view.accessibilityHint = remoteLocalized("输入发送给 Harness 的内容")
         view.accessibilityIdentifier = "remote-composer-text-view"
         context.coordinator.render(view, force: true)
         return view
@@ -2032,7 +2057,7 @@ private struct RemoteReferenceSuggestions: View {
                             suggestionRow(
                                 icon: "bubble.left.and.bubble.right",
                                 title: candidate.label,
-                                subtitle: candidate.cwd ?? "Harness 会话"
+            subtitle: candidate.cwd ?? remoteLocalized("Harness 会话")
                             ) {
                                 onSelectSession(candidate)
                             }
@@ -2131,8 +2156,10 @@ private struct RemoteReferenceSuggestions: View {
     private func fileCandidateSubtitle(_ candidate: RemoteFileReferenceCandidate) -> String {
         let components = pathComponents(candidate.path)
         let parent = components.dropLast().joined(separator: "/")
-        let location = parent.isEmpty ? "项目根目录" : parent
-        return candidate.kind == .directory ? "\(location) · 继续浏览" : location
+        let location = parent.isEmpty ? remoteLocalized("项目根目录") : parent
+        return candidate.kind == .directory
+            ? remoteLocalizedFormat("%@ · 继续浏览", location)
+            : location
     }
 
     private func pathComponents(_ path: String) -> [String] {
@@ -2223,7 +2250,9 @@ private struct RemoteDraftImageRail: View {
                         }
                         .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 22))
                         .offset(x: 8, y: -8)
-                        .accessibilityLabel("移除\(image.name ?? "图片")")
+                        .accessibilityLabel(
+                            remoteLocalizedFormat("移除%@", image.name ?? remoteLocalized("图片"))
+                        )
                     }
                     .padding(.top, 8)
                     .accessibilityElement(children: .contain)
@@ -2257,15 +2286,18 @@ private enum RemoteImagePreparationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unreadable:
-            "无法读取这张图片。"
+            remoteLocalized("无法读取这张图片。")
         case .unsupported:
-            "电脑当前不支持可安全转换的图片格式。"
+            remoteLocalized("电脑当前不支持可安全转换的图片格式。")
         case .tooLarge(let bytes):
-            "图片处理后仍超过单张 \(Self.byteText(bytes)) 的限制。"
+            remoteLocalizedFormat(
+                "图片处理后仍超过单张 %@ 的限制。",
+                Self.byteText(bytes)
+            )
         case .tooMany(let count):
-            "每条消息最多添加 \(count) 张图片。"
+            remoteLocalizedFormat("每条消息最多添加 %lld 张图片。", count)
         case .totalTooLarge(let bytes):
-            "这些图片合计超过 \(Self.byteText(bytes)) 的限制。"
+            remoteLocalizedFormat("这些图片合计超过 %@ 的限制。", Self.byteText(bytes))
         }
     }
 
@@ -2457,7 +2489,7 @@ private enum RemoteImagePreparer {
     private static func normalizedName(_ name: String?, extension fileExtension: String) -> String? {
         guard let name, !name.isEmpty else { return nil }
         let base = (name as NSString).deletingPathExtension
-        return "\(base.isEmpty ? "图片" : base).\(fileExtension)"
+        return "\(base.isEmpty ? remoteLocalized("图片") : base).\(fileExtension)"
     }
 
     private static func previewData(for image: CGImage) -> Data? {
@@ -2492,11 +2524,12 @@ private enum RemoteImagePreparer {
 
 private extension RemoteSubagentEntry {
     var remoteActivityLabel: String {
-        switch activity {
+        let key: String = switch activity {
         case .running: "运行中"
         case .inactive: mode == .continuable ? "未运行" : "已结束"
         case nil: "不可用"
         }
+        return remoteLocalized(key)
     }
 
     var remoteActivityColor: Color {
@@ -2584,7 +2617,10 @@ private struct RemoteSubagentBrowserView: View {
                         } else {
                             RemoteSectionHeader(
                                 title: "派出的工作",
-                                detail: "\(entries.filter { !$0.isDiagnostic }.count) 个"
+                                detail: remoteLocalizedCount(
+                                    entries.filter { !$0.isDiagnostic }.count,
+                                    unit: "subagent"
+                                )
                             )
                             VStack(spacing: 0) {
                                 ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
@@ -2637,7 +2673,7 @@ private struct RemoteSubagentBrowserView: View {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(alignment: .top, spacing: 11) {
                         subagentIcon(entry)
-                        Text(title)
+                        Text(remoteLocalized(title))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -2704,7 +2740,7 @@ private struct RemoteSubagentBrowserView: View {
 
     private func subagentMode(_ entry: RemoteSubagentEntry) -> some View {
         HStack(spacing: 6) {
-            Text(entry.mode == .continuable ? "可继续" : "一次性")
+            Text(remoteLocalized(entry.mode == .continuable ? "可继续" : "一次性"))
             if entry.hasChildren {
                 Text("·")
                 Label("包含子任务", systemImage: "arrow.triangle.branch")
@@ -2736,17 +2772,18 @@ private struct RemoteSubagentBrowserView: View {
     }
 
     private func diagnosticLabel(_ reason: RemoteSubagentEntry.DiagnosticReason?) -> String {
-        switch reason {
+        let key: String = switch reason {
         case .corrupt: "本地记录已损坏"
         case .unsupported: "记录格式暂不支持"
         case .unavailable: "记录暂时不可用"
         case nil: "记录暂时不可用"
         }
+        return remoteLocalized(key)
     }
 
     private func shortIdentifier(_ value: String) -> String {
         let compact = value.replacingOccurrences(of: "-", with: "")
-        return "子代理 \(compact.prefix(8))"
+        return remoteLocalizedFormat("子代理 %@", String(compact.prefix(8)))
     }
 }
 
@@ -2821,7 +2858,10 @@ private struct RemoteNestedSubagentCatalogView: View {
                     } else {
                         RemoteSectionHeader(
                             title: "下级工作",
-                            detail: "\(entries.filter { !$0.isDiagnostic }.count) 个"
+                            detail: remoteLocalizedCount(
+                                entries.filter { !$0.isDiagnostic }.count,
+                                unit: "subagent"
+                            )
                         )
                         VStack(spacing: 0) {
                             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
@@ -2912,9 +2952,9 @@ private struct RemoteNestedSubagentCatalogView: View {
     }
 
     private func subtitle(for entry: RemoteSubagentEntry) -> String {
-        var parts = [entry.mode == .continuable ? "可继续" : "一次性"]
+        var parts = [remoteLocalized(entry.mode == .continuable ? "可继续" : "一次性")]
         parts.append(entry.remoteActivityLabel)
-        if entry.hasChildren { parts.append("包含下级工作") }
+        if entry.hasChildren { parts.append(remoteLocalized("包含下级工作")) }
         return parts.joined(separator: " · ")
     }
 
@@ -2985,8 +3025,8 @@ private struct RemoteNestedSubagentCatalogView: View {
     }
 
     private func capabilitySubtitle(for entry: RemoteSubagentEntry) -> String {
-        var parts = [entry.mode == .continuable ? "可继续" : "一次性"]
-        if entry.hasChildren { parts.append("包含下级工作") }
+        var parts = [remoteLocalized(entry.mode == .continuable ? "可继续" : "一次性")]
+        if entry.hasChildren { parts.append(remoteLocalized("包含下级工作")) }
         return parts.joined(separator: " · ")
     }
 }
@@ -3293,12 +3333,14 @@ private struct RemoteSubagentConversationView: View {
         }
         switch action {
         case "followup":
-            _ = await viewModel.send("请再补充一句：移动端只开放了哪些最小 Remote 能力？")
+            _ = await viewModel.send(
+                remoteLocalized("请再补充一句：移动端只开放了哪些最小 Remote 能力？")
+            )
         case "long-running":
-            _ = await viewModel.send("请运行 sleep 45，然后只回复 done。")
+            _ = await viewModel.send(remoteLocalized("请运行 sleep 45，然后只回复 done。"))
         case "spawn-grandchild":
             _ = await viewModel.send(
-                "请使用 subagent 工具创建一个名为 nested-remote-acceptance 的 continuable 子代理，让它只回复 nested ok；等待它返回后再结束。"
+                remoteLocalized("请使用 subagent 工具创建一个名为 nested-remote-acceptance 的 continuable 子代理，让它只回复 nested ok；等待它返回后再结束。")
             )
         case "interrupt":
             for _ in 0..<100 where viewModel.child.activity != .running {
@@ -3426,7 +3468,9 @@ private struct RemoteModelSelectionSheet: View {
         VStack(spacing: 0) {
             RemoteSheetHeader(
                 title: "模型与推理",
-                subtitle: selectedCatalogModel.map { "当前：\($0.name)" } ?? "选择下一次请求使用的模型"
+                subtitle: selectedCatalogModel.map {
+                    remoteLocalizedFormat("当前：%@", $0.name)
+                } ?? remoteLocalized("选择下一次请求使用的模型")
             ) {
                 if viewModel.isLoadingModels || viewModel.isSelectingModel {
                     ProgressView()
@@ -3486,7 +3530,10 @@ private struct RemoteModelSelectionSheet: View {
 
                     ForEach(directory.groups) { group in
                         VStack(alignment: .leading, spacing: 9) {
-                            RemoteSectionHeader(title: group.name, detail: "\(group.models.count) 个模型")
+                            RemoteSectionHeader(
+                                title: group.name,
+                                detail: remoteLocalizedCount(group.models.count, unit: "model")
+                            )
                             VStack(spacing: 0) {
                                 ForEach(Array(group.models.enumerated()), id: \.element.id) { index, model in
                                     Button {
@@ -3604,8 +3651,8 @@ private struct RemoteModelSelectionSheet: View {
             options.append(EffortOption(
                 id: "provider-default",
                 value: nil,
-                name: "提供方默认",
-                description: "由当前模型提供方决定推理强度"
+                name: remoteLocalized("提供方默认"),
+                description: remoteLocalized("由当前模型提供方决定推理强度")
             ))
         }
         options.append(contentsOf: reasoning.efforts.map {
@@ -3708,7 +3755,7 @@ private struct ConversationItemView: View {
                 Spacer(minLength: 56)
                 VStack(alignment: .trailing, spacing: 5) {
                     if let title = item.title {
-                        Text(title)
+                        Text(remoteLocalized(title))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
@@ -3860,7 +3907,10 @@ private struct ConversationItemView: View {
                         }
                         HStack {
                             if item.details.count > 1 {
-                                Text("另有 \(item.details.count - 1) 段详情")
+                                Text(remoteLocalizedFormat(
+                                    "另有 %lld 段详情",
+                                    item.details.count - 1
+                                ))
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
@@ -3925,7 +3975,7 @@ private struct ConversationItemView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
-            Text(item.title ?? "上下文")
+            Text(remoteLocalized(item.title ?? "上下文"))
                 .font(.caption.weight(.semibold))
             Text("·")
                 .foregroundStyle(.tertiary)
@@ -3953,7 +4003,7 @@ private struct ConversationItemView: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 if let title = item.title {
-                    Text(title).font(.caption.weight(.semibold))
+                    Text(remoteLocalized(title)).font(.caption.weight(.semibold))
                 }
                 Text(item.text)
                     .font(.caption)
@@ -3977,7 +4027,7 @@ private struct ConversationItemView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(RemoteTheme.tool)
                 .frame(width: 18)
-            Text(item.title ?? "工具")
+            Text(remoteLocalized(item.title ?? "工具"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
@@ -4041,13 +4091,14 @@ private struct ConversationItemView: View {
     }
 
     private var stateLabel: String {
-        switch item.state {
+        let key: String = switch item.state {
         case .running: "执行中"
         case .succeeded: "已完成"
         case .failed: "失败"
         case .stopped: "已停止"
         case .info: "信息"
         }
+        return remoteLocalized(key)
     }
 
     private var stateColor: Color {
@@ -4126,7 +4177,7 @@ private struct TrajectoryLedgerView: View {
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.tertiary)
                             Spacer()
-                            Text("\(group.records.count) 条事件")
+                            Text(remoteLocalizedCount(group.records.count, unit: "event"))
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                         }
@@ -4183,7 +4234,7 @@ private struct TrajectoryLedgerView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(alignment: .top, spacing: 9) {
                         trajectoryIcon(record)
-                        Text(record.title)
+                        Text(remoteLocalized(record.title))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(2)
@@ -4199,12 +4250,12 @@ private struct TrajectoryLedgerView: View {
                     trajectoryIcon(record)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
-                            Text(record.title)
+                            Text(remoteLocalized(record.title))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                             if let step = record.step {
-                                Text("步骤 \(step + 1)")
+                                Text(remoteLocalizedFormat("步骤 %lld", step + 1))
                                     .font(.caption2.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(.tertiary)
                             }
@@ -4247,7 +4298,7 @@ private struct TrajectoryLedgerView: View {
         } else {
             HStack(spacing: 8) {
                 if let step = record.step, dynamicTypeSize.isAccessibilitySize {
-                    Text("步骤 \(step + 1)")
+                    Text(remoteLocalizedFormat("步骤 %lld", step + 1))
                 }
                 if let duration = record.duration {
                     Text(durationLabel(duration))
@@ -4262,7 +4313,12 @@ private struct TrajectoryLedgerView: View {
     private var ledgerToolbar: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                Text("总耗时 \(durationLabel(trajectoryDuration)) · \(Set(filteredRecords.compactMap(\.turn)).count) 轮 · \(filteredRecords.filter { $0.kind == .tool }.count) 次调用")
+                Text(remoteLocalizedFormat(
+                    "总耗时 %@ · %lld 轮 · %lld 次调用",
+                    durationLabel(trajectoryDuration),
+                    Set(filteredRecords.compactMap(\.turn)).count,
+                    filteredRecords.filter { $0.kind == .tool }.count
+                ))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -4290,7 +4346,7 @@ private struct TrajectoryLedgerView: View {
 
     private func metric(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label)
+            Text(remoteLocalized(label))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.tertiary)
             Text(value)
@@ -4320,10 +4376,12 @@ private struct TrajectoryLedgerView: View {
         kinds: [RemoteTrajectoryRecord.Kind]
     ) -> some View {
         HStack(spacing: 7) {
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.tertiary)
-                .frame(width: 34, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(width: 42, alignment: .leading)
             GeometryReader { geometry in
                 let visible = filteredRecords.filter { kinds.contains($0.kind) }
                 let minimum = filteredRecords.map(\.sequence).min() ?? 0
@@ -4380,10 +4438,12 @@ private struct TrajectoryLedgerView: View {
     }
 
     private func groupTitle(_ group: TrajectoryGroup) -> String {
-        if let turn = group.turn { return "第 \(turn + 1) 轮" }
-        return group.records.contains(where: { [.goal, .plan].contains($0.kind) })
-            ? "会话状态与上下文"
-            : "会话上下文"
+        if let turn = group.turn { return remoteLocalizedFormat("第 %lld 轮", turn + 1) }
+        return remoteLocalized(
+            group.records.contains(where: { [.goal, .plan].contains($0.kind) })
+                ? "会话状态与上下文"
+                : "会话上下文"
+        )
     }
 
     private func icon(for kind: RemoteTrajectoryRecord.Kind) -> String {
@@ -4415,7 +4475,7 @@ private struct TrajectoryLedgerView: View {
     }
 
     private func durationLabel(_ value: TimeInterval) -> String {
-        value < 1 ? "\(Int(value * 1_000)) ms" : String(format: "%.1f 秒", value)
+        value < 1 ? "\(Int(value * 1_000)) ms" : remoteLocalizedFormat("%.1f 秒", value)
     }
 }
 
@@ -4612,16 +4672,16 @@ private struct RemoteImageViewer: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            RemoteZoomableImageView(
+                RemoteZoomableImageView(
                 image: image,
-                accessibilityName: name ?? "图片",
+                accessibilityName: name ?? remoteLocalized("图片"),
                 reduceMotion: reduceMotion
             )
             .ignoresSafeArea()
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack(spacing: 10) {
-                Text(name ?? "图片预览")
+                Text(name ?? remoteLocalized("图片预览"))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -4697,10 +4757,18 @@ private final class RemoteZoomCanvas: UIView, UIScrollViewDelegate {
 
         isAccessibilityElement = true
         accessibilityTraits = .image
-        accessibilityHint = "使用放大和缩小操作调整图片"
+        accessibilityHint = remoteLocalized("使用放大和缩小操作调整图片")
         accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "放大", target: self, selector: #selector(zoomIn)),
-            UIAccessibilityCustomAction(name: "缩小", target: self, selector: #selector(zoomOut)),
+            UIAccessibilityCustomAction(
+                name: remoteLocalized("放大"),
+                target: self,
+                selector: #selector(zoomIn)
+            ),
+            UIAccessibilityCustomAction(
+                name: remoteLocalized("缩小"),
+                target: self,
+                selector: #selector(zoomOut)
+            ),
         ]
     }
 
@@ -4803,8 +4871,11 @@ private final class RemoteZoomCanvas: UIView, UIScrollViewDelegate {
 
     private func updateAccessibilityValue() {
         accessibilityValue = scrollView.zoomScale <= 1.01
-            ? "适合屏幕"
-            : "已放大 \(Int(scrollView.zoomScale * 100))%"
+            ? remoteLocalized("适合屏幕")
+            : remoteLocalizedFormat(
+                "已放大 %lld%%",
+                Int(scrollView.zoomScale * 100)
+            )
     }
 }
 
@@ -5127,14 +5198,15 @@ private struct ConversationDetailSheet: View {
     }
 
     private var headerTitle: String {
-        if let title = item.title, !title.isEmpty { return title }
-        return switch item.kind {
+        if let title = item.title, !title.isEmpty { return remoteLocalized(title) }
+        let key: String = switch item.kind {
         case .user: "用户消息"
         case .assistant: "模型输出"
         case .tool: "工具详情"
         case .context: "上下文"
         case .status: "执行详情"
         }
+        return remoteLocalized(key)
     }
 
     private var summaryText: String? {
@@ -5152,16 +5224,17 @@ private struct ConversationDetailSheet: View {
               let title = section.title,
               !title.isEmpty,
               title != item.title,
-              title != "完整内容" else { return nil }
-        return title
+              title != remoteLocalized("完整内容") else { return nil }
+        return remoteLocalized(title)
     }
 
     private func tabTitle(_ section: RemoteDetailSection) -> String {
-        switch section.id {
-        case "context-raw", "message": return "内容"
-        case "instruction-sources": return "来源"
-        default: return section.title ?? "详情"
+        let key: String = switch section.id {
+        case "context-raw", "message": "内容"
+        case "instruction-sources": "来源"
+        default: section.title ?? "详情"
         }
+        return remoteLocalized(key)
     }
 
     private var copyPayload: String {
@@ -5174,7 +5247,7 @@ private struct ConversationDetailSheet: View {
     }
 
     private var copyAccessibilityLabel: String {
-        item.kind == .context ? "复制模型接收的原文" : "复制当前详情"
+        remoteLocalized(item.kind == .context ? "复制模型接收的原文" : "复制当前详情")
     }
 
     private func copy(_ value: String) {
@@ -5246,7 +5319,13 @@ private struct InstructionDocumentView: View {
             }
 
             if isTruncated {
-                Label("正文仅展示前 \(displayLimit.formatted()) 个字符；复制仍包含完整原文", systemImage: "ellipsis.circle")
+                Label(
+                    remoteLocalizedFormat(
+                        "正文仅展示前 %@ 个字符；复制仍包含完整原文",
+                        displayLimit.formatted()
+                    ),
+                    systemImage: "ellipsis.circle"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
@@ -5510,7 +5589,11 @@ private struct RemoteGoalStatusDock: View {
                     HStack(spacing: 7) {
                         Text(phaseTitle)
                             .font(.caption.weight(.semibold))
-                        Text("\(goal.roundsStarted)/\(goal.maxRounds) 轮")
+                        Text(remoteLocalizedFormat(
+                            "%lld/%lld 轮",
+                            goal.roundsStarted,
+                            goal.maxRounds
+                        ))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
@@ -5555,18 +5638,30 @@ private struct RemoteGoalStatusDock: View {
         if goal.phase == .blocked,
            let reason = goal.blockedReasonMessage,
            !reason.isEmpty {
-            return "\(goal.objective)，受阻原因：\(reason)，\(goal.roundsStarted) / \(goal.maxRounds) 轮"
+            return remoteLocalizedFormat(
+                "%@，受阻原因：%@，%lld / %lld 轮",
+                goal.objective,
+                reason,
+                goal.roundsStarted,
+                goal.maxRounds
+            )
         }
-        return "\(goal.objective)，\(goal.roundsStarted) / \(goal.maxRounds) 轮"
+        return remoteLocalizedFormat(
+            "%@，%lld / %lld 轮",
+            goal.objective,
+            goal.roundsStarted,
+            goal.maxRounds
+        )
     }
 
     private var phaseTitle: String {
-        switch goal.phase {
+        let key: String = switch goal.phase {
         case .active: "进行中的 Goal"
         case .paused: "已暂停的 Goal"
         case .blocked: "受阻的 Goal"
         case .complete: "已完成的 Goal"
         }
+        return remoteLocalized(key)
     }
 
     private var tone: Color {
@@ -5717,7 +5812,10 @@ private struct QueueDockView: View {
 
     private var queueHeader: some View {
         HStack {
-            Label("排队 · \(queued.count)", systemImage: "tray.full")
+            Label(
+                remoteLocalizedFormat("排队 · %lld", queued.count),
+                systemImage: "tray.full"
+            )
                 .font(.caption.weight(.semibold))
             Spacer()
             if queued.count > 1 {
@@ -5792,7 +5890,7 @@ private struct InteractionCard: View {
                     case .approval(let toolName, let reason):
                         VStack(alignment: .leading, spacing: 8) {
                             RemoteStatusPill(text: toolName, color: RemoteTheme.tool, icon: "wrench.and.screwdriver")
-                            Text(reason ?? "Harness 请求在电脑上执行这项操作。")
+                            Text(reason ?? remoteLocalized("Harness 请求在电脑上执行这项操作。"))
                                 .font(.body)
                                 .lineSpacing(3)
                         }
@@ -5926,7 +6024,10 @@ private struct InteractionCard: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .remoteFieldSurface()
-                .accessibilityLabel("\(question.header ?? question.question)的其他回答")
+                .accessibilityLabel(remoteLocalizedFormat(
+                    "%@的其他回答",
+                    question.header ?? question.question
+                ))
         }
     }
 

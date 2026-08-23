@@ -83,7 +83,7 @@ final class RemoteNotificationManager: NSObject, UNUserNotificationCenterDelegat
             guard settings.authorizationStatus.allowsRemoteReminders else { return }
 
             let content = UNMutableNotificationContent()
-            content.title = event.kind == .completed ? "任务已完成" : "需要你确认"
+            content.title = remoteLocalized(event.kind == .completed ? "任务已完成" : "需要你确认")
             content.body = event.body.isEmpty ? event.kind.fallbackBody : String(event.body.prefix(220))
             content.sound = .default
             content.threadIdentifier = "harness-remote"
@@ -178,9 +178,9 @@ private extension RemoteNotificationEvent.Kind {
     var fallbackBody: String {
         switch self {
         case .completed:
-            "电脑上的 Harness 已完成本次任务。"
+            remoteLocalized("电脑上的 Harness 已完成本次任务。")
         case .attention:
-            "Harness 正在等待你的选择。"
+            remoteLocalized("Harness 正在等待你的选择。")
         }
     }
 }

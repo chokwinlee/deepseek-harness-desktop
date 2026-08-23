@@ -8,11 +8,11 @@ enum RemoteConnectionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "电脑没有返回有效的 Harness 页面。"
+            return remoteLocalized("电脑没有返回有效的 Harness 页面。")
         case .rejected:
-            return "电脑拒绝了 Remote 地址。请在 Desktop 中重新开启 Remote。"
+            return remoteLocalized("电脑拒绝了 Remote 地址。请在 Desktop 中重新开启 Remote。")
         case .server(let statusCode):
-            return "电脑返回了 HTTP \(statusCode)。"
+            return remoteLocalizedFormat("电脑返回了 HTTP %lld。", statusCode)
         }
     }
 }

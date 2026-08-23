@@ -48,22 +48,22 @@ enum HarnessRemoteClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            "电脑没有返回有效的 Harness 数据。"
+            remoteLocalized("电脑没有返回有效的 Harness 数据。")
         case .mismatchedResponse:
-            "电脑返回了无法匹配的响应。"
+            remoteLocalized("电脑返回了无法匹配的响应。")
         case .server(let statusCode):
             switch statusCode {
             case 401:
-                "局域网配对凭据已失效，请重新扫描 Desktop 二维码。"
+                remoteLocalized("局域网配对凭据已失效，请重新扫描 Desktop 二维码。")
             case 413:
-                "图片或消息过大，超过电脑允许的远程传输上限。"
+                remoteLocalized("图片或消息过大，超过电脑允许的远程传输上限。")
             default:
-                "电脑返回了 HTTP \(statusCode)。"
+                remoteLocalizedFormat("电脑返回了 HTTP %lld。", statusCode)
             }
         case .api(_, let message):
             message
         case .unsupportedDecision:
-            "当前请求不支持这个操作。"
+            remoteLocalized("当前请求不支持这个操作。")
         }
     }
 }
@@ -131,7 +131,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
                     title: title.flatMap { $0.isEmpty ? nil : $0 }
                         ?? goalTitle.flatMap { $0.isEmpty ? nil : $0 }
                         ?? projectName
-                        ?? "未命名任务",
+                        ?? remoteLocalized("未命名任务"),
                     updatedAt: Date(timeIntervalSince1970: item.updatedAt / 1_000),
                     running: item.running,
                     projectName: projectName,
@@ -237,7 +237,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         guard child.mode == .continuable else {
             throw HarnessRemoteClientError.api(
                 code: "subagent-not-resumable",
-                message: "这个子代理不支持继续对话。"
+                message: remoteLocalized("这个子代理不支持继续对话。")
             )
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -261,7 +261,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         guard child.mode == .continuable else {
             throw HarnessRemoteClientError.api(
                 code: "subagent-not-resumable",
-                message: "这个子代理不能接收停止操作。"
+                message: remoteLocalized("这个子代理不能接收停止操作。")
             )
         }
         let _: AcceptedWire = try await call(
@@ -415,7 +415,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         guard receipt.accepted else {
             throw HarnessRemoteClientError.api(
                 code: "interaction-rejected",
-                message: receipt.reason ?? "电脑已拒绝这次操作。"
+                message: receipt.reason ?? remoteLocalized("电脑已拒绝这次操作。")
             )
         }
     }
@@ -493,7 +493,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
         if let error = decoded.result.error {
             let message = error.code == "attachment-error"
                 && error.message.localizedCaseInsensitiveContains("does not support image input")
-                ? "当前模型不支持图片输入，请先切换到支持视觉的模型。"
+                ? remoteLocalized("当前模型不支持图片输入，请先切换到支持视觉的模型。")
                 : error.message
             throw HarnessRemoteClientError.api(code: error.code, message: message)
         }
@@ -544,7 +544,7 @@ struct LiveHarnessRemoteClient: HarnessRemoteClient {
 }
 
 actor DemoHarnessRemoteClient: HarnessRemoteClient {
-    nonisolated let displayName = "体验模式"
+    nonisolated let displayName = remoteLocalized("体验模式")
     nonisolated let isDemo = true
 
     private let sessionID = "review-demo-session"
@@ -561,14 +561,14 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: "demo-subagent-user",
             kind: .user,
             title: nil,
-            text: "检查登录态恢复的回归风险。",
+            text: remoteLocalized("检查登录态恢复的回归风险。"),
             time: Date().addingTimeInterval(-90)
         ),
         RemoteConversationItem(
             id: "demo-subagent-answer",
             kind: .assistant,
             title: nil,
-            text: "已检查状态恢复、错误提示和回归测试入口。",
+            text: remoteLocalized("已检查状态恢复、错误提示和回归测试入口。"),
             time: Date().addingTimeInterval(-75)
         ),
     ]
@@ -593,7 +593,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         bytes: 1_365,
         width: 64,
         height: 40,
-        name: "登录流程截图.png"
+        name: remoteLocalized("登录流程截图.png")
     )
     private static let demoAttachmentData = Data(base64Encoded:
         "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAoCAYAAABOzvzpAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAQKADAAQAAAABAAAAKAAAAADM21wGAAAEy0lEQVRoBe1YW1NaVxT+EBTwBogXklSTqFXrXaOiNWrGGiczzTR96Exn+tif0af+hz70F/Spk2amM23STIyX1ssAjdp614hRC9F4QY2IGLB7HeAURZBzwEqUNQPs+97rW2t9a28kxV9+f4hLLAmXWHdO9TgAcQ+45AjEQ+CSOwDiHhCLHtBw+y4KisshkZy9fWSxBkBJWS2u5d7kPvkflmF8xADLsvnMjnn2EAs4ujZLh5LyWn5GapoK+pa7aO34DBptNt8ezULMAJCYJEf9x+2QJAQeiYC50/k56/8EySlp0dQf0szy+99GdUWRizUw5XxW3t93oOfpI7hcLmg0mTwo6eoM5BeWIjFRjs31VbjdLpG7/TctJgDILypDYUklfypD/zNsrK1g9fUylhbmoFAkg5QnIQ/RZuXgRkEJ3Awg28YaaxX/njt3AFRqLRqaO5Dgdf25qb8wPzvOKUtfBwdOWJbMWLEuIS1dzUIgleuTymTIuZqLD64XwGG3Y2fbxs8RUjhXAKRSGZrbP4VCmcydmaxpGOhiBg20qGNvF6/mp7G9tQG1JgtJcjk3J0mu4EDI1l1jfZugcUIkKgDoWzqRrtJgbdUiZG/UNLSCDk5Clu7v/gVOFv+hhCxtnp2A0+mAJiML5Akk5BkUFuQlBCStF45EDEBZVQO3cWb2FWRk5mDFssiR12mb594oRGllHT9s2NDLALTy9dCFQ44EF+YmucuSJsNDlFIJ8EWjFt98VYGv71dDk6aAccIC9wke5Vs/IgDybhahoqbRtxZS09KZOxZi/Y2VuaKdbz9eSElNR1PrPSRIpVzXq/kZTI+/OD7s1DplAX+iJOXvFEkgl0mgTJKitljHvCQDvX++DLpWYNINOvRoB1m7pr7laCOrkSu2djzgvCKgkzUQixPpyRITuW5y6VHTHycNDbvNvrsDI+OOipz9gDmdt64EtPk3iAJAmZyKRhb3Pgtuba6DUpfT6TmAlFmW4rtW38bY3WNl36blVXqomcuSUJ439nex33e+7oh+3YfugPlud2Cb/yDBABDpNLXdg1yh5NbZd+xhsO83/LM4j+4nP8G2SXnZI9fzi9HW+YC/vemu5rF8X+HrxtjIELZs63w90sKjnumAJU5q8x8kmAP0zH2J8EjIggO9j7HD0g8JMe+ieQZKZQpLVR4rU4ojriB2r6q7DZmXtS3LCxgbHuLmRevLNGmFTJqAPJ0KdscBfngyhu9+NIYkQYmQv8WJ8YtKq/nzmga72U1tlq/7FyglVd5qBoXDcdmzv0XX44c48IbM8f7/sx52CJAV/ZWfmRgJqjwpsPByCn3PfoZ99+0RfQ5ZTBoHnseE8nSwsAAgxq/2Y3wrc9/xUcMRxU6q2DbeMF54yK6xy3z31NgLliZf8/XzLpz6h4iP8X2uTIxvHHwe9rkpMwz0/IqPKurYI0aHKRH5PuzNRAwMCUAwxne9E562Jv82sVsbu6rFmIQMgfqmdqi8z1Bi/KHfn4IITKwchriSil0z0nnBAWDW2vN7WQ0b+rg3eqQbxtr84CHArDVq6se2bRPK5JSQjB9rSgk5T3AAvKuY5yaErPfejQ0eAu+dKuIOHAdAHG4XZ1bcAy6OLcVpEvcAcbhdnFmX3gP+BRGTk4HlIkDOAAAAAElFTkSuQmCC"
@@ -601,7 +601,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     private static let demoGoal = RemoteGoalState(
         id: "demo-goal",
         revision: 2,
-        objective: "完成登录态恢复并通过上线前回归验证",
+        objective: remoteLocalized("完成登录态恢复并通过上线前回归验证"),
         phase: .active,
         blockedReasonCode: nil,
         blockedReasonMessage: nil,
@@ -623,19 +623,19 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         RemoteConversationItem(
             id: "demo-context",
             kind: .context,
-            title: "项目指令",
-            text: "AGENTS.md · 已载入",
+            title: remoteLocalized("项目指令"),
+            text: remoteLocalized("AGENTS.md · 已载入"),
             time: Date().addingTimeInterval(-185),
             details: [
                 RemoteDetailSection(
                     id: "instruction-sources",
-                    title: "指令来源",
-                    content: "AGENTS.md\t已载入",
+                    title: remoteLocalized("指令来源"),
+                    content: remoteLocalized("AGENTS.md\t已载入"),
                     kind: .list
                 ),
                 RemoteDetailSection(
                     id: "context-raw",
-                    title: "模型接收的内容",
+                    title: remoteLocalized("模型接收的内容"),
                     content: DemoHarnessRemoteClient.demoInstructionText,
                     kind: .text
                 ),
@@ -645,7 +645,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: "demo-user",
             kind: .user,
             title: nil,
-            text: "请检查登录流程，并给出上线前的风险清单。",
+            text: remoteLocalized("请检查登录流程，并给出上线前的风险清单。"),
             time: Date().addingTimeInterval(-180),
             attachments: [DemoHarnessRemoteClient.demoAttachment]
         ),
@@ -653,25 +653,25 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: "demo-goal-status",
             sequence: 2,
             kind: .status,
-            title: "目标已创建",
+            title: remoteLocalized("目标已创建"),
             text: DemoHarnessRemoteClient.demoGoal.objective,
             time: Date().addingTimeInterval(-178),
             state: .running,
             details: [RemoteDetailSection(
                 id: "goal-objective",
-                title: "目标",
+                title: remoteLocalized("目标"),
                 content: DemoHarnessRemoteClient.demoGoal.objective,
                 kind: .text
             )],
-            metadata: ["3/12 轮", "修订 2"],
+            metadata: [remoteLocalized("3/12 轮"), remoteLocalized("修订 2")],
             symbolName: "target"
         ),
         RemoteConversationItem(
             id: "demo-plan-status",
             sequence: 3,
             kind: .status,
-            title: "已进入计划模式",
-            text: "Harness 会先整理方案，再请求你确认是否执行。",
+            title: remoteLocalized("已进入计划模式"),
+            text: remoteLocalized("Harness 会先整理方案，再请求你确认是否执行。"),
             time: Date().addingTimeInterval(-176),
             state: .running,
             symbolName: "map"
@@ -679,8 +679,8 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         RemoteConversationItem(
             id: "demo-tool",
             kind: .tool,
-            title: "读取 4 个项目文件",
-            text: "已在你的电脑上安全完成",
+            title: remoteLocalized("读取 4 个项目文件"),
+            text: remoteLocalized("已在你的电脑上安全完成"),
             time: Date().addingTimeInterval(-160),
             state: .succeeded,
             toolCard: .read,
@@ -699,49 +699,49 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: "demo-assistant",
             kind: .assistant,
             title: nil,
-            text: "我发现两个需要先处理的问题：登录态过期后的恢复路径，以及错误提示没有告诉用户下一步怎么做。我已经整理了一份修复计划，请你确认。",
+            text: remoteLocalized("我发现两个需要先处理的问题：登录态过期后的恢复路径，以及错误提示没有告诉用户下一步怎么做。我已经整理了一份修复计划，请你确认。"),
             time: Date().addingTimeInterval(-150),
-            reasoning: "先核对登录状态的生命周期，再沿着错误处理分支检查用户是否能恢复操作。最后用现有测试确认风险是否已经被覆盖。",
-            metadata: ["deepseek-chat", "1.7K tokens", "4.2 秒"]
+            reasoning: remoteLocalized("先核对登录状态的生命周期，再沿着错误处理分支检查用户是否能恢复操作。最后用现有测试确认风险是否已经被覆盖。"),
+            metadata: ["deepseek-chat", "1.7K tokens", remoteLocalized("4.2 秒")]
         ),
     ]
 
     private var demoTrajectory: [RemoteTrajectoryRecord] = [
         RemoteTrajectoryRecord(
             id: "demo-trajectory-context", sequence: 0, turn: nil, step: nil, kind: .context,
-            title: "项目指令", summary: "AGENTS.md · 已载入", time: Date().addingTimeInterval(-185),
+            title: remoteLocalized("项目指令"), summary: remoteLocalized("AGENTS.md · 已载入"), time: Date().addingTimeInterval(-185),
             duration: nil, state: .succeeded,
             details: [
                 RemoteDetailSection(
-                    id: "instruction-sources", title: "指令来源",
-                    content: "AGENTS.md\t已载入", kind: .list
+                    id: "instruction-sources", title: remoteLocalized("指令来源"),
+                    content: remoteLocalized("AGENTS.md\t已载入"), kind: .list
                 ),
                 RemoteDetailSection(
-                    id: "context-raw", title: "模型接收的内容",
+                    id: "context-raw", title: remoteLocalized("模型接收的内容"),
                     content: DemoHarnessRemoteClient.demoInstructionText, kind: .text
                 ),
             ]
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-input", sequence: 1, turn: 0, step: nil, kind: .input,
-            title: "用户消息", summary: "检查登录流程并给出风险清单 · 1 张图片", time: Date().addingTimeInterval(-180),
+            title: remoteLocalized("用户消息"), summary: remoteLocalized("检查登录流程并给出风险清单 · 1 张图片"), time: Date().addingTimeInterval(-180),
             duration: nil,
             state: .succeeded,
             attachments: [DemoHarnessRemoteClient.demoAttachment]
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-goal", sequence: 2, turn: nil, step: nil, kind: .goal,
-            title: "目标已创建", summary: DemoHarnessRemoteClient.demoGoal.objective,
+            title: remoteLocalized("目标已创建"), summary: DemoHarnessRemoteClient.demoGoal.objective,
             time: Date().addingTimeInterval(-178), duration: nil, state: .running
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-plan", sequence: 3, turn: nil, step: nil, kind: .plan,
-            title: "计划模式已开启", summary: "先整理方案，再请求确认",
+            title: remoteLocalized("计划模式已开启"), summary: remoteLocalized("先整理方案，再请求确认"),
             time: Date().addingTimeInterval(-176), duration: nil, state: .running
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-request", sequence: 4, turn: 0, step: 0, kind: .request,
-            title: "模型请求", summary: "整理上下文并请求分析", time: Date().addingTimeInterval(-174),
+            title: remoteLocalized("模型请求"), summary: remoteLocalized("整理上下文并请求分析"), time: Date().addingTimeInterval(-174),
             duration: 0.12, state: .succeeded,
             details: [
                 RemoteDetailSection(
@@ -752,12 +752,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-thinking", sequence: 5, turn: 0, step: 0, kind: .assistant,
-            title: "模型思考", summary: "检查登录状态生命周期和错误恢复路径", time: Date().addingTimeInterval(-170),
+            title: remoteLocalized("模型思考"), summary: remoteLocalized("检查登录状态生命周期和错误恢复路径"), time: Date().addingTimeInterval(-170),
             duration: 1.8, state: .succeeded
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-tool", sequence: 6, turn: 0, step: 1, kind: .tool,
-            title: "读取文件", summary: "读取 4 个项目文件", time: Date().addingTimeInterval(-160),
+            title: remoteLocalized("读取文件"), summary: remoteLocalized("读取 4 个项目文件"), time: Date().addingTimeInterval(-160),
             duration: 0.32, state: .succeeded,
             details: [
                 RemoteDetailSection(
@@ -768,12 +768,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-answer", sequence: 7, turn: 0, step: 2, kind: .assistant,
-            title: "模型回答", summary: "整理两个上线前风险和修复计划", time: Date().addingTimeInterval(-150),
+            title: remoteLocalized("模型回答"), summary: remoteLocalized("整理两个上线前风险和修复计划"), time: Date().addingTimeInterval(-150),
             duration: 2.4, state: .succeeded
         ),
         RemoteTrajectoryRecord(
             id: "demo-trajectory-end", sequence: 8, turn: 0, step: 2, kind: .lifecycle,
-            title: "本轮完成", summary: "等待用户确认", time: Date().addingTimeInterval(-149),
+            title: remoteLocalized("本轮完成"), summary: remoteLocalized("等待用户确认"), time: Date().addingTimeInterval(-149),
             duration: 4.62, state: .succeeded
         ),
     ]
@@ -788,11 +788,27 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             items: [
                 RemoteWorkspaceSummary(
                     id: "review-demo-workspace",
-                    title: "Sample Project",
-                    path: "/Users/demo/Sample Project",
-                    sessionIDs: [sessionID],
+                    title: "DSH Desktop",
+                    path: "/Users/demo/deepseek-harness-desktop",
+                    sessionIDs: ["demo-remote-session", "demo-tailscale-session", "demo-release-session"],
                     createdAt: updatedAt.addingTimeInterval(-3_600),
                     updatedAt: updatedAt
+                ),
+                RemoteWorkspaceSummary(
+                    id: "plugin-demo-workspace",
+                    title: "DSH Plugin",
+                    path: "/Users/demo/dsh-plugin-app",
+                    sessionIDs: ["demo-plugin-session"],
+                    createdAt: updatedAt.addingTimeInterval(-7_200),
+                    updatedAt: updatedAt.addingTimeInterval(-3_600)
+                ),
+                RemoteWorkspaceSummary(
+                    id: "sample-demo-workspace",
+                    title: "Sample App",
+                    path: "/Users/demo/sample-app",
+                    sessionIDs: [sessionID],
+                    createdAt: updatedAt.addingTimeInterval(-86_400),
+                    updatedAt: updatedAt.addingTimeInterval(-7_200)
                 ),
             ],
             archivedSessionIDs: []
@@ -802,12 +818,44 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
     func sessions() async throws -> [RemoteSessionSummary] {
         [
             RemoteSessionSummary(
-                id: sessionID,
-                title: "登录流程上线检查",
+                id: "demo-remote-session",
+                title: remoteLocalized("验收 Remote 配对流程"),
                 updatedAt: items.last?.time ?? Date(),
-                running: running,
-                projectName: "Sample Project",
-                projectPath: "/Users/demo/Sample Project"
+                running: false,
+                projectName: "deepseek-harness-desktop",
+                projectPath: "/Users/demo/deepseek-harness-desktop"
+            ),
+            RemoteSessionSummary(
+                id: "demo-tailscale-session",
+                title: remoteLocalized("验证 Tailscale 跨网络连接"),
+                updatedAt: Date().addingTimeInterval(-45),
+                running: true,
+                projectName: "deepseek-harness-desktop",
+                projectPath: "/Users/demo/deepseek-harness-desktop"
+            ),
+            RemoteSessionSummary(
+                id: "demo-release-session",
+                title: remoteLocalized("完善 TestFlight 发布说明"),
+                updatedAt: Date().addingTimeInterval(-3_600),
+                running: false,
+                projectName: "deepseek-harness-desktop",
+                projectPath: "/Users/demo/deepseek-harness-desktop"
+            ),
+            RemoteSessionSummary(
+                id: "demo-plugin-session",
+                title: remoteLocalized("检查插件安装体验"),
+                updatedAt: Date().addingTimeInterval(-7_200),
+                running: false,
+                projectName: "dsh-plugin-app",
+                projectPath: "/Users/demo/dsh-plugin-app"
+            ),
+            RemoteSessionSummary(
+                id: sessionID,
+                title: remoteLocalized("登录流程上线检查"),
+                updatedAt: Date().addingTimeInterval(-86_400),
+                running: false,
+                projectName: "sample-app",
+                projectPath: "/Users/demo/sample-app"
             ),
         ]
     }
@@ -856,7 +904,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         if ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] == "rc8-image-failure" {
             throw HarnessRemoteClientError.api(
                 code: "attachment-unavailable",
-                message: "图片暂时不可用。"
+                message: remoteLocalized("图片暂时不可用。")
             )
         }
         #endif
@@ -865,7 +913,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                 || uploadedAttachments[attachmentID] != nil else {
             throw HarnessRemoteClientError.api(
                 code: "attachment-not-found",
-                message: "找不到这张图片。"
+                message: remoteLocalized("找不到这张图片。")
             )
         }
         if let uploaded = uploadedAttachments[attachmentID] { return uploaded }
@@ -892,10 +940,11 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         sessionID: String,
         query: String
     ) async throws -> [RemoteSessionReferenceCandidate] {
+        let label = remoteLocalized("登录错误恢复")
         let candidate = RemoteSessionReferenceCandidate(
-            mention: "@[登录错误恢复](dsh-session:ZGVtby1yZWZlcmVuY2U)",
+            mention: "@[\(label)](dsh-session:ZGVtby1yZWZlcmVuY2U)",
             sessionID: "demo-reference",
-            label: "登录错误恢复",
+            label: label,
             cwd: "/Users/demo/Sample Project",
             createdAt: Date().addingTimeInterval(-7_200)
         )
@@ -911,7 +960,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                 mode: .continuable,
                 activity: demoSubagentRunning ? .running : .inactive,
                 hasChildren: false,
-                label: "登录回归测试",
+                label: remoteLocalized("登录回归测试"),
                 diagnosticReason: nil
             )],
             parentAvailable: true
@@ -948,7 +997,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: UUID().uuidString,
             kind: .assistant,
             title: nil,
-            text: "已收到补充，我会继续检查。",
+            text: remoteLocalized("已收到补充，我会继续检查。"),
             time: Date()
         ))
         demoSubagentRunning = false
@@ -973,12 +1022,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                         RemoteModelCatalogEntry(
                             id: "deepseek-v4-flash",
                             name: "DeepSeek-V4-Flash",
-                            description: "快速完成日常编码与分析",
+                            description: remoteLocalized("快速完成日常编码与分析"),
                             reasoning: RemoteModelReasoning(
                                 efforts: [
-                                    .init(id: "off", name: "Off", description: "关闭深度推理"),
-                                    .init(id: "high", name: "High", description: "适合复杂编码任务"),
-                                    .init(id: "max", name: "Max", description: "投入最多推理时间"),
+                                    .init(id: "off", name: "Off", description: remoteLocalized("关闭深度推理")),
+                                    .init(id: "high", name: "High", description: remoteLocalized("适合复杂编码任务")),
+                                    .init(id: "max", name: "Max", description: remoteLocalized("投入最多推理时间")),
                                 ],
                                 defaultEffort: "high"
                             )
@@ -986,12 +1035,12 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                         RemoteModelCatalogEntry(
                             id: "deepseek-v4-pro",
                             name: "DeepSeek-V4-Pro",
-                            description: "面向更复杂的长程任务",
+                            description: remoteLocalized("面向更复杂的长程任务"),
                             reasoning: RemoteModelReasoning(
                                 efforts: [
-                                    .init(id: "off", name: "Off", description: "关闭深度推理"),
-                                    .init(id: "high", name: "High", description: "适合复杂编码任务"),
-                                    .init(id: "max", name: "Max", description: "投入最多推理时间"),
+                                    .init(id: "off", name: "Off", description: remoteLocalized("关闭深度推理")),
+                                    .init(id: "high", name: "High", description: remoteLocalized("适合复杂编码任务")),
+                                    .init(id: "max", name: "Max", description: remoteLocalized("投入最多推理时间")),
                                 ],
                                 defaultEffort: "high"
                             )
@@ -1011,12 +1060,18 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         guard let model = directory.groups
             .first(where: { $0.id == selection.provider })?
             .models.first(where: { $0.id == selection.model }) else {
-            throw HarnessRemoteClientError.api(code: "model-unavailable", message: "这个模型当前不可用。")
+            throw HarnessRemoteClientError.api(
+                code: "model-unavailable",
+                message: remoteLocalized("这个模型当前不可用。")
+            )
         }
         let acceptedEffort = selection.reasoningEffort ?? model.reasoning?.defaultEffort
         if let acceptedEffort,
            model.reasoning?.efforts.contains(where: { $0.id == acceptedEffort }) != true {
-            throw HarnessRemoteClientError.api(code: "model-unavailable", message: "这个推理强度当前不可用。")
+            throw HarnessRemoteClientError.api(
+                code: "model-unavailable",
+                message: remoteLocalized("这个推理强度当前不可用。")
+            )
         }
         selectedModel = RemoteModelSelection(
             provider: selection.provider,
@@ -1051,7 +1106,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         items.append(RemoteConversationItem(
             id: UUID().uuidString,
             kind: .user,
-            title: steer ? "中途补充" : nil,
+            title: steer ? remoteLocalized("中途补充") : nil,
             text: text,
             time: now,
             attachments: attachments
@@ -1071,7 +1126,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: UUID().uuidString,
             kind: .status,
             title: nil,
-            text: "任务已由你停止",
+            text: remoteLocalized("任务已由你停止"),
             time: Date()
         ))
     }
@@ -1080,13 +1135,16 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         let message: String
         switch decision {
         case .answer(let answers):
-            message = "已确认：\(answers.flatMap(\.selected).joined(separator: "、"))"
+            message = remoteLocalizedFormat(
+                "已确认：%@",
+                ListFormatter.localizedString(byJoining: answers.flatMap(\.selected))
+            )
         case .allowOnce:
-            message = "已允许本次操作"
+            message = remoteLocalized("已允许本次操作")
         case .reject:
-            message = "已拒绝本次操作"
+            message = remoteLocalized("已拒绝本次操作")
         case .cancelQuestions:
-            message = "已暂不处理确认问题"
+            message = remoteLocalized("已暂不处理确认问题")
         }
         items.append(RemoteConversationItem(
             id: UUID().uuidString,
@@ -1113,12 +1171,18 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                 guard !Task.isCancelled else { return }
                 let question = RemoteQuestion(
                     id: "release-choice",
-                    header: "需要确认",
-                    question: "是否按这份计划修复后再上线？",
-                    detail: "1. 补齐登录态恢复\n2. 改写错误提示\n3. 增加回归测试",
+                    header: remoteLocalized("需要确认"),
+                    question: remoteLocalized("是否按这份计划修复后再上线？"),
+                    detail: remoteLocalized("1. 补齐登录态恢复\n2. 改写错误提示\n3. 增加回归测试"),
                     options: [
-                        .init(label: "批准计划", description: "继续在电脑上执行修复"),
-                        .init(label: "先不执行", description: "保留当前结果，不修改项目"),
+                        .init(
+                            label: remoteLocalized("批准计划"),
+                            description: remoteLocalized("继续在电脑上执行修复")
+                        ),
+                        .init(
+                            label: remoteLocalized("先不执行"),
+                            description: remoteLocalized("保留当前结果，不修改项目")
+                        ),
                     ],
                     allowsMultipleSelection: false
                 )
@@ -1141,7 +1205,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             id: UUID().uuidString,
             kind: .assistant,
             title: nil,
-            text: "收到。我会把这条补充加入当前任务；所有执行仍发生在你的电脑上。",
+            text: remoteLocalized("收到。我会把这条补充加入当前任务；所有执行仍发生在你的电脑上。"),
             time: Date()
         ))
     }
@@ -1155,7 +1219,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
             "bytes": .number(Double(demoAttachment.bytes)),
             "width": .number(Double(demoAttachment.width)),
             "height": .number(Double(demoAttachment.height)),
-            "name": .string(demoAttachment.name ?? "图片.png"),
+            "name": .string(demoAttachment.name ?? remoteLocalized("图片.png")),
         ])
         let goal: JSONValue = .object([
             "id": .string(demoGoal.id),
@@ -1224,7 +1288,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                     "message": .object([
                         "content": .array([.object([
                             "type": .string("text"),
-                            "text": .string("我会先核对截图中的登录状态，再整理上线前修复计划。"),
+                            "text": .string(remoteLocalized("我会先核对截图中的登录状态，再整理上线前修复计划。")),
                         ])]),
                     ]),
                     "usage": .object(["outputTokens": .number(128)]),
@@ -1330,7 +1394,7 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
                     "compactionId": .string("compact-1"),
                     "summary": .array([.object([
                         "type": .string("text"),
-                        "text": .string("保留的压缩摘要"),
+                        "text": .string(remoteLocalized("保留的压缩摘要")),
                     ])]),
                 ])
             ), view: nil),
@@ -1398,7 +1462,9 @@ actor DemoHarnessRemoteClient: HarnessRemoteClient {
         ))
         assert(!snapshot.items.contains { $0.text.contains("MODEL_ONLY_REPLACEMENT") })
         assert(snapshot.items.contains {
-            $0.details.contains { $0.content.contains("保留的压缩摘要") }
+            $0.details.contains {
+                $0.content.contains(remoteLocalized("保留的压缩摘要"))
+            }
         })
         let tools = snapshot.items.filter { $0.kind == .tool }
         assert(tools.count == 3)
@@ -1867,12 +1933,12 @@ private enum LiveEventParser {
         let visiblePreview: String
         if let preview, !preview.isEmpty {
             visiblePreview = attachmentCount > 0
-                ? "\(preview) · \(attachmentCount) 张图片"
+                ? remoteLocalizedFormat("%@ · %lld 张图片", preview, attachmentCount)
                 : preview
         } else if attachmentCount > 0 {
-            visiblePreview = "\(attachmentCount) 张图片"
+            visiblePreview = remoteLocalizedFormat("%lld 张图片", attachmentCount)
         } else {
-            visiblePreview = "等待中的消息"
+            visiblePreview = remoteLocalized("等待中的消息")
         }
         return RemoteQueuedMessage(
             id: id,
@@ -2022,7 +2088,7 @@ private enum ConversationFolder {
                 if let turn, let step, let started = stepStarts["\(turn):\(step)"] {
                     item.metadata.append(durationLabel(milliseconds: event.time - started))
                 }
-                if interrupted { item.metadata.append("已停止") }
+                if interrupted { item.metadata.append(remoteLocalized("已停止")) }
                 item.metadata.removeAll(where: \.isEmpty)
                 output.append(item)
             case "assistant/chunk":
@@ -2065,8 +2131,9 @@ private enum ConversationFolder {
                 let delay = data?["delayMs"]?.numberValue.map(durationLabel(milliseconds:))
                 output.append(RemoteConversationItem(
                     id: "retry:\(event.seq)", sequence: event.seq, kind: .status,
-                    title: "模型请求正在重试",
-                    text: delay.map { "将在 \($0) 后重试" } ?? "连接或模型请求暂时失败，Harness 会自动重试。",
+                    title: remoteLocalized("模型请求正在重试"),
+                    text: delay.map { remoteLocalizedFormat("将在 %@ 后重试", $0) }
+                        ?? remoteLocalized("连接或模型请求暂时失败，Harness 会自动重试。"),
                     time: date, state: .running
                 ))
             case "compaction/summary":
@@ -2074,10 +2141,15 @@ private enum ConversationFolder {
                       let summary = textContent(data["summary"]) else { continue }
                 output.append(RemoteConversationItem(
                     id: "compaction:\(event.seq)", sequence: event.seq, kind: .status,
-                    title: "上下文已整理", text: "较早内容已压缩为摘要。", time: date,
+                    title: remoteLocalized("上下文已整理"),
+                    text: remoteLocalized("较早内容已压缩为摘要。"),
+                    time: date,
                     state: .info,
                     details: [RemoteDetailSection(
-                        id: "summary", title: "压缩摘要", content: summary, kind: .text
+                        id: "summary",
+                        title: remoteLocalized("压缩摘要"),
+                        content: summary,
+                        kind: .text
                     )]
                 ))
             default:
@@ -2159,11 +2231,13 @@ private enum ConversationFolder {
                 ? .failed
                 : (completed ? .succeeded : .running)
             let title = error != nil
-                ? "上下文整理失败"
-                : (completed ? "上下文已整理" : "整理上下文")
+                ? remoteLocalized("上下文整理失败")
+                : remoteLocalized(completed ? "上下文已整理" : "整理上下文")
             let text = error
-                ?? summary.map { firstMeaningfulLine($0, fallback: "较早内容已整理") }
-                ?? "正在压缩较早的会话内容"
+                ?? summary.map {
+                    firstMeaningfulLine($0, fallback: remoteLocalized("较早内容已整理"))
+                }
+                ?? remoteLocalized("正在压缩较早的会话内容")
             let duration: TimeInterval? = if let start, let end {
                 max(end.event.time - start.event.time, 0) / 1_000
             } else {
@@ -2172,7 +2246,7 @@ private enum ConversationFolder {
             let details = summary.map { value in
                 [RemoteDetailSection(
                     id: "summary",
-                    title: "压缩摘要",
+                    title: remoteLocalized("压缩摘要"),
                     content: value,
                     kind: .text
                 )]
@@ -2239,7 +2313,7 @@ private enum ConversationFolder {
                     turn: turn,
                     step: activeStep,
                     kind: isUser ? .input : .context,
-                    title: isUser ? "用户消息" : contextSourceLabel(sourceKind),
+                    title: isUser ? remoteLocalized("用户消息") : contextSourceLabel(sourceKind),
                     summary: isUser
                         ? attachmentSummary(text, attachments)
                         : (attachments.isEmpty
@@ -2250,7 +2324,10 @@ private enum ConversationFolder {
                     state: .succeeded,
                     details: (isUser
                         ? (text.isEmpty ? [] : [RemoteDetailSection(
-                            id: "message", title: "完整内容", content: limited(text), kind: .text
+                            id: "message",
+                            title: remoteLocalized("完整内容"),
+                            content: limited(text),
+                            kind: .text
                         )])
                         : presentation.details) + attachmentDetails(attachments),
                     attachments: attachments
@@ -2264,12 +2341,17 @@ private enum ConversationFolder {
                 let label = [provider, model].compactMap { $0 }.joined(separator: " · ")
                 var details: [RemoteDetailSection] = []
                 if let system = header?["system"]?.stringValue {
-                    details.append(.init(id: "system", title: "系统提示", content: limited(system), kind: .text))
+                    details.append(.init(
+                        id: "system",
+                        title: remoteLocalized("系统提示"),
+                        content: limited(system),
+                        kind: .text
+                    ))
                 }
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-request:\(event.seq)", sequence: event.seq,
                     turn: activeTurn, step: activeStep, kind: .request,
-                    title: "模型请求",
+                    title: remoteLocalized("模型请求"),
                     summary: [label, effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
                     time: time, duration: nil, state: .succeeded, details: details
                 ))
@@ -2284,10 +2366,20 @@ private enum ConversationFolder {
                 let summarySource = text.isEmpty ? reasoning : text
                 var details: [RemoteDetailSection] = []
                 if !reasoning.isEmpty {
-                    details.append(.init(id: "reasoning", title: "思考过程", content: reasoning, kind: .text))
+                    details.append(.init(
+                        id: "reasoning",
+                        title: remoteLocalized("思考过程"),
+                        content: reasoning,
+                        kind: .text
+                    ))
                 }
                 if !text.isEmpty {
-                    details.append(.init(id: "answer", title: "回答", content: text, kind: .text))
+                    details.append(.init(
+                        id: "answer",
+                        title: remoteLocalized("回答"),
+                        content: text,
+                        kind: .text
+                    ))
                 }
                 details.append(contentsOf: attachmentDetails(attachments))
                 let duration = turn.flatMap { turn in
@@ -2296,9 +2388,12 @@ private enum ConversationFolder {
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-assistant:\(event.seq)", sequence: event.seq,
                     turn: turn, step: step, kind: .assistant,
-                    title: text.isEmpty ? "模型思考" : "模型回答",
+                    title: remoteLocalized(text.isEmpty ? "模型思考" : "模型回答"),
                     summary: attachments.isEmpty
-                        ? firstMeaningfulLine(summarySource, fallback: "模型输出")
+                        ? firstMeaningfulLine(
+                            summarySource,
+                            fallback: remoteLocalized("模型输出")
+                        )
                         : attachmentSummary(summarySource, attachments),
                     time: time,
                     duration: duration,
@@ -2315,7 +2410,7 @@ private enum ConversationFolder {
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-tool:\(key.turn):\(key.step):\(key.callID)", sequence: event.seq,
                     turn: turn, step: step, kind: .tool,
-                    title: item.title ?? "工具调用", summary: item.text,
+                    title: item.title ?? remoteLocalized("工具调用"), summary: item.text,
                     time: item.time,
                     duration: duration,
                     state: item.state,
@@ -2349,7 +2444,7 @@ private enum ConversationFolder {
                     turn: activeTurn,
                     step: activeStep,
                     kind: .goal,
-                    title: item.title ?? "目标变化",
+                    title: item.title ?? remoteLocalized("目标变化"),
                     summary: item.text,
                     time: time,
                     duration: nil,
@@ -2364,7 +2459,7 @@ private enum ConversationFolder {
                     turn: activeTurn,
                     step: activeStep,
                     kind: .plan,
-                    title: item.title ?? "计划模式",
+                    title: item.title ?? remoteLocalized("计划模式"),
                     summary: item.text,
                     time: time,
                     duration: nil,
@@ -2377,7 +2472,9 @@ private enum ConversationFolder {
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-retry:\(event.seq)", sequence: event.seq,
                     turn: turn, step: step, kind: .lifecycle,
-                    title: "模型请求重试", summary: data["error"]?.objectValue?["message"]?.stringValue ?? "等待下一次请求",
+                    title: remoteLocalized("模型请求重试"),
+                    summary: data["error"]?.objectValue?["message"]?.stringValue
+                        ?? remoteLocalized("等待下一次请求"),
                     time: time, duration: nil, state: .running
                 ))
             case "compaction/start", "compaction/summary", "compaction/end":
@@ -2391,8 +2488,12 @@ private enum ConversationFolder {
                 records.append(RemoteTrajectoryRecord(
                     id: "trajectory-turn:\(event.seq)", sequence: event.seq,
                     turn: turn, step: nil, kind: .lifecycle,
-                    title: reasonKind == "completed" ? "本轮完成" : (status.title ?? "本轮结束"),
-                    summary: reasonKind == "completed" ? "Harness 已完成本轮任务" : status.text,
+                    title: reasonKind == "completed"
+                        ? remoteLocalized("本轮完成")
+                        : (status.title ?? remoteLocalized("本轮结束")),
+                    summary: reasonKind == "completed"
+                        ? remoteLocalized("Harness 已完成本轮任务")
+                        : status.text,
                     time: time, duration: duration,
                     state: reasonKind == "completed" ? .succeeded : status.state,
                     details: status.details
@@ -2486,9 +2587,9 @@ private enum ConversationFolder {
         _ attachments: [RemoteImageAttachment]
     ) -> String {
         if attachments.isEmpty {
-            return firstMeaningfulLine(text, fallback: "消息内容")
+            return firstMeaningfulLine(text, fallback: remoteLocalized("消息内容"))
         }
-        let imageText = "\(attachments.count) 张图片"
+        let imageText = remoteLocalizedFormat("%lld 张图片", attachments.count)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return imageText }
         return "\(firstMeaningfulLine(trimmed, fallback: imageText)) · \(imageText)"
@@ -2500,7 +2601,8 @@ private enum ConversationFolder {
         guard !attachments.isEmpty else { return [] }
         let rows = attachments.enumerated().map { index, attachment in
             let name = attachment.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let label = name.flatMap { $0.isEmpty ? nil : $0 } ?? "图片 \(index + 1)"
+            let label = name.flatMap { $0.isEmpty ? nil : $0 }
+                ?? remoteLocalizedFormat("图片 %lld", index + 1)
             let size = ByteCountFormatter.string(
                 fromByteCount: Int64(attachment.bytes),
                 countStyle: .file
@@ -2509,7 +2611,7 @@ private enum ConversationFolder {
         }
         return [RemoteDetailSection(
             id: "attachments",
-            title: "图片",
+            title: remoteLocalized("图片"),
             content: rows.joined(separator: "\n"),
             kind: .list
         )]
@@ -2595,11 +2697,11 @@ private enum ConversationFolder {
                 id: "goal:\(event.seq)",
                 sequence: event.seq,
                 kind: .status,
-                title: "目标已清除",
-                text: "当前会话不再自动继续这个目标。",
+                title: remoteLocalized("目标已清除"),
+                text: remoteLocalized("当前会话不再自动继续这个目标。"),
                 time: time,
                 state: .info,
-                metadata: revision.map { ["修订 \($0)"] } ?? [],
+                metadata: revision.map { [remoteLocalizedFormat("修订 %lld", $0)] } ?? [],
                 symbolName: "target"
             )
         }
@@ -2609,14 +2711,14 @@ private enum ConversationFolder {
                 id: "goal:\(event.seq)",
                 sequence: event.seq,
                 kind: .status,
-                title: "目标状态已变化",
-                text: "Harness 已更新当前目标。",
+                title: remoteLocalized("目标状态已变化"),
+                text: remoteLocalized("Harness 已更新当前目标。"),
                 time: time,
                 state: .info,
                 symbolName: "target"
             )
         }
-        let title: String = switch operation {
+        let titleKey: String = switch operation {
         case "create": "目标已创建"
         case "pause": "目标已暂停"
         case "resume": "目标已继续"
@@ -2624,6 +2726,7 @@ private enum ConversationFolder {
         case "block": "目标需要处理"
         default: "目标已更新"
         }
+        let title = remoteLocalized(titleKey)
         return RemoteConversationItem(
             id: "goal:\(event.seq)",
             sequence: event.seq,
@@ -2633,7 +2736,14 @@ private enum ConversationFolder {
             time: time,
             state: state(for: goal.phase),
             details: goalDetails(goal),
-            metadata: ["\(goal.roundsStarted)/\(goal.maxRounds) 轮", "修订 \(goal.revision)"],
+            metadata: [
+                remoteLocalizedFormat(
+                    "%lld/%lld 轮",
+                    goal.roundsStarted,
+                    goal.maxRounds
+                ),
+                remoteLocalizedFormat("修订 %lld", goal.revision),
+            ],
             symbolName: "target"
         )
     }
@@ -2647,16 +2757,16 @@ private enum ConversationFolder {
             id: "plan:\(event.seq)",
             sequence: event.seq,
             kind: .status,
-            title: active ? "已进入计划模式" : "已退出计划模式",
+            title: remoteLocalized(active ? "已进入计划模式" : "已退出计划模式"),
             text: active
-                ? "Harness 会先整理方案，再请求你确认是否执行。"
-                : "Harness 已恢复正常执行模式。",
+                ? remoteLocalized("Harness 会先整理方案，再请求你确认是否执行。")
+                : remoteLocalized("Harness 已恢复正常执行模式。"),
             time: time,
             state: active ? .running : .info,
             details: [RemoteDetailSection(
                 id: "plan-mode",
-                title: "计划模式",
-                content: active ? "当前状态\t已开启" : "当前状态\t已关闭",
+                title: remoteLocalized("计划模式"),
+                content: remoteLocalized(active ? "当前状态\t已开启" : "当前状态\t已关闭"),
                 kind: .list
             )],
             symbolName: "map"
@@ -2666,25 +2776,29 @@ private enum ConversationFolder {
     private static func goalDetails(_ goal: RemoteGoalState) -> [RemoteDetailSection] {
         var details = [RemoteDetailSection(
             id: "goal-objective",
-            title: "目标",
+            title: remoteLocalized("目标"),
             content: goal.objective,
             kind: .text
         )]
         let status = [
-            "状态\t\(goalPhaseLabel(goal.phase))",
-            "进度\t\(goal.roundsStarted) / \(goal.maxRounds) 轮",
-            "修订\t\(goal.revision)",
+            remoteLocalizedFormat("状态\t%@", goalPhaseLabel(goal.phase)),
+            remoteLocalizedFormat(
+                "进度\t%lld / %lld 轮",
+                goal.roundsStarted,
+                goal.maxRounds
+            ),
+            remoteLocalizedFormat("修订\t%lld", goal.revision),
         ]
         details.append(RemoteDetailSection(
             id: "goal-status",
-            title: "状态",
+            title: remoteLocalized("状态"),
             content: status.joined(separator: "\n"),
             kind: .list
         ))
         if let message = goal.blockedReasonMessage, !message.isEmpty {
             details.append(RemoteDetailSection(
                 id: "goal-blocked",
-                title: "需要处理",
+                title: remoteLocalized("需要处理"),
                 content: message,
                 kind: .text
             ))
@@ -2693,12 +2807,13 @@ private enum ConversationFolder {
     }
 
     private static func goalPhaseLabel(_ phase: RemoteGoalState.Phase) -> String {
-        switch phase {
+        let key: String = switch phase {
         case .active: "进行中"
         case .paused: "已暂停"
         case .blocked: "受阻"
         case .complete: "已完成"
         }
+        return remoteLocalized(key)
     }
 
     private static func state(
@@ -2785,14 +2900,14 @@ private enum ConversationFolder {
 
         if sourceKind == "goal",
            let round = int(source?["round"]), round > 0 {
-            preview = "Goal · 第 \(round) 轮"
-            var rows = ["轮次\t第 \(round) 轮"]
+            preview = remoteLocalizedFormat("Goal · 第 %lld 轮", round)
+            var rows = [remoteLocalizedFormat("轮次\t第 %lld 轮", round)]
             if let revision = int(source?["revision"]) {
-                rows.append("修订\t\(revision)")
+                rows.append(remoteLocalizedFormat("修订\t%lld", revision))
             }
             details.append(RemoteDetailSection(
                 id: "goal-source",
-                title: "Goal 续跑",
+                title: remoteLocalized("Goal 续跑"),
                 content: rows.joined(separator: "\n"),
                 kind: .list
             ))
@@ -2806,20 +2921,20 @@ private enum ConversationFolder {
             }
             details.append(RemoteDetailSection(
                 id: "instruction-sources",
-                title: "指令来源",
+                title: remoteLocalized("指令来源"),
                 content: rows.joined(separator: "\n"),
                 kind: .list
             ))
             if changes.count == 1, let change = changes.first {
                 preview = "\(change.path) · \(instructionAction(change.action, baseline: baseline))"
             } else {
-                preview = "已同步 \(changes.count) 个指令文件"
+                preview = remoteLocalizedFormat("已同步 %lld 个指令文件", changes.count)
             }
         }
 
         details.append(RemoteDetailSection(
             id: "context-raw",
-            title: "模型接收的内容",
+            title: remoteLocalized("模型接收的内容"),
             content: text,
             kind: .text
         ))
@@ -2849,16 +2964,16 @@ private enum ConversationFolder {
     }
 
     private static func instructionAction(_ action: String, baseline: Bool) -> String {
-        if action == "remove" { return "已移除" }
-        if baseline { return "已载入" }
-        return action == "set" ? "已添加" : "已更新"
+        if action == "remove" { return remoteLocalized("已移除") }
+        if baseline { return remoteLocalized("已载入") }
+        return remoteLocalized(action == "set" ? "已添加" : "已更新")
     }
 
     private static func firstContextLine(_ value: String) -> String {
         let line = value.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty && $0 != "<system-reminder>" && $0 != "</system-reminder>" }
-        return line ?? "Harness 已载入一段上下文"
+        return line ?? remoteLocalized("Harness 已载入一段上下文")
     }
 
     private static func contextSourceLabel(_ sourceKind: String) -> String {
@@ -2870,7 +2985,7 @@ private enum ConversationFolder {
             "session-reference": "引用会话",
             "goal": "目标续跑",
         ]
-        return labels[sourceKind] ?? "系统上下文"
+        return remoteLocalized(labels[sourceKind] ?? "系统上下文")
     }
 
     private static func toolItem(
@@ -2946,24 +3061,40 @@ private enum ConversationFolder {
             sections.append(.init(id: "description", title: nil, content: description, kind: .text))
         }
         if let content = textContent(callView?["content"]) {
-            sections.append(.init(id: "call-content", title: "操作说明", content: content, kind: .text))
+            sections.append(.init(
+                id: "call-content",
+                title: remoteLocalized("操作说明"),
+                content: content,
+                kind: .text
+            ))
         }
         if let rawInput = readableJSON(callView?["rawInput"]) {
-            sections.append(.init(id: "input", title: "输入", content: rawInput, kind: .code(language: nil)))
+            sections.append(.init(
+                id: "input",
+                title: remoteLocalized("输入"),
+                content: rawInput,
+                kind: .code(language: nil)
+            ))
         }
 
         var summary: String?
         switch card {
         case .terminal:
             if let output = resultView?["output"]?.stringValue {
-                sections.append(.init(id: "terminal", title: "终端输出", content: limited(output), kind: .code(language: "console")))
-                summary = firstMeaningfulLine(output, fallback: "命令已完成")
+                sections.append(.init(
+                    id: "terminal",
+                    title: remoteLocalized("终端输出"),
+                    content: limited(output),
+                    kind: .code(language: "console")
+                ))
+                summary = firstMeaningfulLine(output, fallback: remoteLocalized("命令已完成"))
             }
         case .diff:
             let diffs = resultView?["diffs"]?.arrayValue ?? callView?["diffs"]?.arrayValue ?? []
             for (index, diff) in diffs.enumerated() {
                 guard let object = diff.objectValue else { continue }
-                let path = object["path"]?.stringValue ?? "文件 \(index + 1)"
+                let path = object["path"]?.stringValue
+                    ?? remoteLocalizedFormat("文件 %lld", index + 1)
                 let oldText = object["oldText"]?.stringValue
                 let newText = object["newText"]?.stringValue ?? ""
                 sections.append(.init(
@@ -2972,16 +3103,24 @@ private enum ConversationFolder {
                     kind: .diff
                 ))
             }
-            summary = sections.isEmpty ? nil : "修改了 \(sections.count) 个文件"
+            summary = sections.isEmpty
+                ? nil
+                : remoteLocalizedFormat("修改了 %lld 个文件", sections.count)
         case .search:
             if resultView?["shape"]?.stringValue == "paths" {
                 let paths = resultView?["paths"]?.arrayValue?.compactMap(\.stringValue) ?? []
-                sections.append(.init(id: "paths", title: "匹配路径", content: paths.joined(separator: "\n"), kind: .list))
+                sections.append(.init(
+                    id: "paths",
+                    title: remoteLocalized("匹配路径"),
+                    content: paths.joined(separator: "\n"),
+                    kind: .list
+                ))
             } else {
                 let files = resultView?["files"]?.arrayValue ?? []
                 for (index, file) in files.enumerated() {
                     guard let object = file.objectValue else { continue }
-                    let path = object["path"]?.stringValue ?? "结果 \(index + 1)"
+                    let path = object["path"]?.stringValue
+                        ?? remoteLocalizedFormat("结果 %lld", index + 1)
                     let lines = object["matches"]?.arrayValue?.compactMap { match -> String? in
                         guard let value = match.objectValue else { return nil }
                         let number = int(value["lineNumber"]).map(String.init) ?? "?"
@@ -2991,9 +3130,9 @@ private enum ConversationFolder {
                 }
             }
             let total = int(resultView?["total"]) ?? sections.count
-            summary = "找到 \(total) 条结果"
+            summary = remoteLocalizedFormat("找到 %lld 条结果", total)
         case .read:
-            let path = resultView?["path"]?.stringValue ?? "文件内容"
+            let path = resultView?["path"]?.stringValue ?? remoteLocalized("文件内容")
             let lines = resultView?["lines"]?.arrayValue?.compactMap { line -> String? in
                 guard let value = line.objectValue else { return nil }
                 let number = int(value["number"]).map(String.init) ?? ""
@@ -3003,13 +3142,18 @@ private enum ConversationFolder {
                 id: "read", title: path, content: limited(lines.joined(separator: "\n")),
                 kind: .code(language: resultView?["lang"]?.stringValue)
             ))
-            summary = "读取 \(path) · \(lines.count) 行"
+            summary = remoteLocalizedFormat("读取 %@ · %lld 行", path, lines.count)
         case .web:
             if resultView?["kind"]?.stringValue == "fetch" {
                 let status = int(resultView?["statusCode"]).map(String.init) ?? ""
-                let url = resultView?["url"]?.stringValue ?? "网页"
-                summary = "抓取完成 \(status)"
-                sections.append(.init(id: "url", title: "来源", content: url, kind: .text))
+                let url = resultView?["url"]?.stringValue ?? remoteLocalized("网页")
+                summary = remoteLocalizedFormat("抓取完成 %@", status)
+                sections.append(.init(
+                    id: "url",
+                    title: remoteLocalized("来源"),
+                    content: url,
+                    kind: .text
+                ))
             } else {
                 let sources = resultView?["sources"]?.arrayValue ?? []
                 let list = sources.compactMap { source -> String? in
@@ -3019,33 +3163,54 @@ private enum ConversationFolder {
                     let snippet = value["snippet"]?.stringValue
                     return [title, url, snippet].compactMap { $0 }.joined(separator: "\n")
                 }.joined(separator: "\n\n")
-                sections.append(.init(id: "sources", title: "来源", content: limited(list), kind: .list))
+                sections.append(.init(
+                    id: "sources",
+                    title: remoteLocalized("来源"),
+                    content: limited(list),
+                    kind: .list
+                ))
                 if let answer = resultView?["answer"]?.stringValue {
-                    sections.insert(.init(id: "answer", title: "摘要", content: answer, kind: .text), at: 0)
+                    sections.insert(.init(
+                        id: "answer",
+                        title: remoteLocalized("摘要"),
+                        content: answer,
+                        kind: .text
+                    ), at: 0)
                 }
-                summary = "检索了 \(sources.count) 个来源"
+                summary = remoteLocalizedFormat("检索了 %lld 个来源", sources.count)
             }
         case .generic:
             if let content = textContent(resultView?["content"]) {
-                sections.append(.init(id: "result", title: "结果", content: limited(content), kind: inferredSectionKind(content)))
-                summary = firstMeaningfulLine(content, fallback: "操作已完成")
+                sections.append(.init(
+                    id: "result",
+                    title: remoteLocalized("结果"),
+                    content: limited(content),
+                    kind: inferredSectionKind(content)
+                ))
+                summary = firstMeaningfulLine(content, fallback: remoteLocalized("操作已完成"))
             }
         }
 
         if resultView == nil, let rawResult, !rawResult.isEmpty {
-            sections.append(.init(id: "raw-result", title: "结果", content: limited(rawResult), kind: inferredSectionKind(rawResult)))
-            summary = summary ?? firstMeaningfulLine(rawResult, fallback: "操作已完成")
+            sections.append(.init(
+                id: "raw-result",
+                title: remoteLocalized("结果"),
+                content: limited(rawResult),
+                kind: inferredSectionKind(rawResult)
+            ))
+            summary = summary
+                ?? firstMeaningfulLine(rawResult, fallback: remoteLocalized("操作已完成"))
         }
         if summary == nil {
             switch state {
-            case .running: summary = "正在电脑上执行"
-            case .failed: summary = "执行失败"
-            case .stopped: summary = "已停止"
-            case .succeeded: summary = "已完成"
-            case .info: summary = "Harness 操作"
+            case .running: summary = remoteLocalized("正在电脑上执行")
+            case .failed: summary = remoteLocalized("执行失败")
+            case .stopped: summary = remoteLocalized("已停止")
+            case .succeeded: summary = remoteLocalized("已完成")
+            case .info: summary = remoteLocalized("Harness 操作")
             }
         }
-        return (summary ?? "Harness 操作", sections)
+        return (summary ?? remoteLocalized("Harness 操作"), sections)
     }
 
     private static func toolResultBlock(_ entry: HistoryEntryWire?) -> [String: JSONValue]? {
@@ -3087,24 +3252,25 @@ private enum ConversationFolder {
         let state: RemoteConversationItem.State
         switch kind {
         case "error":
-            title = "本轮执行失败"
-            text = reason["error"]?.objectValue?["message"]?.stringValue ?? "模型请求返回了错误。"
+            title = remoteLocalized("本轮执行失败")
+            text = reason["error"]?.objectValue?["message"]?.stringValue
+                ?? remoteLocalized("模型请求返回了错误。")
             state = .failed
         case "max-tokens":
-            title = "已达到输出上限"
-            text = "模型在完成回答前达到了本次输出 token 上限。"
+            title = remoteLocalized("已达到输出上限")
+            text = remoteLocalized("模型在完成回答前达到了本次输出 token 上限。")
             state = .failed
         case "aborted":
-            title = "本轮已停止"
-            text = "执行已被取消，已经产生的内容仍保留在轨迹中。"
+            title = remoteLocalized("本轮已停止")
+            text = remoteLocalized("执行已被取消，已经产生的内容仍保留在轨迹中。")
             state = .stopped
         case "blocked":
-            title = "本轮已阻塞"
-            text = "Harness 无法继续当前步骤。"
+            title = remoteLocalized("本轮已阻塞")
+            text = remoteLocalized("Harness 无法继续当前步骤。")
             state = .failed
         default:
-            title = "本轮已中断"
-            text = "会话在完成前中断，已有内容已保留。"
+            title = remoteLocalized("本轮已中断")
+            text = remoteLocalized("会话在完成前中断，已有内容已保留。")
             state = .stopped
         }
         return RemoteConversationItem(
@@ -3178,12 +3344,14 @@ private enum ConversationFolder {
 
     private static func limited(_ value: String, limit: Int = 30_000) -> String {
         guard value.count > limit else { return value }
-        return String(value.prefix(limit)) + "\n\n…内容过长，已在手机端截断。"
+        return String(value.prefix(limit)) + remoteLocalized("\n\n…内容过长，已在手机端截断。")
     }
 
     private static func durationLabel(milliseconds: Double) -> String {
         let seconds = max(milliseconds, 0) / 1_000
-        return seconds < 1 ? "\(Int(seconds * 1_000)) ms" : String(format: "%.1f 秒", seconds)
+        return seconds < 1
+            ? "\(Int(seconds * 1_000)) ms"
+            : remoteLocalizedFormat("%.1f 秒", seconds)
     }
 
     private static func int(_ value: JSONValue?) -> Int? {

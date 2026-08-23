@@ -1,6 +1,25 @@
 import SwiftUI
 import UIKit
 
+func remoteLocalized(_ key: String) -> String {
+    Bundle.main.localizedString(forKey: key, value: key, table: nil)
+}
+
+func remoteLocalizedFormat(_ key: String, _ arguments: CVarArg...) -> String {
+    String(
+        format: remoteLocalized(key),
+        locale: Locale.current,
+        arguments: arguments
+    )
+}
+
+func remoteLocalizedCount(_ count: Int, unit: String) -> String {
+    remoteLocalizedFormat(
+        count == 1 ? "count.\(unit).one" : "count.\(unit).other",
+        count
+    )
+}
+
 enum RemoteTheme {
     static let accent = dynamicColor(
         light: UIColor(red: 0.18, green: 0.36, blue: 0.75, alpha: 1),
@@ -283,11 +302,11 @@ struct RemotePageHeader<Trailing: View>: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.headline)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
             if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
+                Text(remoteLocalized(subtitle))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
@@ -365,10 +384,10 @@ struct RemoteSheetHeader<Trailing: View>: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.title3.weight(.semibold))
             if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
+                Text(remoteLocalized(subtitle))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
@@ -440,14 +459,14 @@ struct RemoteSectionHeader: View {
     }
 
     private var sectionTitle: some View {
-        Text(title)
+        Text(remoteLocalized(title))
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func sectionDetail(_ detail: String) -> some View {
-        Text(detail)
+        Text(remoteLocalized(detail))
             .font(.caption)
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
@@ -467,7 +486,7 @@ struct RemoteStatusPill: View {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .bold))
             }
-            Text(text)
+            Text(remoteLocalized(text))
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
         .font(.caption2.weight(.semibold))
@@ -510,10 +529,10 @@ struct RemoteInlineNotice: View {
                 .background(tone.color.opacity(0.11), in: RoundedRectangle(cornerRadius: 7))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(remoteLocalized(title))
                     .font(.subheadline.weight(.semibold))
                 if let message, !message.isEmpty {
-                    Text(message)
+                    Text(remoteLocalized(message))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -521,7 +540,7 @@ struct RemoteInlineNotice: View {
             }
             Spacer(minLength: 6)
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
+                Button(remoteLocalized(actionTitle), action: action)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(tone.color)
                     .buttonStyle(RemotePressableRowButtonStyle(cornerRadius: 9))
@@ -572,10 +591,10 @@ struct RemoteEmptyState<ActionLabel: View>: View {
                 }
                 .padding(.bottom, 18)
 
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
-            Text(message)
+            Text(remoteLocalized(message))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -621,10 +640,10 @@ struct RemoteLoadingState: View {
             }
             .padding(.bottom, 18)
 
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
-            Text(message)
+            Text(remoteLocalized(message))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -668,11 +687,11 @@ struct RemoteDestructiveConfirmationSheet: View {
                     .background(RemoteTheme.danger.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
                     .padding(.top, 2)
 
-                Text(title)
+                Text(remoteLocalized(title))
                     .font(.title3.weight(.bold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 14)
-                Text(message)
+                Text(remoteLocalized(message))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -694,7 +713,7 @@ struct RemoteDestructiveConfirmationSheet: View {
     private var actionButtons: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(spacing: 10) {
-                Button(confirmTitle, action: performConfirm)
+                Button(remoteLocalized(confirmTitle), action: performConfirm)
                     .buttonStyle(RemoteActionButtonStyle(kind: .danger))
                 Button("取消") { dismiss() }
                     .buttonStyle(RemoteActionButtonStyle(kind: .secondary))
@@ -703,7 +722,7 @@ struct RemoteDestructiveConfirmationSheet: View {
             HStack(spacing: 10) {
                 Button("取消") { dismiss() }
                     .buttonStyle(RemoteActionButtonStyle(kind: .secondary))
-                Button(confirmTitle, action: performConfirm)
+                Button(remoteLocalized(confirmTitle), action: performConfirm)
                     .buttonStyle(RemoteActionButtonStyle(kind: .danger))
             }
         }

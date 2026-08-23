@@ -16,6 +16,10 @@ DSH Remote is the native SwiftUI companion for DSH Desktop. It connects directly
 
 Code, repositories, Shell access, model calls, API keys, and task history remain on the computer.
 
+## Languages
+
+The app follows the language selected for DSH Remote in iOS Settings. English and Simplified Chinese cover the complete product surface, including setup, errors, notifications, approvals, model routing, Activity, images, references, and nested subagents. Project names, file paths, user prompts, and computer-provided model output are preserved as content rather than translated by the app.
+
 ## Install the source preview
 
 Requirements:

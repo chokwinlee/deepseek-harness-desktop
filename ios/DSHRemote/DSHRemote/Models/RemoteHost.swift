@@ -11,17 +11,17 @@ enum RemoteHostTransport {
     var label: String {
         switch self {
         case .loopback:
-            "本机调试"
+            remoteLocalized("本机调试")
         case .sameWiFi:
-            "同一 Wi-Fi"
+            remoteLocalized("同一 Wi-Fi")
         case .unpairedLocalNetwork:
-            "局域网（未配对）"
+            remoteLocalized("局域网（未配对）")
         case .tailscale:
             "Tailscale"
         case .https:
             "HTTPS"
         case .custom:
-            "自定义连接"
+            remoteLocalized("自定义连接")
         }
     }
 }

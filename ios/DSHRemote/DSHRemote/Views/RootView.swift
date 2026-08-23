@@ -6,15 +6,18 @@ struct RootView: View {
     @State private var addHostStartsWithScanner = false
 
     var body: some View {
+        Group {
         #if DEBUG
-        if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] {
-            debugScenario(scenario)
-        } else {
-            appRoot
-        }
+            if let scenario = ProcessInfo.processInfo.environment["DSH_REMOTE_SCENARIO"] {
+                debugScenario(scenario)
+            } else {
+                appRoot
+            }
         #else
-        appRoot
+            appRoot
         #endif
+        }
+        .statusBarHidden(false)
     }
 
     private var appRoot: some View {
@@ -62,10 +65,10 @@ struct RootView: View {
                     client: DemoHarnessRemoteClient(),
                     session: RemoteSessionSummary(
                         id: "review-demo-session",
-                        title: "登录流程上线检查",
+                        title: remoteLocalized("登录流程上线检查"),
                         updatedAt: Date(),
                         running: false,
-                        projectName: "Sample Project",
+                        projectName: remoteLocalized("示例项目"),
                         projectPath: "/Users/demo/Sample Project"
                     )
                 )
@@ -86,7 +89,7 @@ struct RootView: View {
                         ),
                         session: RemoteSessionSummary(
                             id: sessionID,
-                            title: "DSH Remote v0.3 验收",
+                            title: remoteLocalized("DSH Remote v0.3 验收"),
                             updatedAt: Date(),
                             running: false,
                             projectName: "deepseek-harness-desktop",

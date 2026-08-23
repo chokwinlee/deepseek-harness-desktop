@@ -54,10 +54,15 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 > DSH Remote 当前属于 **iOS 源码预览**。目前还没有 App Store 或公开 TestFlight 构建，GitHub Release 也不包含可直接安装的 iOS App。公开 TestFlight 正在准备中。
 
 <p align="center">
-  <img src="docs/images/readme-remote.png" width="360" alt="DSH Remote 原生 iPhone 项目与会话界面">
+  <img src="docs/images/remote-home-zh.png" width="30%" alt="DSH Remote 中文同一 Wi-Fi 配对界面">
+  <img src="docs/images/remote-projects-zh.png" width="30%" alt="DSH Remote 中文项目与运行会话界面">
+  <img src="docs/images/remote-conversation-zh.png" width="30%" alt="DSH Remote 中文审批处理界面">
 </p>
+<p align="center"><sub>同一 Wi-Fi 配对 · 项目与运行会话 · 审批处理</sub></p>
 
 DSH Remote 是用户自己拥有或管理的 DSH Desktop 电脑的原生 SwiftUI 配套 App。手机不运行 Agent、仓库、终端或模型服务商；任务仍在电脑执行，iPhone 只提供窄控制面。
+
+iOS 源码预览会跟随设备为 App 选择的语言，目前已完整覆盖英文与简体中文，包括设置、错误、通知、审批、模型、轨迹和子代理流程。
 
 - **同一 Wi-Fi（推荐）**　Desktop 在用户明确开启后提供带认证的局域网入口，不需要 Tailscale 账号。
 - **离开本地网络**　两台设备加入用户自己的 Tailnet，Desktop 自动配置私有的 Tailscale Serve HTTPS 入口；不要使用 Funnel。

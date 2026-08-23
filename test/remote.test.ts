@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import http, { type Server } from 'node:http'
 import { type AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -842,4 +842,75 @@ test('LAN Remote strips credentials, rewrites Host, streams large requests, and 
     host: `127.0.0.1:${upstreamPort}`,
     'content-length': String(body.length),
   })
+})
+
+test('iOS Remote ships complete English and Simplified Chinese product-copy coverage', async () => {
+  const iosRoot = join(process.cwd(), 'ios', 'DSHRemote', 'DSHRemote')
+  const englishPath = join(iosRoot, 'en.lproj', 'Localizable.strings')
+  const chinesePath = join(iosRoot, 'zh-Hans.lproj', 'Localizable.strings')
+  const projectPath = join(process.cwd(), 'ios', 'DSHRemote', 'DSHRemote.xcodeproj', 'project.pbxproj')
+  const [englishSource, chineseSource, projectSource, relativePaths] = await Promise.all([
+    readFile(englishPath, 'utf8'),
+    readFile(chinesePath, 'utf8'),
+    readFile(projectPath, 'utf8'),
+    readdir(iosRoot, { recursive: true }),
+  ])
+
+  const entryPattern = /^"((?:\\.|[^"\\])*)"\s*=\s*"((?:\\.|[^"\\])*)";/gm
+  const englishEntries = [...englishSource.matchAll(entryPattern)]
+  const english = new Map<string, string>()
+  for (const entry of englishEntries) {
+    const key = entry[1]
+    const value = entry[2]
+    assert.ok(key !== undefined && value !== undefined)
+    assert.equal(english.has(key), false, `duplicate English localization key: ${key}`)
+    english.set(key, value)
+    assert.doesNotMatch(value, /[\u3400-\u9fff]/, `English value still contains Han text: ${key}`)
+  }
+  assert.ok(english.size >= 640, 'the English catalog should cover the complete Remote surface')
+
+  const placeholderTokens = (value: string): string[] => (
+    [...value.matchAll(/%(?:\d+\$)?(?:\.\d+)?(?:lld|ld|d|@|f|%)/g)]
+      .map(match => match[0].replace(/%\d+\$/, '%'))
+      .filter(token => token !== '%%')
+      .sort()
+  )
+  for (const [key, value] of english) {
+    if (!key.includes('%')) continue
+    assert.deepEqual(
+      placeholderTokens(value),
+      placeholderTokens(key),
+      `localization placeholders changed for: ${key}`,
+    )
+  }
+
+  const swiftPaths = relativePaths
+    .map(String)
+    .filter(path => path.endsWith('.swift'))
+  const chineseLiteral = /"((?:\\.|[^"\\])*[\u3400-\u9fff](?:\\.|[^"\\])*)"/g
+  const untranslated: string[] = []
+  for (const relativePath of swiftPaths) {
+    const source = await readFile(join(iosRoot, relativePath), 'utf8')
+    for (const match of source.matchAll(chineseLiteral)) {
+      const literal = match[1]
+      assert.ok(literal !== undefined)
+      if (!english.has(literal)) untranslated.push(`${relativePath}: ${literal}`)
+    }
+  }
+  assert.deepEqual(untranslated, [], 'every Chinese product-copy literal needs an English value')
+
+  assert.match(projectSource, /knownRegions = \([\s\S]*en,[\s\S]*"zh-Hans"/)
+  assert.match(projectSource, /en\.lproj\/Localizable\.strings/)
+  assert.match(projectSource, /zh-Hans\.lproj\/Localizable\.strings/)
+  assert.match(chineseSource, /"count\.project\.one" = "%lld 个项目";/)
+
+  const designSystem = await readFile(join(iosRoot, 'Views', 'RemoteDesignSystem.swift'), 'utf8')
+  assert.match(designSystem, /Text\(remoteLocalized\(title\)\)/)
+  assert.match(designSystem, /Text\(remoteLocalized\(message\)\)/)
+  assert.match(designSystem, /Text\(remoteLocalized\(detail\)\)/)
+
+  const conversation = await readFile(join(iosRoot, 'Views', 'RemoteConversationView.swift'), 'utf8')
+  assert.match(conversation, /return remoteLocalized\(title\)/)
+  assert.match(conversation, /Text\(remoteLocalized\(record\.title\)\)/)
+  assert.match(conversation, /accessibilityHint = remoteLocalized\("使用放大和缩小操作调整图片"\)/)
 })

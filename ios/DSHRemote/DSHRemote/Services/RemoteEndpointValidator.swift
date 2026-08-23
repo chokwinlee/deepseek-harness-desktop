@@ -11,17 +11,17 @@ enum RemoteEndpointError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .empty:
-            return "请输入电脑上显示的 Remote 地址。"
+            return remoteLocalized("请输入电脑上显示的 Remote 地址。")
         case .invalidURL:
-            return "这不是有效的 Remote 地址。"
+            return remoteLocalized("这不是有效的 Remote 地址。")
         case .insecureURL:
-            return "公网地址必须使用 HTTPS；HTTP 只可用于本地局域网。"
+            return remoteLocalized("公网地址必须使用 HTTPS；HTTP 只可用于本地局域网。")
         case .unsupportedHost:
-            return "这个地址不是可识别的局域网地址，请改用 HTTPS。"
+            return remoteLocalized("这个地址不是可识别的局域网地址，请改用 HTTPS。")
         case .embeddedCredentials:
-            return "Remote 地址不能包含用户名或密码。"
+            return remoteLocalized("Remote 地址不能包含用户名或密码。")
         case .missingPairingCredential:
-            return "同一 Wi-Fi 连接必须扫描 Desktop 的局域网配对二维码。"
+            return remoteLocalized("同一 Wi-Fi 连接必须扫描 Desktop 的局域网配对二维码。")
         }
     }
 }

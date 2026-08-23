@@ -1,0 +1,22 @@
+/* Chinese source copy lives in Swift. This resource makes zh-Hans an explicit app language. */
+"DSH Remote" = "DSH Remote";
+"count.project.one" = "%lld 个项目";
+"count.project.other" = "%lld 个项目";
+"count.running.one" = "%lld 个运行中";
+"count.running.other" = "%lld 个运行中";
+"count.session.one" = "%lld 个会话";
+"count.session.other" = "%lld 个会话";
+"count.turn.one" = "%lld 轮";
+"count.turn.other" = "%lld 轮";
+"count.call.one" = "%lld 次调用";
+"count.call.other" = "%lld 次调用";
+"count.computer.one" = "%lld 台";
+"count.computer.other" = "%lld 台";
+"count.subagent.one" = "%lld 个";
+"count.subagent.other" = "%lld 个";
+"count.model.one" = "%lld 个模型";
+"count.model.other" = "%lld 个模型";
+"count.event.one" = "%lld 条事件";
+"count.event.other" = "%lld 条事件";
+"acceptance.references.prompt" = "DSH Remote v0.3 端到端验收。请读取并引用 %@，随后使用 subagent 工具创建一个名为 remote-acceptance 的 continuable 子代理，让它检查本项目 Remote 的安全边界并返回一句结论。最后简短汇总。";
+"acceptance.image.prompt" = "图片与引用回归验收。请读取 %@，并用一句话说明附图的主要形状与配色。";

@@ -150,7 +150,7 @@ final class RemoteHostViewModel: ObservableObject {
                 id: "completed:\(session.id):\(session.updatedAt.timeIntervalSince1970)",
                 kind: .completed,
                 sessionID: session.id,
-                body: "“\(session.title)”已在你的电脑上完成。"
+                body: remoteLocalizedFormat("“%@”已在你的电脑上完成。", session.title)
             ))
         }
     }
@@ -465,7 +465,7 @@ final class RemoteConversationViewModel: ObservableObject {
 
     func updateQueue(_ item: RemoteQueuedMessage, action: RemoteQueueAction) async {
         if case .edit = action, item.attachmentCount > 0 {
-            errorMessage = "带图片的排队消息不能只编辑文字；请删除后重新发送。"
+            errorMessage = remoteLocalized("带图片的排队消息不能只编辑文字；请删除后重新发送。")
             return
         }
         do {
@@ -533,7 +533,7 @@ final class RemoteConversationViewModel: ObservableObject {
                 id: "attention:\(interaction.id)",
                 kind: .attention,
                 sessionID: session.id,
-                body: "“\(session.title)”正在等待你的确认。"
+                body: remoteLocalizedFormat("“%@”正在等待你的确认。", session.title)
             ))
         case .interactionResolved(let id):
             if interaction?.id == id { interaction = nil }
@@ -550,7 +550,7 @@ final class RemoteConversationViewModel: ObservableObject {
             id: "completed:\(latest.id):\(latest.updatedAt.timeIntervalSince1970)",
             kind: .completed,
             sessionID: latest.id,
-            body: "“\(latest.title)”已在你的电脑上完成。"
+            body: remoteLocalizedFormat("“%@”已在你的电脑上完成。", latest.title)
         ))
     }
 
@@ -600,7 +600,7 @@ final class RemoteConversationViewModel: ObservableObject {
             }
             throw HarnessRemoteClientError.api(
                 code: "references-unsupported",
-                message: "当前电脑版本不支持引用，请更新到 DSH Desktop v0.3.0 或更高版本。"
+                message: remoteLocalized("当前电脑版本不支持引用，请更新到 DSH Desktop v0.3.0 或更高版本。")
             )
         }
         throw error

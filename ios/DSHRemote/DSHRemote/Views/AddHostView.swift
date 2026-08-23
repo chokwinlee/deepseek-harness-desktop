@@ -131,7 +131,7 @@ struct AddHostView: View {
                 guard let message, !message.isEmpty else { return }
                 UIAccessibility.post(
                     notification: .announcement,
-                    argument: "连接失败，\(message)"
+                    argument: remoteLocalizedFormat("连接失败，%@", message)
                 )
             }
             .onChange(of: scenePhase) { _, phase in
@@ -241,7 +241,7 @@ struct AddHostView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(importedHost?.transportLabel ?? "Remote 连接")
+                Text(importedHost?.transportLabel ?? remoteLocalized("Remote 连接"))
                     .font(.subheadline.weight(.semibold))
                 Text(importedHost?.address ?? "等待验证")
                     .font(.caption)
@@ -263,7 +263,9 @@ struct AddHostView: View {
         .padding(13)
         .remoteSurface(cornerRadius: 14)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("已读取 \(importedHost?.transportLabel ?? "Remote") 连接")
+        .accessibilityLabel(
+            remoteLocalizedFormat("已读取 %@ 连接", importedHost?.transportLabel ?? "Remote")
+        )
         .accessibilityValue(importedHost?.address ?? "等待验证")
     }
 
@@ -408,9 +410,9 @@ struct AddHostView: View {
 
     private func connectionGuideCopy(title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
+            Text(remoteLocalized(title))
                 .font(.body.weight(.semibold))
-            Text(detail)
+            Text(remoteLocalized(detail))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
@@ -522,11 +524,15 @@ struct AddHostView: View {
 
     private var connectionSubtitle: String {
         if (isChecking || errorMessage != nil), importedHost != nil {
-            let transport = importedIsSameWiFi ? "同一 Wi-Fi 配对" : "跨网络连接"
-            return isChecking ? "正在验证\(transport)" : "\(transport)尚未完成"
+            let transport = remoteLocalized(importedIsSameWiFi ? "同一 Wi-Fi 配对" : "跨网络连接")
+            return isChecking
+                ? remoteLocalizedFormat("正在验证%@", transport)
+                : remoteLocalizedFormat("%@尚未完成", transport)
         }
-        guard hasImportedConnection else { return "同一 Wi-Fi 扫码，无需 Tailscale" }
-        return importedIsSameWiFi ? "同一 Wi-Fi 配对尚未完成" : "跨网络连接尚未完成"
+        guard hasImportedConnection else { return remoteLocalized("同一 Wi-Fi 扫码，无需 Tailscale") }
+        return remoteLocalized(
+            importedIsSameWiFi ? "同一 Wi-Fi 配对尚未完成" : "跨网络连接尚未完成"
+        )
     }
 
     private func openAppSettings() {
@@ -623,19 +629,19 @@ struct AddHostView: View {
         if let urlError = error as? URLError {
             switch urlError.code {
             case .cannotFindHost, .dnsLookupFailed:
-                return localConnection
+                return remoteLocalized(localConnection
                     ? "找不到电脑。请确认 iPhone 和 Mac 仍在同一 Wi-Fi，并在 Desktop 重新显示局域网二维码。"
-                    : "找不到电脑。请确认手机已连接 Tailnet，或检查 HTTPS 域名。"
+                    : "找不到电脑。请确认手机已连接 Tailnet，或检查 HTTPS 域名。")
             case .cannotConnectToHost, .timedOut, .networkConnectionLost:
-                return localConnection
+                return remoteLocalized(localConnection
                     ? "无法连接电脑。请确认 Desktop 正在运行、“同一 Wi-Fi”入口仍已开启；网络变化后请重新扫码。"
-                    : "无法连接电脑。请确认 Desktop 正在运行，且 Tailscale Serve 或 HTTPS 入口已开启。"
+                    : "无法连接电脑。请确认 Desktop 正在运行，且 Tailscale Serve 或 HTTPS 入口已开启。")
             case .notConnectedToInternet:
-                return localConnection
+                return remoteLocalized(localConnection
                     ? "无法访问本地网络。请确认 Wi-Fi 已连接，并在 iPhone 设置中允许 DSH Remote 访问本地网络。"
-                    : "当前没有可用网络，请联网后重试。"
+                    : "当前没有可用网络，请联网后重试。")
             case .secureConnectionFailed, .serverCertificateUntrusted:
-                return "HTTPS 证书无效。请检查 Tailscale Serve 或你自己的 HTTPS 配置。"
+                return remoteLocalized("HTTPS 证书无效。请检查 Tailscale Serve 或你自己的 HTTPS 配置。")
             default:
                 break
             }
@@ -771,9 +777,9 @@ struct TailscaleSetupGuideView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(step.title)
+                Text(remoteLocalized(step.title))
                     .font(.body.weight(.semibold))
-                Text(step.detail)
+                Text(remoteLocalized(step.detail))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
@@ -783,7 +789,7 @@ struct TailscaleSetupGuideView: View {
                     HStack(spacing: 8) {
                         ForEach(step.links) { link in
                             Link(destination: link.url) {
-                                Label(link.title, systemImage: "arrow.up.right")
+                                Label(remoteLocalized(link.title), systemImage: "arrow.up.right")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(RemoteTheme.accent)
                                     .padding(.horizontal, 10)
@@ -894,7 +900,7 @@ private struct RemoteScannerSheet: View {
 
             if let validationMessage {
                 VStack(spacing: 8) {
-                    Text(validationMessage)
+                    Text(remoteLocalized(validationMessage))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
@@ -937,7 +943,7 @@ private struct RemoteScannerSheet: View {
                 validationMessage = nil
                 onResult(value)
             } catch {
-                validationMessage = "这不是 DSH Desktop 配对码，请扫描 Desktop 显示的二维码。"
+                validationMessage = remoteLocalized("这不是 DSH Desktop 配对码，请扫描 Desktop 显示的二维码。")
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 UIAccessibility.post(
                     notification: .announcement,

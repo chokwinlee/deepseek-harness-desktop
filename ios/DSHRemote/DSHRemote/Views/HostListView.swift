@@ -33,7 +33,7 @@ struct HostListView: View {
         .sheet(item: $pendingRemoval) { host in
             RemoteDestructiveConfirmationSheet(
                 icon: "desktopcomputer",
-                title: "移除“\(host.name)”？",
+                title: remoteLocalizedFormat("移除“%@”？", host.name),
                 message: "这只会删除这台 iPhone 保存的连接信息，不会改动电脑上的项目、会话或任务。",
                 confirmTitle: "移除电脑"
             ) {
@@ -104,7 +104,10 @@ struct HostListView: View {
     private var savedHosts: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                RemoteSectionHeader(title: "电脑", detail: "\(hostStore.hosts.count) 台")
+                RemoteSectionHeader(
+                    title: "电脑",
+                    detail: remoteLocalizedCount(hostStore.hosts.count, unit: "computer")
+                )
                     .padding(.bottom, 2)
 
                 ForEach(hostStore.hosts) { host in
@@ -125,7 +128,7 @@ struct HostListView: View {
                                 .frame(width: 44, height: 52)
                                 .contentShape(Rectangle())
                         }
-                        .accessibilityLabel("管理 \(host.name)")
+                        .accessibilityLabel(remoteLocalizedFormat("管理 %@", host.name))
                     }
                     .padding(.horizontal, 4)
                     .remoteSurface(cornerRadius: 14)
@@ -265,9 +268,9 @@ private struct EmptyConnectionView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(remoteLocalized(title))
                     .font(.subheadline.weight(.semibold))
-                Text(detail)
+                Text(remoteLocalized(detail))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)

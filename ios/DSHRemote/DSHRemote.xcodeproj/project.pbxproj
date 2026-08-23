@@ -26,6 +26,8 @@
 		A10000000000000000000013 /* AboutRemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* AboutRemoteView.swift */; };
 		A10000000000000000000014 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000000000015 /* RemoteDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* RemoteDesignSystem.swift */; };
+		A10000000000000000000016 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* Localizable.strings */; };
+		A10000000000000000000017 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000008 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +52,10 @@
 		B10000000000000000000015 /* AboutRemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutRemoteView.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B10000000000000000000017 /* RemoteDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDesignSystem.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B10000000000000000000019 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		B1000000000000000000001A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		B1000000000000000000001B /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +87,8 @@
 				D10000000000000000000005 /* Views */,
 				B1000000000000000000000C /* Info.plist */,
 				B10000000000000000000016 /* PrivacyInfo.xcprivacy */,
+				D10000000000000000000007 /* Localizable.strings */,
+				D10000000000000000000008 /* InfoPlist.strings */,
 			);
 			path = DSHRemote;
 			sourceTree = "<group>";
@@ -132,6 +140,27 @@
 		};
 /* End PBXGroup section */
 
+/* Begin PBXVariantGroup section */
+		D10000000000000000000007 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				B10000000000000000000018 /* en */,
+				B10000000000000000000019 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000008 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				B1000000000000000000001A /* en */,
+				B1000000000000000000001B /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
 /* Begin PBXNativeTarget section */
 		E10000000000000000000001 /* DSHRemote */ = {
 			isa = PBXNativeTarget;
@@ -171,6 +200,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = D10000000000000000000001;
@@ -190,6 +220,8 @@
 			files = (
 				A1000000000000000000000E /* Assets.xcassets in Resources */,
 				A10000000000000000000014 /* PrivacyInfo.xcprivacy in Resources */,
+				A10000000000000000000016 /* Localizable.strings in Resources */,
+				A10000000000000000000017 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
