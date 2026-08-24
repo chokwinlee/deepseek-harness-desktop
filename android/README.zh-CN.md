@@ -15,9 +15,9 @@ DSH Remote 是 DSH Desktop 的原生 Android 控制端，直接连接用户自�
 
 ## 安装 GitHub 正式版
 
-1. 打开 [`v0.4.0` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0)。
+1. 打开 [`v0.4.1` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.1)。
 2. 在运行 Harness 的电脑上安装该 Release 中的 Desktop 安装包。旧版 Desktop 可能不包含当前 Android Remote 所需的协议。
-3. 在 Android 8.0 或更高版本的设备上，从同一页面下载 `DSH-Remote-Android-v0.4.0.apk`。
+3. 在 Android 8.0 或更高版本的设备上，从同一页面下载 `DSH-Remote-Android-v0.4.1.apk`。
 4. 如果 Android 提示，请为打开 APK 的浏览器或文件管理器允许“安装未知应用”。安装结束后可以重新关闭这个来源权限。
 5. 打开 DSH Remote。可以先选择“还没有电脑？先体验一下”进入离线 Demo，也可以按照下一节配对电脑。
 
@@ -28,21 +28,21 @@ Android 可能会对侧载 App 显示通用安全提醒。签名或校验值不�
 从同一个正式版页面下载 `SHA256SUMS.txt`。在 macOS 中，分别查看 APK 实际哈希与清单记录：
 
 ```sh
-shasum -a 256 DSH-Remote-Android-v0.4.0.apk
-grep 'DSH-Remote-Android-v0.4.0.apk$' SHA256SUMS.txt
+shasum -a 256 DSH-Remote-Android-v0.4.1.apk
+grep 'DSH-Remote-Android-v0.4.1.apk$' SHA256SUMS.txt
 ```
 
 Linux 把第一条命令换成：
 
 ```sh
-sha256sum DSH-Remote-Android-v0.4.0.apk
+sha256sum DSH-Remote-Android-v0.4.1.apk
 ```
 
 在 Windows PowerShell 中：
 
 ```powershell
-Get-FileHash .\DSH-Remote-Android-v0.4.0.apk -Algorithm SHA256
-Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0.apk$'
+Get-FileHash .\DSH-Remote-Android-v0.4.1.apk -Algorithm SHA256
+Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.1.apk$'
 ```
 
 两处 SHA-256 必须完全相同。APK 还使用项目永久证书签名，公开证书指纹记录在 [Android 发布签名说明](../docs/ANDROID_RELEASE_SIGNING.md#provisioned-project-identity)中。

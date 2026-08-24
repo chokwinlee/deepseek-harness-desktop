@@ -1037,7 +1037,7 @@ test('Android Remote keeps its build, security boundary, protocol, and locales i
 
 test('tagged releases require a signed installable Android APK', async () => {
   const normalizeLineEndings = (source: string) => source.replaceAll('\r\n', '\n')
-  const [workflow, ciWorkflow, dependabot, wrapper, build, readme, readmeChinese, signingGuide] = await Promise.all([
+  const [workflow, ciWorkflow, dependabot, wrapper, build, readme, readmeChinese, signingGuide, packageManifest] = await Promise.all([
     readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8').then(normalizeLineEndings),
     readFile(join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8').then(normalizeLineEndings),
     readFile(join(process.cwd(), '.github', 'dependabot.yml'), 'utf8').then(normalizeLineEndings),
@@ -1047,6 +1047,7 @@ test('tagged releases require a signed installable Android APK', async () => {
     readFile(join(process.cwd(), 'README.md'), 'utf8').then(normalizeLineEndings),
     readFile(join(process.cwd(), 'README.zh-CN.md'), 'utf8').then(normalizeLineEndings),
     readFile(join(process.cwd(), 'docs', 'ANDROID_RELEASE_SIGNING.md'), 'utf8').then(normalizeLineEndings),
+    readFile(join(process.cwd(), 'package.json'), 'utf8').then(JSON.parse) as Promise<{ version: string }>,
   ])
 
   assert.match(workflow, /name: Release desktop installers and Android companion/)
@@ -1120,7 +1121,8 @@ test('tagged releases require a signed installable Android APK', async () => {
   assert.match(dependabot, /package-ecosystem: gradle\n\s+directory: \/android/)
 
   for (const source of [readme, readmeChinese]) {
-    assert.match(source, /DSH-Remote-Android-v0\.4\.0\.apk/)
+    const escapedVersion = packageManifest.version.replaceAll('.', '\\.')
+    assert.match(source, new RegExp(`DSH-Remote-Android-v${escapedVersion}\\.apk`))
     assert.match(source, /https:\/\/testflight\.apple\.com\/join\/7Ew6Yk9V/)
     assert.doesNotMatch(source, /no public (?:TestFlight )?link|还没有公开链接/)
   }

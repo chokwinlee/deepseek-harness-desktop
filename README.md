@@ -35,7 +35,7 @@ DSH Desktop runs the official [DeepSeek Harness](https://github.com/deepseek-ai/
 - **Multimodal sessions** — paste or attach images and send them through the normal Harness conversation flow when the selected provider and model declare image input support. Image messages remain visible in session history.
 - **Usage at a glance on macOS** — see today and seven-day token totals, estimated cost, active task count, and aggregate running throughput without leaving the current session.
 - **Compact macOS package** — stays under 90 MB while bundling the complete Harness runtime, using Tauri and the system WKWebView instead of shipping Chromium.
-- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.4.0 · Harness rc.8`.
+- **Visible runtime alignment** — the sidebar identifies both the Desktop release and its bundled Harness version, such as `DSH Desktop v0.4.1 · Harness rc.8`.
 - **Ready to run** — includes everything needed to start Harness, with no separate Node.js installation or terminal command. The app starts and stops the local runtime automatically.
 - **Native mobile Remote** — the SwiftUI iPhone client and Kotlin/Compose Android client pair on trusted Wi-Fi or the user's own Tailscale network, then browse projects, create sessions, steer tasks, handle approvals, send images, and follow subagents without moving execution off the computer.
 
@@ -111,8 +111,8 @@ Android uses the same local-first Remote v1 contract, QR format, Desktop LAN pro
 
 To install it:
 
-1. Open the [`v0.4.0` release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0) and install its Desktop package on the computer.
-2. Download `DSH-Remote-Android-v0.4.0.apk` on an Android 8.0+ device. If asked, temporarily allow **Install unknown apps** for the browser or file manager that opened it.
+1. Open the [`v0.4.1` release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.1) and install its Desktop package on the computer.
+2. Download `DSH-Remote-Android-v0.4.1.apk` on an Android 8.0+ device. If asked, temporarily allow **Install unknown apps** for the browser or file manager that opened it.
 3. Compare the APK's SHA-256 with its entry in `SHA256SUMS.txt` from the same release.
 4. Open the offline Demo, or in Desktop choose **Settings → General → Mobile Remote → Connect phone** and scan its QR code.
 
@@ -126,11 +126,11 @@ Download Desktop installers and the Android APK from the [latest stable GitHub R
 
 | Current stable release | Architecture | File |
 | --- | --- | --- |
-| macOS | Apple Silicon | `DSH-Desktop-0.4.0-mac-arm64.dmg` |
-| macOS | Intel | `DSH-Desktop-0.4.0-mac-x64.dmg` |
-| Windows 10/11 | x64 installer | `DSH-Desktop-0.4.0-win-x64.exe` |
-| Windows 10/11 | x64 portable | `DSH-Desktop-0.4.0-win-x64.zip` |
-| Android 8.0+ | universal APK | `DSH-Remote-Android-v0.4.0.apk` |
+| macOS | Apple Silicon | `DSH-Desktop-0.4.1-mac-arm64.dmg` |
+| macOS | Intel | `DSH-Desktop-0.4.1-mac-x64.dmg` |
+| Windows 10/11 | x64 installer | `DSH-Desktop-0.4.1-win-x64.exe` |
+| Windows 10/11 | x64 portable | `DSH-Desktop-0.4.1-win-x64.zip` |
+| Android 8.0+ | universal APK | `DSH-Remote-Android-v0.4.1.apk` |
 | iPhone, iOS 17+ | public beta | [TestFlight invitation](https://testflight.apple.com/join/7Ew6Yk9V) |
 
 The release also includes macOS ZIP archives and `SHA256SUMS.txt` for integrity verification. GitHub does not publish a generic iOS IPA.

@@ -35,7 +35,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 - **多模态会话**　所选服务商与模型声明支持图片输入后，可以直接粘贴或附加图片，并沿用 Harness 的标准会话流程。图片消息会保留在会话历史中。
 - **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
 - **轻巧的 macOS 安装包**　低于 90 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
-- **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.4.0 · Harness rc.8`。
+- **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.4.1 · Harness rc.8`。
 - **开箱即用**　启动 Harness 所需的内容已经完整内置，无需另装 Node.js，也不用执行终端命令。应用会自动启动和关闭本地运行时。
 - **原生手机 Remote**　SwiftUI iPhone 客户端与 Kotlin/Compose Android 客户端可在受信任的同一 Wi-Fi 或用户自己的 Tailscale 网络中配对，随后浏览项目、新建会话、引导任务、处理审批、发送图片并跟进子代理；执行始终留在电脑上。
 
@@ -111,8 +111,8 @@ Android 与 iOS 复用相同的本地优先 Remote v1 协议、二维码格式�
 
 安装步骤：
 
-1. 打开 [`v0.4.0` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0)，在电脑安装该页面提供的 Desktop 包。
-2. 在 Android 8.0 或更高版本的设备下载 `DSH-Remote-Android-v0.4.0.apk`。系统询问时，可以临时为打开文件的浏览器或文件管理器允许“安装未知应用”。
+1. 打开 [`v0.4.1` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.1)，在电脑安装该页面提供的 Desktop 包。
+2. 在 Android 8.0 或更高版本的设备下载 `DSH-Remote-Android-v0.4.1.apk`。系统询问时，可以临时为打开文件的浏览器或文件管理器允许“安装未知应用”。
 3. 把 APK 的 SHA-256 与同一 Release 中 `SHA256SUMS.txt` 的对应记录进行比较。
 4. 先体验离线 Demo，或在 Desktop 选择 **设置 → 通用 → 手机 Remote → 连接手机** 并扫描二维码。
 
@@ -126,11 +126,11 @@ Desktop 安装包和 Android APK 均位于[最新稳定 GitHub Release](https://
 
 | 当前稳定版 | 架构 | 文件 |
 | --- | --- | --- |
-| macOS | Apple Silicon | `DSH-Desktop-0.4.0-mac-arm64.dmg` |
-| macOS | Intel | `DSH-Desktop-0.4.0-mac-x64.dmg` |
-| Windows 10/11 | x64 安装版 | `DSH-Desktop-0.4.0-win-x64.exe` |
-| Windows 10/11 | x64 便携版 | `DSH-Desktop-0.4.0-win-x64.zip` |
-| Android 8.0+ | 通用 APK | `DSH-Remote-Android-v0.4.0.apk` |
+| macOS | Apple Silicon | `DSH-Desktop-0.4.1-mac-arm64.dmg` |
+| macOS | Intel | `DSH-Desktop-0.4.1-mac-x64.dmg` |
+| Windows 10/11 | x64 安装版 | `DSH-Desktop-0.4.1-win-x64.exe` |
+| Windows 10/11 | x64 便携版 | `DSH-Desktop-0.4.1-win-x64.zip` |
+| Android 8.0+ | 通用 APK | `DSH-Remote-Android-v0.4.1.apk` |
 | iPhone，iOS 17+ | 公开内测 | [TestFlight 邀请链接](https://testflight.apple.com/join/7Ew6Yk9V) |
 
 正式版还提供 macOS ZIP 与用于完整性校验的 `SHA256SUMS.txt`。GitHub 不提供通用 iOS IPA。

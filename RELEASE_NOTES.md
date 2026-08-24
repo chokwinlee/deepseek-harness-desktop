@@ -1,19 +1,17 @@
-# DSH Desktop v0.4.0
+# DSH Desktop v0.4.1
 
 <!-- dsh-summary:zh -->
 ## 中文
 
-- 正式提供永久证书签名的 DSH Remote Android APK，可从 GitHub Release 直接安装和覆盖升级。
-- iPhone Remote 已通过 Beta App Review，并开放[公开 TestFlight 内测](https://testflight.apple.com/join/7Ew6Yk9V)。
-- 手机端支持项目与会话、流式回复、图片、审批、结构化问题、任务队列、模型切换、轨迹和多层子代理。
-- Desktop 提供 Remote 配对、连接状态、凭证轮换与 Tailscale 引导；代码、凭证、Shell 和模型调用仍保留在用户电脑上。
+- 修复 Desktop 更新通知在侧边栏重绘期间误挂到 macOS 标题栏的问题。
+- 更新入口现在只会出现在侧边栏“设置”上方；侧边栏暂不可用时会隐藏等待，不再遮挡用量统计或窗口控件。
+- 重新提供配套的 Desktop 安装包与永久证书签名 Android APK，手机端功能保持不变。
 <!-- /dsh-summary:zh -->
 
 <!-- dsh-summary:en -->
 ## English
 
-- Publish the permanently signed DSH Remote Android APK as a stable GitHub asset that can update the prior beta in place.
-- Open the approved [iPhone Remote public TestFlight beta](https://testflight.apple.com/join/7Ew6Yk9V).
-- Support projects, sessions, streamed responses, images, approvals, structured questions, queues, model switching, trajectory, and nested subagents on mobile.
-- Keep Remote pairing, connection state, credential rotation, and Tailscale guidance in Desktop while code, credentials, Shell access, and model calls remain on the user's computer.
+- Fix the Desktop update notice mounting in the macOS title bar while the sidebar rerenders.
+- Keep the update entry above Sidebar Settings; when that surface is temporarily unavailable, the entry waits hidden instead of covering usage or window controls.
+- Provide matching Desktop installers and a permanently signed Android APK; mobile behavior is unchanged.
 <!-- /dsh-summary:en -->

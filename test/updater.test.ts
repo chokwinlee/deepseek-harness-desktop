@@ -6,7 +6,9 @@ import { runInNewContext } from 'node:vm'
 
 interface UpdaterTestApi {
   copyFor(locale: string): Record<string, string>
+  findSettingsTriggerFrom(candidates: unknown[], excluded?: unknown): unknown | null
   harnessVersionLabel(raw: string): string
+  isSettingsTriggerCandidate(candidate: unknown): boolean
   isNewer(latest: string, current: string): boolean
   localizedReleaseSummary(body: string, locale: string, fallback?: string): string
   markedReleaseSummary(body: string, locale: string): string
@@ -17,6 +19,27 @@ interface UpdaterTestApi {
   statusForRelease(tag: string, current: string, ignored: string | null): string
   summarize(body: string, fallback?: string): string
   versionLabel(raw: string): string
+}
+
+interface FakeDialogButtonOptions {
+  titlebar?: boolean
+  settingsArea?: boolean
+}
+
+function fakeDialogButton({ titlebar = false, settingsArea = false }: FakeDialogButtonOptions = {}) {
+  return {
+    getAttribute(name: string) {
+      return name === 'aria-haspopup' ? 'dialog' : null
+    },
+    hasAttribute(name: string) {
+      return name === 'aria-expanded'
+    },
+    closest(selector: string) {
+      if (selector.includes('.dsh-usage-meter') && titlebar) return { className: 'dsh-usage-meter' }
+      if (selector.includes('_settingsArea') && settingsArea) return { className: 'hash_settingsArea' }
+      return null
+    },
+  }
 }
 
 interface UpdaterSandbox {
@@ -63,6 +86,25 @@ test('shows the desktop control only for an available update', async () => {
   assert.equal(api.shouldShowForStatus('current'), false)
   assert.equal(api.shouldShowForStatus('error'), false)
   assert.equal(api.shouldShowForStatus('ignored'), false)
+})
+
+test('never treats title-bar dialogs as the sidebar Settings trigger', async () => {
+  const { api } = await loadUpdater()
+  const usageSummary = fakeDialogButton({ titlebar: true })
+  const sidebarSettings = fakeDialogButton({ settingsArea: true })
+
+  assert.equal(api.isSettingsTriggerCandidate(usageSummary), false)
+  assert.equal(api.findSettingsTriggerFrom([usageSummary]), null)
+  assert.equal(api.findSettingsTriggerFrom([usageSummary, sidebarSettings]), sidebarSettings)
+  assert.equal(api.findSettingsTriggerFrom([sidebarSettings], sidebarSettings), null)
+})
+
+test('hides the updater instead of mounting beside an unrelated dialog control', async () => {
+  const { api } = await loadUpdater()
+  const unrelatedDialog = fakeDialogButton()
+
+  assert.equal(api.isSettingsTriggerCandidate(unrelatedDialog), false)
+  assert.equal(api.findSettingsTriggerFrom([unrelatedDialog]), null)
 })
 
 test('labels the bundled Harness release separately from the Desktop version', async () => {
@@ -134,6 +176,8 @@ test('keeps the updater inside the sidebar design and accessibility contract', a
   assert.match(source, /prefers-reduced-motion: reduce/)
   assert.match(source, /:host\(\[data-layout="rail"\]\)/)
   assert.match(source, /function positionRailHost\(\)/)
+  assert.match(source, /TITLEBAR_SURFACE_SELECTOR/)
+  assert.match(source, /SIDEBAR_SETTINGS_SURFACE_SELECTOR/)
   assert.doesNotMatch(source, /z-index:\s*2147483000/)
   assert.doesNotMatch(source, /position:\s*fixed;[\s\S]{0,80}left:\s*14px;[\s\S]{0,80}bottom:\s*14px;/)
 })

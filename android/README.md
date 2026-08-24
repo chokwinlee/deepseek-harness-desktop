@@ -20,12 +20,12 @@ push service, or model gateway.
 
 ## Install the GitHub release
 
-1. Open the [`v0.4.0` release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0).
+1. Open the [`v0.4.1` release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.1).
 2. Install the Desktop package from that release on the computer that will run
    Harness. An older Desktop build may not provide the Android Remote contract
    expected by this release.
 3. On an Android 8.0 or later device, download
-   `DSH-Remote-Android-v0.4.0.apk` from the same release.
+   `DSH-Remote-Android-v0.4.1.apk` from the same release.
 4. If Android asks, allow **Install unknown apps** for the browser or file
    manager that opened this APK. You can turn that source permission off again
    after installation.
@@ -41,21 +41,21 @@ Download `SHA256SUMS.txt` from the same release. On macOS, compare the APK's
 computed hash with its line in that file:
 
 ```sh
-shasum -a 256 DSH-Remote-Android-v0.4.0.apk
-grep 'DSH-Remote-Android-v0.4.0.apk$' SHA256SUMS.txt
+shasum -a 256 DSH-Remote-Android-v0.4.1.apk
+grep 'DSH-Remote-Android-v0.4.1.apk$' SHA256SUMS.txt
 ```
 
 On Linux, replace the first command with:
 
 ```sh
-sha256sum DSH-Remote-Android-v0.4.0.apk
+sha256sum DSH-Remote-Android-v0.4.1.apk
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\DSH-Remote-Android-v0.4.0.apk -Algorithm SHA256
-Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0.apk$'
+Get-FileHash .\DSH-Remote-Android-v0.4.1.apk -Algorithm SHA256
+Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.1.apk$'
 ```
 
 The two SHA-256 values must match exactly. The APK is also signed with the

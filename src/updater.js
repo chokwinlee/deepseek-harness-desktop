@@ -18,6 +18,8 @@
   const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
   const MAX_NOTES_CHARS = 320
   const MAX_SUMMARY_ITEMS = 3
+  const TITLEBAR_SURFACE_SELECTOR = '.dsh-usage-meter, [data-tauri-drag-region], [data-dsh-native-titlebar]'
+  const SIDEBAR_SETTINGS_SURFACE_SELECTOR = '[data-slot="sidebar.settings"], [data-dsh-sidebar-settings], [class*="_settingsArea"]'
 
   const COPY = Object.freeze({
     zh: Object.freeze({
@@ -108,6 +110,25 @@
     return status === 'update'
   }
 
+  function isSettingsTriggerCandidate(candidate) {
+    if (!candidate || typeof candidate.getAttribute !== 'function' || typeof candidate.closest !== 'function') {
+      return false
+    }
+    if (candidate.getAttribute('aria-haspopup') !== 'dialog' || !candidate.hasAttribute('aria-expanded')) {
+      return false
+    }
+    if (candidate.closest(TITLEBAR_SURFACE_SELECTOR)) return false
+    return Boolean(candidate.closest(SIDEBAR_SETTINGS_SURFACE_SELECTOR))
+  }
+
+  function findSettingsTriggerFrom(candidates, excluded = null) {
+    for (const candidate of candidates || []) {
+      if (candidate === excluded) continue
+      if (isSettingsTriggerCandidate(candidate)) return candidate
+    }
+    return null
+  }
+
   function summarize(body, fallback = '') {
     if (!body) return fallback
     let text = String(body)
@@ -192,6 +213,8 @@
       parseVersion,
       resolveLocaleFromHints,
       runtimeSummary,
+      findSettingsTriggerFrom,
+      isSettingsTriggerCandidate,
       shouldShowForStatus,
       statusForRelease,
       summarize,
@@ -484,11 +507,7 @@
 
   function findSettingsTrigger() {
     const candidates = document.querySelectorAll('button[aria-haspopup="dialog"]')
-    for (const candidate of candidates) {
-      if (candidate === triggerEl) continue
-      if (candidate.hasAttribute('aria-expanded')) return candidate
-    }
-    return null
+    return findSettingsTriggerFrom(candidates, triggerEl)
   }
 
   function inferLocale() {
