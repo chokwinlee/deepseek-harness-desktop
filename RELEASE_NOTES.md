@@ -1,19 +1,19 @@
-# DSH Desktop v0.4.0-beta.1
+# DSH Desktop v0.4.0
 
 <!-- dsh-summary:zh -->
 ## 中文
 
-- 首次提供 DSH Remote Android 内测 APK，可通过 Desktop 二维码连接同一局域网或 Tailscale 网络中的电脑。
-- Android 端支持项目与会话浏览、流式回复、图片输入、审批与结构化问题、任务队列、模型切换和断线恢复。
-- Desktop 增加内置 Remote 配对、连接状态、凭证轮换与 Tailscale 使用引导；代码、凭证和模型调用仍保留在用户电脑上。
-- 这是面向 GitHub 用户的预发布内测版本；使用前请先在 Desktop 打开 Remote，并优先在受信任的私有 Wi-Fi 下完成首次配对。
+- 正式提供永久证书签名的 DSH Remote Android APK，可从 GitHub Release 直接安装和覆盖升级。
+- iPhone Remote 已通过 Beta App Review，并开放最多 10,000 人加入的[公开 TestFlight 内测](https://testflight.apple.com/join/7Ew6Yk9V)。
+- 手机端支持项目与会话、流式回复、图片、审批、结构化问题、任务队列、模型切换、轨迹和多层子代理。
+- Desktop 提供 Remote 配对、连接状态、凭证轮换与 Tailscale 引导；代码、凭证、Shell 和模型调用仍保留在用户电脑上。
 <!-- /dsh-summary:zh -->
 
 <!-- dsh-summary:en -->
 ## English
 
-- Ship the first DSH Remote Android beta APK for pairing with Desktop over the same LAN or a user-owned Tailscale network.
-- Support project and session browsing, streamed responses, image input, approvals, structured questions, queues, model switching, and reconnection on Android.
-- Add built-in Remote pairing, connection status, credential rotation, and Tailscale guidance to Desktop while keeping code, credentials, and model calls on the user's computer.
-- This is a GitHub prerelease for beta testing. Enable Remote in Desktop and complete the first pairing on trusted private Wi-Fi whenever possible.
+- Publish the permanently signed DSH Remote Android APK as a stable GitHub asset that can update the prior beta in place.
+- Open the approved [iPhone Remote public TestFlight beta](https://testflight.apple.com/join/7Ew6Yk9V) to as many as 10,000 testers.
+- Support projects, sessions, streamed responses, images, approvals, structured questions, queues, model switching, trajectory, and nested subagents on mobile.
+- Keep Remote pairing, connection state, credential rotation, and Tailscale guidance in Desktop while code, credentials, Shell access, and model calls remain on the user's computer.
 <!-- /dsh-summary:en -->

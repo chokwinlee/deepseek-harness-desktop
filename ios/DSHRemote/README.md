@@ -2,8 +2,8 @@
 
 DSH Remote is the native SwiftUI companion for DSH Desktop. It connects directly to a Harness computer owned or managed by the user; the project does not operate a relay, account system, analytics service, or model gateway for the iOS app.
 
-> [!NOTE]
-> This is currently an **iOS source preview**. There is no App Store or public TestFlight build yet. Do not expect an IPA from GitHub Releases to install on an arbitrary iPhone.
+> [!IMPORTANT]
+> The external beta has passed Beta App Review. Join the public TestFlight beta at <https://testflight.apple.com/join/7Ew6Yk9V>. The app is not yet published on the App Store, and GitHub Releases do not provide a generic installable IPA.
 
 ## What it can do
 
@@ -20,7 +20,23 @@ Code, repositories, Shell access, model calls, API keys, and task history remain
 
 The app follows the language selected for DSH Remote in iOS Settings. English and Simplified Chinese cover the complete product surface, including setup, errors, notifications, approvals, model routing, Activity, images, references, and nested subagents. Project names, file paths, user prompts, and computer-provided model output are preserved as content rather than translated by the app.
 
-## Install the source preview
+## Install with TestFlight
+
+Requirements:
+
+- an iPhone running iOS 17 or later;
+- Apple's [TestFlight app](https://apps.apple.com/app/testflight/id899247664);
+- a running DSH Desktop release.
+
+Steps:
+
+1. Open the [DSH Remote public invitation](https://testflight.apple.com/join/7Ew6Yk9V).
+2. Choose **View in TestFlight**, accept the invitation, and install the beta.
+3. Open DSH Remote and pair it with the current DSH Desktop release.
+
+The public group accepts up to 10,000 testers. Each uploaded build remains available for up to 90 days.
+
+## Build from source with Xcode
 
 Requirements:
 
@@ -38,7 +54,7 @@ Steps:
 5. Connect your iPhone, choose it as the run destination, and select **Product → Run**.
 6. Follow any Developer Mode or device-trust prompt shown by iOS or Xcode.
 
-A free Xcode Personal Team supports personal on-device testing, but the app must be re-provisioned periodically. Public installation will move to TestFlight after the first external beta build is approved.
+A free Xcode Personal Team supports personal on-device testing, but the app must be re-provisioned periodically. TestFlight is the supported installation path for testers who do not build from source.
 
 ## Pair on the same Wi-Fi
 
@@ -60,7 +76,7 @@ Chinese step-by-step guide: [`../../docs/TAILSCALE_REMOTE_SETUP.zh-CN.md`](../..
 | Channel | Status |
 | --- | --- |
 | Xcode source build | Available now |
-| Public TestFlight | Planned; link not available yet |
+| Public TestFlight | [Available now](https://testflight.apple.com/join/7Ew6Yk9V), up to 10,000 testers |
 | App Store | Not submitted yet |
 
 ## Privacy and support

@@ -5,7 +5,7 @@
 DSH Remote 是 DSH Desktop 的原生 Android 控制端，直接连接用户自己拥有或管理的 Harness 电脑。项目方不运营自己的 relay、账号、分析、广告、推送或模型网关。
 
 > [!IMPORTANT]
-> `v0.4.0-beta.1` 是用于测试的 **GitHub 预发布版**，不是 Google Play 版本。请只安装本仓库提供的 APK。App 要求 Android 8.0 或更高版本，并需要同一 Release 中配套的最新版 DSH Desktop。
+> `v0.4.0` 是首个包含签名 Android APK 的 **GitHub 正式版**，当前尚未通过 Google Play 分发。请只安装本仓库提供的 APK。App 要求 Android 8.0 或更高版本，并需要配套的 DSH Desktop。
 
 <p align="center">
   <img src="../docs/images/android-remote-home-zh.png" width="42%" alt="DSH Remote Android 中文配对与引导界面">
@@ -13,11 +13,11 @@ DSH Remote 是 DSH Desktop 的原生 Android 控制端，直接连接用户自�
 </p>
 <p align="center"><sub>配对与离线 Demo · 对话、队列和审批</sub></p>
 
-## 安装 GitHub 内测版
+## 安装 GitHub 正式版
 
-1. 打开 [`v0.4.0-beta.1` 预发布页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1)。
-2. 在运行 Harness 的电脑上安装该 Release 中的 Desktop 安装包。旧版 Desktop 可能不包含本次 Android 内测所需的 Remote 协议。
-3. 在 Android 8.0 或更高版本的设备上，从同一页面下载 `DSH-Remote-Android-v0.4.0-beta.1.apk`。
+1. 打开 [`v0.4.0` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0)。
+2. 在运行 Harness 的电脑上安装该 Release 中的 Desktop 安装包。旧版 Desktop 可能不包含当前 Android Remote 所需的协议。
+3. 在 Android 8.0 或更高版本的设备上，从同一页面下载 `DSH-Remote-Android-v0.4.0.apk`。
 4. 如果 Android 提示，请为打开 APK 的浏览器或文件管理器允许“安装未知应用”。安装结束后可以重新关闭这个来源权限。
 5. 打开 DSH Remote。可以先选择“还没有电脑？先体验一下”进入离线 Demo，也可以按照下一节配对电脑。
 
@@ -25,24 +25,24 @@ Android 可能会对侧载 App 显示通用安全提醒。签名或校验值不�
 
 ### 校验下载文件
 
-从同一个预发布页面下载 `SHA256SUMS.txt`。在 macOS 中，分别查看 APK 实际哈希与清单记录：
+从同一个正式版页面下载 `SHA256SUMS.txt`。在 macOS 中，分别查看 APK 实际哈希与清单记录：
 
 ```sh
-shasum -a 256 DSH-Remote-Android-v0.4.0-beta.1.apk
-grep 'DSH-Remote-Android-v0.4.0-beta.1.apk$' SHA256SUMS.txt
+shasum -a 256 DSH-Remote-Android-v0.4.0.apk
+grep 'DSH-Remote-Android-v0.4.0.apk$' SHA256SUMS.txt
 ```
 
 Linux 把第一条命令换成：
 
 ```sh
-sha256sum DSH-Remote-Android-v0.4.0-beta.1.apk
+sha256sum DSH-Remote-Android-v0.4.0.apk
 ```
 
 在 Windows PowerShell 中：
 
 ```powershell
-Get-FileHash .\DSH-Remote-Android-v0.4.0-beta.1.apk -Algorithm SHA256
-Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0-beta.1.apk$'
+Get-FileHash .\DSH-Remote-Android-v0.4.0.apk -Algorithm SHA256
+Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0.apk$'
 ```
 
 两处 SHA-256 必须完全相同。APK 还使用项目永久证书签名，公开证书指纹记录在 [Android 发布签名说明](../docs/ANDROID_RELEASE_SIGNING.md#provisioned-project-identity)中。
@@ -96,19 +96,19 @@ Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0-beta.1.
 
 代码、仓库、模型凭证、模型调用、Shell 与 Agent 执行始终留在电脑上。
 
-## 升级 GitHub 内测版
+## 升级 GitHub 正式版
 
 只从本仓库下载更高版本 APK，校验 SHA-256 后直接打开并选择“更新”。GitHub APK 使用相同 application ID 和永久签名身份，因此新版可以覆盖升级现有安装，并保留已经保存的电脑。希望保留本地配对数据时不要先卸载。Android 会拒绝安装更低版本或其他签名身份的 APK。
 
-## 已知内测边界
+## 已知边界
 
 - Android 真机覆盖仍有限，相机配对、局域网直连、蜂窝网络下的 Tailscale、通知、图片输入、Android 17 本地网络权限、16 KB page size 设备与厂商后台限制仍需更多测试者验证。
 - 电脑必须保持开机，并持续运行 DSH Desktop 与 Harness。
 - 通知只是本地尽力提醒，不是远程推送。Android Doze、进程被杀或厂商后台限制都可能中断提醒。
 - 带认证的同一 Wi-Fi 传输没有加密；任何不能完全信任的网络都应改用 Tailscale HTTPS。
-- 当前尚未通过 Google Play 分发。Play 专属配置与审核工作不影响本次 GitHub 内测版的安装。
+- 当前尚未通过 Google Play 分发。Play 专属配置与审核工作不影响签名 GitHub 正式版的安装。
 
-## 提交内测反馈
+## 提交反馈
 
 请创建 [GitHub Issue](https://github.com/chokwinlee/deepseek-harness-desktop/issues)，并提供：
 

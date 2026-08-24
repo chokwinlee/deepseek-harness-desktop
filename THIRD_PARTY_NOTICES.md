@@ -18,7 +18,7 @@ The packaged application also contains transitive dependencies of DeepSeek Harne
 
 ## Android Remote dependencies
 
-The Android source preview uses the following third-party components:
+The Android client uses the following third-party components:
 
 - AndroidX, Jetpack Compose, Material 3, Navigation, Lifecycle, CameraX,
   ExifInterface, and Android test libraries, licensed under the

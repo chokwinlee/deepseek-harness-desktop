@@ -13,7 +13,7 @@ body:
     attributes:
       label: DSH Desktop or Remote version
       description: Find this in the release filename, Desktop sidebar, or Remote About and privacy screen.
-      placeholder: 0.4.0-beta.1
+      placeholder: 0.4.0
     validations:
       required: true
   - type: dropdown
@@ -79,7 +79,7 @@ body:
     attributes:
       label: Submission checks
       options:
-        - label: I reproduced this with the latest applicable stable release or GitHub pre-release.
+        - label: I reproduced this with the latest applicable stable release or TestFlight beta.
           required: true
         - label: I removed all QR codes, credentials, tokens, private prompts, addresses, paths, and workspace data.
           required: true

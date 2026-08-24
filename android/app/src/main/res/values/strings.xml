@@ -479,7 +479,7 @@
     <!-- About, privacy, and built-in remote guide -->
     <string name="about_action">About and privacy</string>
     <string name="about_title">About DSH Remote</string>
-    <string name="about_subtitle">GitHub beta · %1$s</string>
+    <string name="about_subtitle">GitHub release · %1$s</string>
     <string name="about_local_first_title">Your computer remains the host</string>
     <string name="about_local_first_message">DSH Remote has no project-operated relay, account, analytics, advertising, push service, or model gateway. Code, credentials, session history, and execution stay on your computer.</string>
     <string name="about_tailscale_title">Use Tailscale away from Wi-Fi</string>

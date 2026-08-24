@@ -2,8 +2,8 @@
 
 这是 DSH Desktop 的独立开源 iPhone 控制端。它不连接本项目维护者提供的服务器，而是直接访问用户自己的电脑。iPhone 和 Mac 在同一个受信任 Wi-Fi 时，优先使用 Desktop 自带的认证局域网入口，不需要安装或登录 Tailscale；离开同一 Wi-Fi 后，再选择 Tailscale Tailnet 或自行管理的 HTTPS。
 
-> [!NOTE]
-> 当前属于 **iOS 源码预览**，还没有 App Store 或公开 TestFlight 构建。GitHub Release 暂不提供可供任意 iPhone 直接安装的 IPA。
+> [!IMPORTANT]
+> 外部构建已经通过 Beta App Review，可通过[公开 TestFlight 链接](https://testflight.apple.com/join/7Ew6Yk9V)安装。App 尚未正式上架 App Store，GitHub Release 也不提供通用可安装 IPA。
 
 ## 当前进度
 
@@ -41,7 +41,23 @@ App 会跟随 iOS 设置中为 DSH Remote 选择的语言。英文和简体中�
 - 跨网络时，推荐 iPhone 与电脑均安装 Tailscale 并登录同一个 Tailnet，或使用你自己管理的 HTTPS；
 - 在 Desktop 的“设置 → 通用 → 手机 Remote”中选择需要的连接方式。同一 Wi-Fi 配对不要求配置 Tailnet HTTPS。
 
-## TestFlight 开放前安装到真机
+## 通过 TestFlight 安装
+
+要求：
+
+- iOS 17 或更高版本的 iPhone；
+- Apple 的 [TestFlight App](https://apps.apple.com/app/testflight/id899247664)；
+- 正在运行的当前 DSH Desktop 正式版。
+
+步骤：
+
+1. 打开 [DSH Remote 公开邀请链接](https://testflight.apple.com/join/7Ew6Yk9V)。
+2. 选择“在 TestFlight 中查看”，接受邀请并安装内测版。
+3. 打开 DSH Remote，与当前 DSH Desktop 正式版完成配对。
+
+公开组最多接受 10,000 名测试者。每个上传构建最长可测试 90 天。
+
+## 使用 Xcode 从源码安装
 
 1. 在 **Xcode → Settings → Accounts** 登录 Apple Account。
 2. 用 Xcode 打开 `ios/DSHRemote/DSHRemote.xcodeproj`。
@@ -50,7 +66,7 @@ App 会跟随 iOS 设置中为 DSH Remote 选择的语言。英文和简体中�
 5. 连接 iPhone，选择它作为运行设备，然后执行 **Product → Run**。
 6. 按 Xcode 或 iOS 提示完成 Developer Mode 与设备信任。
 
-免费 Xcode Personal Team 可用于个人真机测试，但需要定期重新签名。面向普通用户的安装方式会在首个外部测试构建通过后改为 TestFlight 公开链接。
+免费 Xcode Personal Team 可用于个人真机测试，但需要定期重新签名。不从源码构建的测试者应使用 TestFlight 安装。
 
 在 Xcode 中打开 `DSHRemote.xcodeproj`，选择开发团队和 iPhone 后运行。首次本地配对时，在 Desktop 打开“设置 → 通用 → 手机 Remote → 连接 iPhone → 开始本地配对”，再在 iOS App 扫描二维码。扫码后 App 会立即验证电脑并保存连接，不需要再点一次确认；验证失败时会返回添加页显示原因，可重新扫码或重试。局域网 HTTP 地址不能手输，必须扫码导入访问凭据。
 

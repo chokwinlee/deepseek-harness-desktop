@@ -5,9 +5,9 @@ same persistent project key on every release. The release workflow deliberately
 fails before publication when that key is unavailable; it never substitutes a
 temporary debug key or uploads an unsigned APK.
 
-`v0.4.0-beta.1` is the first Android GitHub testing pre-release. It publishes an
-APK for sideloading, not a Google Play installation. The matching Desktop beta,
-APK, and checksum file are all distributed from the same tagged release.
+`v0.4.0` is the first stable GitHub release with an Android APK. The earlier
+`v0.4.0-beta.1` remains available as a historical pre-release. Both builds use
+the same permanent identity, so the stable APK can update the beta in place.
 
 ## Decide the long-term key boundary first
 
@@ -66,7 +66,8 @@ keytool -list -v -keystore DSH-Remote-Android-release.jks
 
 ## GitHub Actions secrets
 
-The tag release job requires all four repository Actions secrets:
+The tag release job requires all four secrets in the protected
+`android-release` GitHub Environment:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
@@ -76,38 +77,36 @@ The tag release job requires all four repository Actions secrets:
 Upload the keystore without writing its base64 value to a repository file:
 
 ```sh
-base64 < DSH-Remote-Android-release.jks | gh secret set ANDROID_KEYSTORE_BASE64
-gh secret set ANDROID_KEYSTORE_PASSWORD
-gh secret set ANDROID_KEY_ALIAS
-gh secret set ANDROID_KEY_PASSWORD
+base64 < DSH-Remote-Android-release.jks | gh secret set --env android-release ANDROID_KEYSTORE_BASE64
+gh secret set --env android-release ANDROID_KEYSTORE_PASSWORD
+gh secret set --env android-release ANDROID_KEY_ALIAS
+gh secret set --env android-release ANDROID_KEY_PASSWORD
 ```
 
 The last three commands read their values from the terminal prompt.
 
 ## Release behavior
 
-For the `v0.4.0-beta.1` tag, the workflow:
+For the `v0.4.0` tag, the workflow:
 
 1. verifies the tag matches `package.json`;
-2. sets Android `versionName` to `0.4.0-beta.1` and assigns a monotonic
-   `versionCode` that is newer than prior public APKs;
+2. sets Android `versionName` to `0.4.0` and assigns final `versionCode`
+   `4009000`, newer than `v0.4.0-beta.1` (`4003001`);
 3. runs Android unit tests, AndroidTest compilation, lint, screenshot validation,
    Release APK assembly, and Release AAB assembly;
 4. verifies the APK signature and embedded version with Android build tools;
 5. verifies the AAB JAR signature and confirms that its certificate matches the
    APK certificate;
-6. creates a GitHub **Pre-release** and publishes
-   `DSH-Remote-Android-v0.4.0-beta.1.apk` as a user-downloadable asset;
-7. retains `DSH-Remote-Android-v0.4.0-beta.1.aab` as a separate Actions artifact for
+6. creates a stable GitHub Release and publishes
+   `DSH-Remote-Android-v0.4.0.apk` as a user-downloadable asset;
+7. retains `DSH-Remote-Android-v0.4.0.aab` as a separate Actions artifact for
    future Play Console submission.
 
 `SHA256SUMS.txt` is generated after the Android APK and desktop installers are
 downloaded into the publish job, so the APK is covered by the same release digest
 file as the macOS and Windows artifacts.
 
-Users must reach this build through
-`/releases/tag/v0.4.0-beta.1` or the Releases list. GitHub's `/releases/latest`
-route excludes pre-releases and will continue to resolve to the latest stable
-Desktop release. Consumer installation, checksum, update, and beta-feedback
-instructions are maintained in [`android/README.md`](../android/README.md) and
+Users can reach this build through `/releases/latest`,
+`/releases/tag/v0.4.0`, or the Releases list. Consumer installation, checksum,
+update, and feedback instructions are maintained in [`android/README.md`](../android/README.md) and
 [`android/README.zh-CN.md`](../android/README.zh-CN.md).

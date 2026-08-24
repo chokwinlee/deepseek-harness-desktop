@@ -8,9 +8,9 @@ not operate its own relay, account service, analytics service, advertising SDK,
 push service, or model gateway.
 
 > [!IMPORTANT]
-> `v0.4.0-beta.1` is a **GitHub pre-release for testing**, not a Google Play
-> release. Install only the APK from this repository. It requires Android 8.0
-> or later and the matching latest DSH Desktop build from the same release.
+> `v0.4.0` is the first stable **GitHub release** with a signed Android APK; it
+> is not yet a Google Play release. Install only the APK from this repository.
+> It requires Android 8.0 or later and the matching DSH Desktop build.
 
 <p align="center">
   <img src="../docs/images/android-remote-home-en.png" width="42%" alt="DSH Remote Android onboarding">
@@ -18,14 +18,14 @@ push service, or model gateway.
 </p>
 <p align="center"><sub>Pairing and offline Demo · Conversation, queue, and approvals</sub></p>
 
-## Install the GitHub beta
+## Install the GitHub release
 
-1. Open the [`v0.4.0-beta.1` pre-release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1).
+1. Open the [`v0.4.0` release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0).
 2. Install the Desktop package from that release on the computer that will run
    Harness. An older Desktop build may not provide the Android Remote contract
-   expected by this beta.
+   expected by this release.
 3. On an Android 8.0 or later device, download
-   `DSH-Remote-Android-v0.4.0-beta.1.apk` from the same release.
+   `DSH-Remote-Android-v0.4.0.apk` from the same release.
 4. If Android asks, allow **Install unknown apps** for the browser or file
    manager that opened this APK. You can turn that source permission off again
    after installation.
@@ -37,25 +37,25 @@ or checksum mismatch, and do not install an APK copied from another website.
 
 ### Verify the download
 
-Download `SHA256SUMS.txt` from the same pre-release. On macOS, compare the APK's
+Download `SHA256SUMS.txt` from the same release. On macOS, compare the APK's
 computed hash with its line in that file:
 
 ```sh
-shasum -a 256 DSH-Remote-Android-v0.4.0-beta.1.apk
-grep 'DSH-Remote-Android-v0.4.0-beta.1.apk$' SHA256SUMS.txt
+shasum -a 256 DSH-Remote-Android-v0.4.0.apk
+grep 'DSH-Remote-Android-v0.4.0.apk$' SHA256SUMS.txt
 ```
 
 On Linux, replace the first command with:
 
 ```sh
-sha256sum DSH-Remote-Android-v0.4.0-beta.1.apk
+sha256sum DSH-Remote-Android-v0.4.0.apk
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\DSH-Remote-Android-v0.4.0-beta.1.apk -Algorithm SHA256
-Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0-beta.1.apk$'
+Get-FileHash .\DSH-Remote-Android-v0.4.0.apk -Algorithm SHA256
+Select-String -Path .\SHA256SUMS.txt -Pattern 'DSH-Remote-Android-v0.4.0.apk$'
 ```
 
 The two SHA-256 values must match exactly. The APK is also signed with the
@@ -143,7 +143,7 @@ Remote.
 Code, repositories, model credentials, model calls, Shell access, and Agent
 execution remain on the computer.
 
-## Upgrade a GitHub beta
+## Upgrade a GitHub release
 
 Download a newer APK only from this repository, verify its SHA-256 value, then
 open it and choose **Update**. GitHub APKs use the same application ID and
@@ -152,7 +152,7 @@ without deleting saved computers. Do not uninstall first if you want to retain
 that local pairing data. Android will reject an older version or an APK signed
 by another identity.
 
-## Known beta limits
+## Known limits
 
 - Android physical-device coverage is still limited. Camera pairing, direct
   LAN behavior, Tailscale across cellular networks, notifications, photo input,
@@ -164,9 +164,9 @@ by another identity.
 - The authenticated same-Wi-Fi transport is not encrypted. Use Tailscale HTTPS
   on any network you do not fully trust.
 - Google Play distribution is not available yet. Play-specific setup and review
-  work do not affect installation of this GitHub beta.
+  work do not affect installation of the signed GitHub release.
 
-## Report beta feedback
+## Report feedback
 
 Open a [GitHub issue](https://github.com/chokwinlee/deepseek-harness-desktop/issues)
 and include:

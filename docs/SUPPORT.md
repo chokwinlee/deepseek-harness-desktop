@@ -7,25 +7,32 @@ DeepSeek AI or Tailscale product.
 
 ## English
 
-### Install or update the Android beta
+### Install the iPhone TestFlight beta
 
-Android testers must use the direct
-[`v0.4.0-beta.1` pre-release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1).
-GitHub's `/releases/latest` route points to the latest stable release and may
-not contain an Android APK.
+Install Apple's [TestFlight app](https://apps.apple.com/app/testflight/id899247664),
+then open the [DSH Remote public invitation](https://testflight.apple.com/join/7Ew6Yk9V).
+The public group accepts up to 10,000 testers. DSH Remote requires iOS 17 or
+later and a current DSH Desktop release on the computer. GitHub does not publish
+a generic installable IPA.
+
+### Install or update the Android release
+
+Android users can use the
+[`v0.4.0` stable release](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0)
+or GitHub's `/releases/latest` route.
 
 Install both the Desktop build and
-`DSH-Remote-Android-v0.4.0-beta.1.apk` from that same pre-release. Android 8.0
+`DSH-Remote-Android-v0.4.0.apk` from that same release. Android 8.0
 or later is required. Before installing, compare the APK's SHA-256 with its
-entry in the release's `SHA256SUMS.txt`. A future GitHub beta signed by the same
+entry in the release's `SHA256SUMS.txt`. A future GitHub release signed by the same
 project key can update this install directly; do not uninstall first if you
 want to retain saved computers.
 
-Full instructions: [Android beta guide](../android/README.md).
+Full instructions: [Android install guide](../android/README.md).
 
 ### Before reporting a connection issue
 
-1. Confirm that the matching DSH Desktop beta is running, Harness has finished
+1. Confirm that the matching DSH Desktop release is running, Harness has finished
    starting, and **Mobile Remote** is enabled.
 2. Confirm that the phone's date and time are automatic. A large clock mismatch
    can break HTTPS certificate validation.
@@ -102,17 +109,24 @@ Privacy details are in the [DSH Remote privacy policy](./PRIVACY.md).
 
 DSH Remote 是独立开源项目，不是 DeepSeek AI 或 Tailscale 官方产品。
 
-### 安装或升级 Android 内测版
+### 安装 iPhone TestFlight 内测版
 
-Android 测试者必须打开 [`v0.4.0-beta.1` 预发布专属页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0-beta.1)。GitHub 的 `/releases/latest` 指向最新稳定版，不一定包含 Android APK。
+先安装 Apple 的 [TestFlight App](https://apps.apple.com/app/testflight/id899247664)，
+再打开 [DSH Remote 公开邀请链接](https://testflight.apple.com/join/7Ew6Yk9V)。
+公开组最多接受 10,000 名测试者。DSH Remote 要求 iOS 17 或更高版本，并需要
+电脑运行当前 DSH Desktop 正式版。GitHub 不提供通用可安装 IPA。
 
-请从同一个预发布页面安装 Desktop 内测版与 `DSH-Remote-Android-v0.4.0-beta.1.apk`，Android 要求 8.0 或更高版本。安装前，把 APK 的 SHA-256 与 Release 中 `SHA256SUMS.txt` 的对应记录进行比较。未来使用同一项目密钥签名的 GitHub 内测版可以直接覆盖升级；希望保留已保存电脑时不要先卸载。
+### 安装或升级 Android 正式版
 
-完整步骤见 [Android 中文内测指南](../android/README.zh-CN.md)。
+Android 用户可以打开 [`v0.4.0` 正式版页面](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.4.0)，也可以使用 GitHub 的 `/releases/latest`。
+
+请从同一个正式版页面安装 Desktop 与 `DSH-Remote-Android-v0.4.0.apk`，Android 要求 8.0 或更高版本。安装前，把 APK 的 SHA-256 与 Release 中 `SHA256SUMS.txt` 的对应记录进行比较。未来使用同一项目密钥签名的 GitHub 正式版可以直接覆盖升级；希望保留已保存电脑时不要先卸载。
+
+完整步骤见 [Android 中文安装指南](../android/README.zh-CN.md)。
 
 ### 报告连接问题前
 
-1. 确认配套的 DSH Desktop 内测版正在运行，Harness 已经完成启动，并且“手机 Remote”已经开启。
+1. 确认配套的 DSH Desktop 正式版正在运行，Harness 已经完成启动，并且“手机 Remote”已经开启。
 2. 确认手机日期和时间使用自动设置。时钟相差过大会导致 HTTPS 证书校验失败。
 3. 使用同一 Wi-Fi 时，确认两台设备仍在同一个受信任私有网络。关闭并重新开启局域网入口，然后扫描新二维码，不要继续使用以前保存的二维码截图。
 4. 不要手动输入本地 HTTP 地址。Desktop 生成的二维码包含必需的随机访问凭据。

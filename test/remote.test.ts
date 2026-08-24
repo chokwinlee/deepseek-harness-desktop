@@ -1120,7 +1120,9 @@ test('tagged releases require a signed installable Android APK', async () => {
   assert.match(dependabot, /package-ecosystem: gradle\n\s+directory: \/android/)
 
   for (const source of [readme, readmeChinese]) {
-    assert.match(source, /DSH-Remote-Android-v0\.4\.0-beta\.1\.apk/)
+    assert.match(source, /DSH-Remote-Android-v0\.4\.0\.apk/)
+    assert.match(source, /https:\/\/testflight\.apple\.com\/join\/7Ew6Yk9V/)
+    assert.doesNotMatch(source, /no public (?:TestFlight )?link|还没有公开链接/)
   }
   assert.match(signingGuide, /same persistent project key/)
   assert.match(signingGuide, /Play App Signing/)

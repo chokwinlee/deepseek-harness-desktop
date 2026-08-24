@@ -463,7 +463,7 @@
     <!-- 关于、隐私与内置远程教程 -->
     <string name="about_action">关于与隐私</string>
     <string name="about_title">关于 DSH Remote</string>
-    <string name="about_subtitle">GitHub 内测版 · %1$s</string>
+    <string name="about_subtitle">GitHub 正式版 · %1$s</string>
     <string name="about_local_first_title">电脑始终是运行宿主</string>
     <string name="about_local_first_message">DSH Remote 没有项目方 relay、账号、分析、广告、推送服务或模型网关。代码、凭证、会话历史和执行都留在你的电脑。</string>
     <string name="about_tailscale_title">离开同一 Wi-Fi 后使用 Tailscale</string>

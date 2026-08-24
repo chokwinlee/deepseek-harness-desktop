@@ -45,6 +45,10 @@ Live mode connects directly to the user's Harness computer through Tailscale Ser
 
 ## Distribution before App Store release
 
-Until a public TestFlight build is approved, GitHub describes DSH Remote as an iOS source preview. Developers can run it on their own device through Xcode signing. The repository does not publish a generic IPA or imply that an App Store build exists.
+The first external build has passed Beta App Review and the public TestFlight
+group is available at <https://testflight.apple.com/join/7Ew6Yk9V>, with a
+10,000-tester limit. Developers may also run the source on their own device
+through Xcode signing. The repository does not publish a generic IPA.
 
-After the first external TestFlight build passes Beta App Review, the repository can replace the “coming soon” notice with the public TestFlight invitation link. App Store availability must remain a separate later milestone.
+TestFlight availability must remain distinct from App Store availability. The
+app has not yet been submitted for public App Store distribution.

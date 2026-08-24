@@ -2,10 +2,10 @@
 
 [English](#english) · [简体中文](#简体中文)
 
-These notes describe the `v0.4.0-beta.1` Android source and its GitHub APK. The
+These notes describe the `v0.4.0` Android source and its GitHub APK. The
 app is not yet distributed through Google Play. These notes prepare a future
 Play Data Safety form; they are not final Play Console answers and do not change
-the GitHub beta installation steps.
+the signed GitHub release installation steps.
 
 ## English
 
@@ -86,7 +86,7 @@ processing. Do not claim that the Android build has no SDK metrics.
 
 ## 简体中文
 
-本文记录 `v0.4.0-beta.1` Android 源码与 GitHub APK 的数据边界。App 当前尚未通过 Google Play 分发。本文用于准备未来的 Play Data Safety 表单，不是最终 Play Console 答案，也不改变 GitHub 内测版安装步骤。
+本文记录 `v0.4.0` Android 源码与 GitHub APK 的数据边界。App 当前尚未通过 Google Play 分发。本文用于准备未来的 Play Data Safety 表单，不是最终 Play Console 答案，也不改变签名 GitHub 正式版安装步骤。
 
 ### 项目方运营的数据收集
 
