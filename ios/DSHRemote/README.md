@@ -3,7 +3,7 @@
 DSH Remote is the native SwiftUI companion for DSH Desktop. It connects directly to a Harness computer owned or managed by the user; the project does not operate a relay, account system, analytics service, or model gateway for the iOS app.
 
 > [!IMPORTANT]
-> The external beta has passed Beta App Review. Join the public TestFlight beta at <https://testflight.apple.com/join/7Ew6Yk9V>. The app is not yet published on the App Store, and GitHub Releases do not provide a generic installable IPA.
+> DSH Remote is available as a public iPhone beta. [Join with TestFlight](https://testflight.apple.com/join/7Ew6Yk9V).
 
 ## What it can do
 
@@ -33,8 +33,6 @@ Steps:
 1. Open the [DSH Remote public invitation](https://testflight.apple.com/join/7Ew6Yk9V).
 2. Choose **View in TestFlight**, accept the invitation, and install the beta.
 3. Open DSH Remote and pair it with the current DSH Desktop release.
-
-The public group accepts up to 10,000 testers. Each uploaded build remains available for up to 90 days.
 
 ## Build from source with Xcode
 
@@ -70,14 +68,6 @@ The LAN endpoint is opt-in, limited to the Remote API allowlist, and protected b
 Install Tailscale on the Mac and iPhone, sign in to the same tailnet, then use the built-in setup guide on either Desktop or iPhone. Desktop configures Tailscale Serve automatically; do not use Funnel.
 
 Chinese step-by-step guide: [`../../docs/TAILSCALE_REMOTE_SETUP.zh-CN.md`](../../docs/TAILSCALE_REMOTE_SETUP.zh-CN.md).
-
-## Distribution status
-
-| Channel | Status |
-| --- | --- |
-| Xcode source build | Available now |
-| Public TestFlight | [Available now](https://testflight.apple.com/join/7Ew6Yk9V), up to 10,000 testers |
-| App Store | Not submitted yet |
 
 ## Privacy and support
 

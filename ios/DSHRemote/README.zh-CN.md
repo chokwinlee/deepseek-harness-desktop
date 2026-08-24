@@ -3,7 +3,7 @@
 这是 DSH Desktop 的独立开源 iPhone 控制端。它不连接本项目维护者提供的服务器，而是直接访问用户自己的电脑。iPhone 和 Mac 在同一个受信任 Wi-Fi 时，优先使用 Desktop 自带的认证局域网入口，不需要安装或登录 Tailscale；离开同一 Wi-Fi 后，再选择 Tailscale Tailnet 或自行管理的 HTTPS。
 
 > [!IMPORTANT]
-> 外部构建已经通过 Beta App Review，可通过[公开 TestFlight 链接](https://testflight.apple.com/join/7Ew6Yk9V)安装。App 尚未正式上架 App Store，GitHub Release 也不提供通用可安装 IPA。
+> DSH Remote 已开放 iPhone 公开内测，可通过 [TestFlight](https://testflight.apple.com/join/7Ew6Yk9V)加入。
 
 ## 当前进度
 
@@ -54,8 +54,6 @@ App 会跟随 iOS 设置中为 DSH Remote 选择的语言。英文和简体中�
 1. 打开 [DSH Remote 公开邀请链接](https://testflight.apple.com/join/7Ew6Yk9V)。
 2. 选择“在 TestFlight 中查看”，接受邀请并安装内测版。
 3. 打开 DSH Remote，与当前 DSH Desktop 正式版完成配对。
-
-公开组最多接受 10,000 名测试者。每个上传构建最长可测试 90 天。
 
 ## 使用 Xcode 从源码安装
 

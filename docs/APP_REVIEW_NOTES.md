@@ -46,9 +46,8 @@ Live mode connects directly to the user's Harness computer through Tailscale Ser
 ## Distribution before App Store release
 
 The first external build has passed Beta App Review and the public TestFlight
-group is available at <https://testflight.apple.com/join/7Ew6Yk9V>, with a
-10,000-tester limit. Developers may also run the source on their own device
-through Xcode signing. The repository does not publish a generic IPA.
+group is available at <https://testflight.apple.com/join/7Ew6Yk9V>. Developers
+may also run the source on their own device through Xcode signing.
 
 TestFlight availability must remain distinct from App Store availability. The
 app has not yet been submitted for public App Store distribution.

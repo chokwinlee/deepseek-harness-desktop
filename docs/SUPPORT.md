@@ -11,9 +11,8 @@ DeepSeek AI or Tailscale product.
 
 Install Apple's [TestFlight app](https://apps.apple.com/app/testflight/id899247664),
 then open the [DSH Remote public invitation](https://testflight.apple.com/join/7Ew6Yk9V).
-The public group accepts up to 10,000 testers. DSH Remote requires iOS 17 or
-later and a current DSH Desktop release on the computer. GitHub does not publish
-a generic installable IPA.
+DSH Remote requires iOS 17 or later and a current DSH Desktop release on the
+computer.
 
 ### Install or update the Android release
 
@@ -113,8 +112,7 @@ DSH Remote 是独立开源项目，不是 DeepSeek AI 或 Tailscale 官方产品
 
 先安装 Apple 的 [TestFlight App](https://apps.apple.com/app/testflight/id899247664)，
 再打开 [DSH Remote 公开邀请链接](https://testflight.apple.com/join/7Ew6Yk9V)。
-公开组最多接受 10,000 名测试者。DSH Remote 要求 iOS 17 或更高版本，并需要
-电脑运行当前 DSH Desktop 正式版。GitHub 不提供通用可安装 IPA。
+DSH Remote 要求 iOS 17 或更高版本，并需要电脑运行当前 DSH Desktop 正式版。
 
 ### 安装或升级 Android 正式版
 

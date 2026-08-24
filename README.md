@@ -52,7 +52,7 @@ The compact title-bar summary stays visible while you work. Open it for input, o
 ## iPhone Remote (TestFlight beta)
 
 > [!IMPORTANT]
-> The external TestFlight build has passed Beta App Review. Install the public beta from [TestFlight](https://testflight.apple.com/join/7Ew6Yk9V). App Store availability is a separate later milestone, and GitHub Releases do not contain an installable IPA.
+> DSH Remote is available as a public iPhone beta. [Join with TestFlight](https://testflight.apple.com/join/7Ew6Yk9V).
 
 <p align="center">
   <img src="docs/images/remote-home-en.png" width="30%" alt="DSH Remote same-Wi-Fi pairing in English">
@@ -74,8 +74,6 @@ The iOS TestFlight beta follows the device's app-language setting and includes c
 1. Install Apple's [TestFlight app](https://apps.apple.com/app/testflight/id899247664) on an iPhone running iOS 17 or later.
 2. Open the [DSH Remote public invitation](https://testflight.apple.com/join/7Ew6Yk9V), choose **View in TestFlight**, then accept and install the beta.
 3. Install the current DSH Desktop release on the computer before pairing.
-
-The public group accepts up to 10,000 testers. Each uploaded TestFlight build remains available for up to 90 days. TestFlight, rather than GitHub, delivers installable iOS builds.
 
 ### Build from source with Xcode
 

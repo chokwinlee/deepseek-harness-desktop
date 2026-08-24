@@ -52,7 +52,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 ## iPhone Remote（TestFlight 内测）
 
 > [!IMPORTANT]
-> 外部 TestFlight 构建已经通过 Beta App Review。普通用户可以通过[公开 TestFlight 链接](https://testflight.apple.com/join/7Ew6Yk9V)安装。App Store 正式上架仍是后续独立里程碑，GitHub Release 不提供可安装 IPA。
+> DSH Remote 已开放 iPhone 公开内测，可通过 [TestFlight](https://testflight.apple.com/join/7Ew6Yk9V)加入。
 
 <p align="center">
   <img src="docs/images/remote-home-zh.png" width="30%" alt="DSH Remote 中文同一 Wi-Fi 配对界面">
@@ -74,8 +74,6 @@ iOS TestFlight 内测版会跟随设备为 App 选择的语言，目前已完整
 1. 在运行 iOS 17 或更高版本的 iPhone 安装 Apple 的 [TestFlight App](https://apps.apple.com/app/testflight/id899247664)。
 2. 打开 [DSH Remote 公开邀请链接](https://testflight.apple.com/join/7Ew6Yk9V)，选择“在 TestFlight 中查看”，接受邀请并安装。
 3. 配对前，在电脑安装当前 DSH Desktop 正式版。
-
-公开组最多接受 10,000 名测试者。每个上传到 TestFlight 的构建最长可测试 90 天。iOS 可安装版本由 TestFlight 提供，不通过 GitHub 分发。
 
 ### 使用 Xcode 从源码安装
 
