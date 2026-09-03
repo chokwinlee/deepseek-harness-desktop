@@ -230,7 +230,7 @@ struct RemoteConversationView: View {
                         .frame(height: 1)
                         .id("conversation-bottom")
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 12)
                     .padding(.top, 14)
                     .padding(.bottom, 20)
                     .opacity(contentIsPositioned && !isRestoringViewMode ? 1 : 0)
@@ -704,7 +704,7 @@ struct RemoteConversationView: View {
                     .zIndex(1)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 6)
         .padding(
             .bottom,
             dockBottomPadding(bottomSafeArea: bottomSafeArea)
@@ -737,7 +737,7 @@ struct RemoteConversationView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.top, 6)
             .padding(.bottom, 2)
         }
@@ -768,7 +768,7 @@ struct RemoteConversationView: View {
         .padding(.horizontal, 10)
         .frame(minHeight: 44)
         .background(RemoteTheme.mutedSurface, in: RoundedRectangle(cornerRadius: 9))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.bottom, 8)
     }
 
@@ -1472,7 +1472,7 @@ struct RemoteConversationView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.top, 4)
         }
     }
@@ -2654,7 +2654,7 @@ private struct RemoteSubagentBrowserView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 12)
                     .padding(.top, 16)
                     .padding(.bottom, 30)
                 }
@@ -2918,7 +2918,7 @@ private struct RemoteNestedSubagentCatalogView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .padding(.top, 16)
                 .padding(.bottom, 30)
             }
@@ -3146,7 +3146,7 @@ private struct RemoteSubagentConversationView: View {
                         .frame(height: 1)
                         .id("subagent-bottom")
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 12)
                     .padding(.top, 14)
                     .padding(.bottom, 20)
                     .opacity(contentIsPositioned ? 1 : 0)
@@ -3752,7 +3752,7 @@ private struct ConversationItemView: View {
         switch item.kind {
         case .user:
             HStack {
-                Spacer(minLength: 56)
+                Spacer(minLength: 36)
                 VStack(alignment: .trailing, spacing: 5) {
                     if let title = item.title {
                         Text(remoteLocalized(title))
@@ -4523,7 +4523,7 @@ private struct RemoteMessageImageGallery: View {
                         )
                     }
                 }
-                .frame(maxWidth: 286, alignment: .leading)
+                .frame(maxWidth: 320, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: alignment)
             }
         }
@@ -4534,9 +4534,9 @@ private struct RemoteMessageImageGallery: View {
         let rawRatio = CGFloat(attachment.width) / CGFloat(attachment.height)
         let ratio = min(max(rawRatio, 0.25), 4)
         if ratio >= 1 {
-            return CGSize(width: 240, height: 240 / ratio)
+            return CGSize(width: 264, height: 264 / ratio)
         }
-        return CGSize(width: 240 * ratio, height: 240)
+        return CGSize(width: 264 * ratio, height: 264)
     }
 }
 
@@ -5006,7 +5006,7 @@ private struct ConversationDetailSheet: View {
                         MarkdownContent(text: item.text)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 28)
             }

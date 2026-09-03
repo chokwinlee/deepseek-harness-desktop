@@ -92,7 +92,7 @@ enum RemoteTheme {
     })
     static let shadow = Color.black.opacity(0.12)
 
-    static let pagePadding: CGFloat = 16
+    static let pagePadding: CGFloat = 12
     static let sectionSpacing: CGFloat = 22
     static let cardRadius: CGFloat = 16
     static let controlRadius: CGFloat = 13

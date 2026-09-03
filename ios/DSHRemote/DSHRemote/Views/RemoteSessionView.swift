@@ -94,7 +94,7 @@ struct RemoteSessionView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.top, 14)
             .padding(.bottom, 28)
         }
