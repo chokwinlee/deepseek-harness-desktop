@@ -67,7 +67,7 @@ function resolveDshManifest(): string {
 }
 
 function resolveDshBin(): string {
-  return join(dirname(resolveDshManifest()), 'lib', 'bin.js')
+  return join(dirname(dirname(dirname(resolveDshManifest()))), 'dsh-desktop-settings-plugin', 'lib', 'launch.js')
 }
 
 function isExternalUrl(rawUrl: string): boolean {

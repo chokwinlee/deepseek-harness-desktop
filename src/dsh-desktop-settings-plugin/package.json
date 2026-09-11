@@ -8,27 +8,35 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./desktop.patch.yml": "./desktop.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./launch": "./lib/launch.js",
+    "./rpc": {
+      "types": "./lib/rpc.d.ts",
+      "default": "./lib/rpc.js"
+    }
   },
   "dsh": {
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-gateway"
       ],
       "platform": "web"
     }
   },
   "files": [
     "desktop.patch.yml",
-    "lib/index.js",
-    "lib/client.js"
+    "lib"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-locale": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-locale": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.2",
     "react": "^18.2.0"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
   }
 }

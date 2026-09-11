@@ -1,4 +1,4 @@
-import { AbstractApiClient, type IApiClient } from '@deepseek-ai/dsh-host-apiproxy/client'
+import { connectLoopback, callRemote, type LoopbackConnection } from 'dsh-desktop-settings-plugin/rpc'
 
 const SETTINGS_NAMESPACE = 'ui-onboarding'
 const ACKNOWLEDGEMENT_FIELD = 'welcomeNoticeVersion'
@@ -11,20 +11,6 @@ interface WelcomeNoticeGateway {
   writeVersion(version: string): Promise<void>
 }
 
-class LoopbackApiClient extends AbstractApiClient {
-  constructor(private readonly origin: string) {
-    super(10_000)
-  }
-
-  protected override resolveBase(): string {
-    return this.origin
-  }
-
-  protected override doFetch(input: URL, init?: RequestInit): Promise<Response> {
-    return fetch(input, init)
-  }
-}
-
 function versionFrom(view: { value: unknown } | undefined): string | undefined {
   if (typeof view?.value !== 'object' || view.value === null) return undefined
   const version = (view.value as Record<string, unknown>)[ACKNOWLEDGEMENT_FIELD]
@@ -32,27 +18,21 @@ function versionFrom(view: { value: unknown } | undefined): string | undefined {
 }
 
 class HarnessWelcomeNoticeGateway implements WelcomeNoticeGateway {
-  constructor(private readonly settings: IApiClient['settings']) {}
+  constructor(private readonly connection: LoopbackConnection) {}
 
   async readVersion(): Promise<string | undefined> {
-    const response = await this.settings.describe({})
-    if (!response.result.ok) {
-      throw new Error(`Unable to read Harness onboarding settings: ${response.result.error.message}`)
-    }
-    const view = response.result.value.namespaces.find(candidate => candidate.ns === SETTINGS_NAMESPACE)
+    const response = await callRemote<{ namespaces: Array<{ ns: string; value: unknown }> }>(this.connection, 'settings/describe', {})
+    const view = response.namespaces.find(candidate => candidate.ns === SETTINGS_NAMESPACE)
     if (view === undefined) throw new Error('Harness onboarding settings are unavailable')
     return versionFrom(view)
   }
 
   async writeVersion(version: string): Promise<void> {
-    const response = await this.settings.mutate({
+    const response = await callRemote<{ value: unknown }>(this.connection, 'settings/mutate', {
       ns: SETTINGS_NAMESPACE,
       ops: [{ op: 'set', path: [ACKNOWLEDGEMENT_FIELD], value: version }],
     })
-    if (!response.result.ok) {
-      throw new Error(`Unable to update Harness onboarding settings: ${response.result.error.message}`)
-    }
-    if (versionFrom(response.result.value) !== version) {
+    if (versionFrom(response) !== version) {
       throw new Error('Harness did not retain the welcome notice acknowledgement')
     }
   }
@@ -67,6 +47,6 @@ export async function acknowledgeUpstreamWelcomeNotice(gateway: WelcomeNoticeGat
 
 /** Suppress the non-functional upstream welcome notice through its settings API. */
 export async function suppressUpstreamWelcomeNotice(origin: string): Promise<void> {
-  const client = new LoopbackApiClient(origin)
-  await acknowledgeUpstreamWelcomeNotice(new HarnessWelcomeNoticeGateway(client.settings))
+  const connection = await connectLoopback(origin)
+  await acknowledgeUpstreamWelcomeNotice(new HarnessWelcomeNoticeGateway(connection))
 }

@@ -1,4 +1,4 @@
-import { readdirSync, statSync, unlinkSync, rmdirSync } from 'node:fs';
+import { readdirSync, statSync, lstatSync, unlinkSync, rmdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DRY = process.env.DRY_RUN === '1';
@@ -140,6 +140,8 @@ const fmt = (n) => (n / 1048576).toFixed(1) + 'M';
 
 for (const d of readdirSync(root)) {
   if (d.startsWith('.')) continue;
+  // Local file: dependencies point back into source; never prune their targets.
+  if (lstatSync(join(root, d)).isSymbolicLink()) continue;
   if (d === '@types') {
     const sz = dirSize(join(root, d));
     if (DRY) { console.log('  [dir]', join(root, d), fmt(sz)); bytes += sz; removed++; }

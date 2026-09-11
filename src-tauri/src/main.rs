@@ -103,6 +103,7 @@ const SHELL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static REMOTE_SERVE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+static TAILNET_PROXY_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static LAN_REMOTE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static CHILD_GENERATION: AtomicU64 = AtomicU64::new(0);
 static REMOTE_SERVE_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -973,7 +974,7 @@ fn create_product_subagent_preset(dsh_home: &Path, product: ProductSubagent) -> 
     }
 
     let source = resolve_modules_directory()
-        .join("@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml");
+        .join("@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml");
     let standard = fs::read_to_string(&source)
         .map_err(|error| format!("failed to read {}: {error}", source.display()))?;
     let enabled = enable_product_subagent_tool(&standard, product)?;
@@ -1323,7 +1324,7 @@ fn resolve_script() -> PathBuf {
     if let Ok(path) = env::var("DSH_SCRIPT") {
         return PathBuf::from(path);
     }
-    resolve_modules_directory().join("@deepseek-ai/dsh/lib/bin.js")
+    resolve_modules_directory().join("dsh-desktop-settings-plugin/lib/launch.js")
 }
 
 fn resolve_modules_directory() -> PathBuf {
@@ -1836,7 +1837,11 @@ fn parse_readiness(line: &str) -> Option<tauri::Url> {
         && url.port().is_some()
         && url.username().is_empty()
         && url.password().is_none()
-        && url.query().is_none()
+        && url.path() == "/"
+        && url.query().is_none_or(|_| {
+            let pairs: Vec<_> = url.query_pairs().collect();
+            pairs.len() == 1 && pairs[0].0 == "token" && !pairs[0].1.is_empty()
+        })
         && url.fragment().is_none();
     valid.then_some(url)
 }
@@ -2219,6 +2224,11 @@ fn refresh_remote_status_async(handle: tauri::AppHandle, force: bool) {
 
 fn stop_remote_serve_process() {
     REMOTE_SERVE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut guard) = TAILNET_PROXY_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            remote::terminate_serve(&mut child);
+        }
+    }
     if let Ok(mut guard) = REMOTE_SERVE_CHILD.lock() {
         if let Some(mut child) = guard.take() {
             remote::terminate_serve(&mut child);
@@ -2266,17 +2276,18 @@ fn parse_lan_remote_readiness(line: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-fn spawn_lan_remote_proxy(
+fn spawn_remote_proxy(
     harness_url: &tauri::Url,
     token: &str,
+    tailnet: bool,
 ) -> Result<(Child, String), String> {
     if harness_url.scheme() != "http" || harness_url.host_str() != Some("127.0.0.1") {
         return Err("局域网 Remote 拒绝代理非 loopback Harness 地址。".into());
     }
-    let port = harness_url
+    harness_url
         .port()
         .ok_or("Harness 没有返回可代理的 loopback 端口。")?;
-    let target = format!("http://127.0.0.1:{port}");
+    let target = harness_url.as_str();
     let script = resolve_lan_remote_proxy();
     if !script.is_file() {
         return Err(format!(
@@ -2288,11 +2299,18 @@ fn spawn_lan_remote_proxy(
     let mut command = Command::new(resolve_node());
     command
         .arg(script)
-        .args(["--target", &target, "--token", token, "--port"])
-        .arg(remote::LAN_REMOTE_PORT.to_string())
+        .args(["--target", target, "--token", token, "--port"])
+        .arg(if tailnet {
+            "0".to_string()
+        } else {
+            remote::LAN_REMOTE_PORT.to_string()
+        })
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if tailnet {
+        command.arg("--tailnet");
+    }
     #[cfg(unix)]
     command.process_group(0);
     let mut child = command
@@ -2319,7 +2337,22 @@ fn spawn_lan_remote_proxy(
             return Err("等待局域网 Remote 启动超时。".into());
         }
     };
-    match parse_lan_remote_readiness(&readiness) {
+    let endpoint = if tailnet {
+        readiness
+            .trim()
+            .strip_prefix("dsh tailnet remote: ")
+            .and_then(|value| value.parse::<tauri::Url>().ok())
+            .filter(|url| {
+                url.scheme() == "http"
+                    && url.host_str() == Some("127.0.0.1")
+                    && url.port().is_some()
+            })
+            .map(|url| url.to_string())
+            .ok_or_else(|| "Invalid Tailscale proxy readiness".to_string())
+    } else {
+        parse_lan_remote_readiness(&readiness)
+    };
+    match endpoint {
         Ok(endpoint) => Ok((child, endpoint)),
         Err(error) => {
             remote::terminate_serve(&mut child);
@@ -2379,7 +2412,7 @@ fn sync_lan_remote(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Resul
         .clone()
         .ok_or("局域网 Remote 缺少配对凭据。")?;
     stop_lan_remote_process();
-    let (child, endpoint) = spawn_lan_remote_proxy(harness_url, &token)?;
+    let (child, endpoint) = spawn_remote_proxy(harness_url, &token, false)?;
     let pairing_url = remote::authenticated_pairing_url(&endpoint, &token)?;
     let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
     *LAN_REMOTE_CHILD
@@ -2403,6 +2436,23 @@ fn start_remote_serve_monitor(handle: tauri::AppHandle, generation: u64) {
     thread::spawn(move || loop {
         thread::sleep(MONITOR_INTERVAL);
         if REMOTE_SERVE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let proxy_status = match TAILNET_PROXY_CHILD.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(child) => child.try_wait(),
+                None => return,
+            },
+            Err(_) => Err(std::io::Error::other(
+                "Remote proxy supervisor lock poisoned",
+            )),
+        };
+        if !matches!(proxy_status, Ok(None)) {
+            deactivate_remote_transport(
+                Some("Remote 鉴权代理已停止，连接已自动关闭。请重新开启 Remote。".into()),
+                false,
+                &handle,
+            );
             return;
         }
         let status = match REMOTE_SERVE_CHILD.lock() {
@@ -2483,10 +2533,6 @@ fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Res
     if harness_url.scheme() != "http" || harness_url.host_str() != Some("127.0.0.1") {
         return Err("Remote 拒绝代理非 loopback Harness 地址。".into());
     }
-    let port = harness_url
-        .port()
-        .ok_or("Harness 没有返回可代理的 loopback 端口。")?;
-    let target = format!("http://127.0.0.1:{port}");
 
     stop_remote_serve_process();
     remote::wait_until_port_clear(&info)?;
@@ -2498,20 +2544,31 @@ fn sync_remote_serve(handle: &tauri::AppHandle, harness_url: &tauri::Url) -> Res
         ));
     }
 
-    let mut child = remote::spawn_serve(&info, &target)?;
+    let endpoint = remote::endpoint_url(&info);
+    let pairing_url = remote::pairing_url(&endpoint)?;
+    let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
+    let (mut proxy, target) = spawn_remote_proxy(harness_url, "", true)?;
+    let mut child = match remote::spawn_serve(&info, &target) {
+        Ok(child) => child,
+        Err(error) => {
+            remote::terminate_serve(&mut proxy);
+            return Err(error);
+        }
+    };
     if let Err(error) = remote::wait_until_serving(&mut child, &info, &target) {
         remote::terminate_serve(&mut child);
+        remote::terminate_serve(&mut proxy);
         return Err(error);
     }
     if let Some(operation_id) = active_tailscale_operation_id("enable") {
         publish_remote_operation_stage(handle, operation_id, "generating-pairing", true, "");
     }
-    let endpoint = remote::endpoint_url(&info);
-    let pairing_url = remote::pairing_url(&endpoint)?;
-    let qr_svg = remote::pairing_qr_data_uri(&pairing_url)?;
     *REMOTE_SERVE_CHILD
         .lock()
         .map_err(|_| "Remote Serve supervisor lock poisoned".to_string())? = Some(child);
+    *TAILNET_PROXY_CHILD
+        .lock()
+        .map_err(|_| "Tailscale proxy supervisor lock poisoned".to_string())? = Some(proxy);
     let generation = REMOTE_SERVE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     if let Ok(mut state) = REMOTE_STATE.lock() {
         state.phase = "on".into();
@@ -2965,10 +3022,23 @@ fn usage_record_from_event(value: &serde_json::Value, cutoff_ms: u64) -> Option<
     }))
 }
 
+fn usage_log_generation(name: &str) -> Option<u64> {
+    let name = name.strip_suffix(".zstd").unwrap_or(name);
+    if name == "session.jsonl" {
+        return Some(0);
+    }
+    let digits = name.strip_prefix("session.v")?.strip_suffix(".jsonl")?;
+    if digits.starts_with('0') || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
 fn collect_usage_log_paths(directory: &Path, cutoff_ms: u64, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
+    let mut newest: Option<(u64, PathBuf, Option<u64>)> = None;
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -2984,19 +3054,30 @@ fn collect_usage_log_paths(directory: &Path, cutoff_ms: u64, paths: &mut Vec<Pat
         if !file_type.is_file() {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        let Some(generation) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(usage_log_generation)
+        else {
             continue;
         };
-        if !matches!(name, "session.jsonl" | "session.jsonl.zstd") {
-            continue;
-        }
-        let modified_ms = entry
+        let modified = entry
             .metadata()
             .and_then(|metadata| metadata.modified())
             .ok()
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_millis() as u64);
-        if modified_ms.is_none_or(|modified| modified >= cutoff_ms) {
+        if newest
+            .as_ref()
+            .is_none_or(|(version, _, _)| generation > *version)
+        {
+            newest = Some((generation, path, modified));
+        }
+    }
+    // Choose the generation before filtering by date: never resurrect the old
+    // file merely because a migration successor has an older mtime.
+    if let Some((_, path, modified)) = newest {
+        if modified.is_none_or(|time| time >= cutoff_ms) {
             paths.push(path);
         }
     }
@@ -3066,6 +3147,20 @@ fn usage_snapshot_value(cutoff_ms: u64) -> serde_json::Value {
 
 fn desktop_status_value() -> Result<serde_json::Value, String> {
     let mut status = plugin_manager_status_value()?;
+    let report_path = harness_paths()
+        .dsh_home
+        .join("desktop-upgrades")
+        .join(bundled_harness_version())
+        .join("migration.json");
+    if let Ok(bytes) = fs::read(&report_path) {
+        if let Ok(report) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            status["migration"] = serde_json::json!({
+                "migrated": report["migrated"].as_array().map_or(0, Vec::len),
+                "refused": report["refused"].as_array().map_or(0, Vec::len),
+                "reportPath": report_path.display().to_string(),
+            });
+        }
+    }
     status["cli"] = cli_status_value();
     status["profilePath"] = serde_json::Value::String(
         harness_paths()
@@ -3524,7 +3619,25 @@ fn start_harness(mode: LaunchMode) -> Result<(Child, tauri::Url, StartupTail), S
             return Err(error);
         }
     };
-    println!("[dsh] harness ready at {url}");
+    println!(
+        "[dsh] harness ready at {}",
+        url.origin().ascii_serialization()
+    );
+    // Explicit isolated verification hook: credentials never enter public logs.
+    if env::var_os("SPIKE_HOME").is_some() {
+        if let Some(path) = env::var_os("DSH_VERIFY_READY_FILE") {
+            use std::os::unix::fs::OpenOptionsExt;
+            let result = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path)
+                .and_then(|mut file| file.write_all(url.as_str().as_bytes()));
+            if let Err(error) = result {
+                eprintln!("[dsh] verification receipt failed: {error}");
+            }
+        }
+    }
     match acknowledge_onboarding(&url) {
         Ok(()) => println!("[dsh] upstream welcome notice acknowledged"),
         Err(error) => eprintln!("[dsh] warning: {error}"),
@@ -4322,20 +4435,20 @@ mod tests {
 
     use super::{
         append_remote_operation_resume_parameter, clear_presented_remote_operation,
-        create_product_subagent_preset, desktop_preferences_path, detected_plugin,
-        enable_product_subagent_tool, ensure_desktop_settings_module_link, installed_plugins,
-        lan_remote_credential_path, load_or_create_lan_remote_credential,
+        collect_usage_log_paths, create_product_subagent_preset, desktop_preferences_path,
+        detected_plugin, enable_product_subagent_tool, ensure_desktop_settings_module_link,
+        installed_plugins, lan_remote_credential_path, load_or_create_lan_remote_credential,
         mark_remote_operation_presentation_handoff, parse_lan_remote_readiness, parse_readiness,
         pending_change_outcome, plugin_profile_state, plugin_state_changes,
         plugin_state_fingerprint, product_subagent_marker, product_subagent_preset_ready,
         product_subagent_status_value, read_desktop_preferences, read_lan_remote_credential,
         redact_startup_line, remote_transition_in_progress, resolve_modules_directory,
         restore_last_known_good, rotate_lan_remote_credential, safe_profile_manifest, same_file,
-        smooth_stream_enabled_from, update_remote_operation_state, usage_record_from_event,
-        valid_lan_remote_token, validate_plugin_spec, without_cli_path_block,
-        write_profile_snapshot, write_smooth_stream_preference, RemoteOperationState,
-        RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK, CODEX_SUBAGENT,
-        LEGACY_CLI_PATH_BLOCK,
+        smooth_stream_enabled_from, update_remote_operation_state, usage_log_generation,
+        usage_record_from_event, valid_lan_remote_token, validate_plugin_spec,
+        without_cli_path_block, write_profile_snapshot, write_smooth_stream_preference,
+        RemoteOperationState, RemoteRuntimeState, CLAUDE_CODE_SUBAGENT, CLI_PATH_BLOCK,
+        CODEX_SUBAGENT, LEGACY_CLI_PATH_BLOCK,
     };
 
     #[test]
@@ -4454,7 +4567,7 @@ mod tests {
             "dsh web: http://127.0.0.1.evil.example:3210",
             "dsh web: http://localhost:3210",
             "dsh web: http://127.0.0.1",
-            "dsh web: http://127.0.0.1:3210/?token=secret",
+            "dsh web: http://127.0.0.1:3210/?other=secret",
         ] {
             assert!(parse_readiness(line).is_none(), "accepted {line}");
         }
@@ -4475,6 +4588,33 @@ mod tests {
         ] {
             assert!(parse_lan_remote_readiness(line).is_err(), "accepted {line}");
         }
+    }
+
+    #[test]
+    fn usage_reads_only_the_newest_canonical_session_generation() {
+        for name in [
+            "session.v0.jsonl",
+            "session.v03.jsonl",
+            "session.v3.jsonl.tmp",
+            "session.vx.jsonl",
+        ] {
+            assert_eq!(usage_log_generation(name), None);
+        }
+        assert_eq!(usage_log_generation("session.v3.jsonl.zstd"), Some(3));
+        let root = std::env::temp_dir().join(format!("dsh-usage-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        for name in [
+            "session.jsonl.zstd",
+            "session.v3.jsonl.zstd",
+            "session.v2.jsonl.zstd",
+            "session.v4.jsonl.tmp",
+        ] {
+            std::fs::write(root.join(name), b"").unwrap();
+        }
+        let mut paths = Vec::new();
+        collect_usage_log_paths(&root, 0, &mut paths);
+        assert_eq!(paths, vec![root.join("session.v3.jsonl.zstd")]);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

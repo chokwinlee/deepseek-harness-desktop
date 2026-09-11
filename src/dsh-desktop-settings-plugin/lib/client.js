@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
       { key: 'codex', statusKey: 'codex', packageName: CODEX_PACKAGE, presetId: CODEX_PRESET, mark: 'CX', configureAction: 'configure-codex-preset' },
       { key: 'claude', statusKey: 'claudeCode', packageName: CLAUDE_CODE_PACKAGE, presetId: CLAUDE_CODE_PRESET, mark: 'CC', configureAction: 'configure-claude-code-preset' }
     ]
-    const inject = ['slots', 'locale', 'connection']
+    const inject = ['slots', 'locale', 'remote']
 
     const en = {
       tab: 'Install & manage',
@@ -87,6 +87,7 @@ window.__ModuleLoader__.load({
       enableCli: 'Enable in Terminal',
       replaceCli: 'Use Desktop dsh',
       removeCli: 'Remove command',
+      migration: 'History migration: {migrated} ready; {refused} retained for recovery. Report: {path}',
       loading: 'Reading Desktop plugin status…',
       profile: 'Profile: {path}'
     }
@@ -158,6 +159,7 @@ window.__ModuleLoader__.load({
       enableCli: '在终端启用',
       replaceCli: '改用桌面版 dsh',
       removeCli: '移除命令',
+      migration: '历史记录迁移：{migrated} 份可用，{refused} 份保留原件待恢复。报告：{path}',
       loading: '正在读取桌面插件状态…',
       profile: 'Profile：{path}'
     }
@@ -294,11 +296,11 @@ window.__ModuleLoader__.load({
           return
         }
         try {
-          const response = await api.agentPresets.list({})
-          if (!response.result.ok) throw new Error(response.result.error.message)
+          const response = await api.agentPresets.list()
+          if (!response.ok) throw new Error(response.error.message)
           setProductDefaults(Object.fromEntries(PRODUCT_SUBAGENTS.map(product => [
             product.key,
-            Boolean(response.result.value.presets.find(preset => preset.id === product.presetId)?.isDefault)
+            Boolean(response.value.presets.find(preset => preset.id === product.presetId)?.isDefault)
           ])))
           setProductErrors({})
         } catch (error) {
@@ -337,11 +339,8 @@ window.__ModuleLoader__.load({
         setSelectingProduct(product.key)
         setProductErrors(current => ({ ...current, [product.key]: '' }))
         try {
-          const response = await api.settings.update({
-            ns: 'agent-presets',
-            patch: { default: product.presetId }
-          })
-          if (!response.result.ok) throw new Error(response.result.error.message)
+          const response = await api.settings.update('agent-presets', { default: product.presetId }, undefined)
+          if (!response.ok) throw new Error(response.error.message)
           await loadProductDefaults()
         } catch (error) {
           setProductErrors(current => ({
@@ -476,6 +475,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'dpm-panel-head' },
             React.createElement('h3', { id: 'dpm-installed-title' }, t('installedTitle'))
           ),
+          status?.migration ? React.createElement('p', { className: 'dpm-status', role: 'status' }, template(t, 'migration', { migrated: status.migration.migrated, refused: status.migration.refused, path: status.migration.reportPath })) : null,
           !status ? React.createElement('p', { className: 'dpm-subtle' }, t('loading'))
             : installed.length === 0 ? React.createElement('p', { className: 'dpm-subtle' }, t('installedEmpty'))
               : React.createElement('ul', { className: 'dpm-list' }, installed.map(plugin =>
@@ -533,7 +533,7 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'desktop plugin manager dictionaries')
       const t = ctx.locale.bind(NS)
-      const { api } = ctx.get('connection')
+      const api = ctx.remote
       ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
         name: 'settings.plugins.tab',
         id: 'desktop-manager',

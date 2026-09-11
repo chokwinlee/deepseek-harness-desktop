@@ -8,7 +8,8 @@ off the user's computer.
 
 - Contract name: `dsh-remote`
 - Contract version: `1`
-- Current Harness line: `@deepseek-ai/dsh@0.1.0-rc.8`
+- Current bundled Harness: `@deepseek-ai/dsh@0.1.5-rc.2`
+- Desktop adapts the retained Remote v1 methods and live events to the upstream Typert gateway.
 - Clients must ignore unknown JSON object fields.
 - A missing optional capability must degrade to a readable, retryable state.
 - A server response with a mismatched `rpcId` must be rejected.
@@ -30,6 +31,8 @@ HTTP RPC calls use `POST /api/<method>`. Live events use
 `GET /api/events.mux` upgraded to WebSocket (`wss` for HTTPS, `ws` for the
 authenticated private-LAN exception). When a bearer credential exists, both
 transports send `Authorization: Bearer <credential>`.
+
+Desktop exchanges the local Harness launch token for a browser cookie inside its proxy. LAN bearer credentials and Tailscale membership remain the client trust boundary; the upstream cookie is never given to the phone. Both proxies expose only the reviewed Remote API routes.
 
 Clients must reject manually entered cleartext URLs. The only cleartext HTTP
 exception is a private LAN endpoint imported from a Desktop-generated pairing
