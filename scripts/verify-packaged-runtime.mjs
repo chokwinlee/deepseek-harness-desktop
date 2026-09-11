@@ -3,9 +3,10 @@ import { access, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { parseHarnessUrl } from '../dist/src/harness-supervisor.js'
+import { connectLoopback, callRemote } from '../src/dsh-desktop-settings-plugin/lib/rpc.js'
 
 const PRODUCT_NAME = 'DSH Desktop'
-const READY_LINE = /dsh web:\s+(http:\/\/127\.0\.0\.1:\d+)/
 const STARTUP_TIMEOUT_MS = 60_000
 const STABILITY_WINDOW_MS = 3_000
 
@@ -90,7 +91,7 @@ async function verifyDeepSeekDependencyClosure(modulesDirectory) {
   }
 }
 
-async function waitForHttpReady(url, child, readOutput) {
+async function waitForHttpReady(connection, child, readOutput) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS
   let lastError
 
@@ -99,7 +100,7 @@ async function waitForHttpReady(url, child, readOutput) {
       throw new Error(`Packaged Harness exited before HTTP readiness.\n${readOutput()}`)
     }
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(5_000) })
+      const response = await fetch(connection.origin, { headers: { cookie: connection.cookie }, signal: AbortSignal.timeout(5_000) })
       if (response.ok) {
         await response.arrayBuffer()
         return
@@ -111,7 +112,7 @@ async function waitForHttpReady(url, child, readOutput) {
     await new Promise(resolveDelay => setTimeout(resolveDelay, 200))
   }
 
-  throw new Error(`Packaged Harness did not answer at ${url}: ${String(lastError)}\n${readOutput()}`)
+  throw new Error(`Packaged Harness did not answer at ${connection.origin}: ${String(lastError)}\n${readOutput()}`)
 }
 
 async function verifyStableProcess(child, readOutput) {
@@ -140,7 +141,7 @@ async function smokeRuntime(runtimeExecutable, dshBin) {
     },
   )
   let output = ''
-  const readOutput = () => output
+  const readOutput = () => output.replace(/(token=)[^\s]+/g, '$1[redacted]')
 
   try {
     const readyUrl = await new Promise((resolveReady, rejectReady) => {
@@ -153,21 +154,27 @@ async function smokeRuntime(runtimeExecutable, dshBin) {
       }
       const accept = chunk => {
         output = `${output}${chunk.toString()}`.slice(-12_000)
-        const match = READY_LINE.exec(output)
-        if (match !== null) finish(resolveReady, match[1])
+        for (const line of output.split(/\r?\n/).slice(0, -1)) {
+          const url = parseHarnessUrl(line)
+          if (url !== undefined) { finish(resolveReady, url); break }
+        }
       }
       const timeout = setTimeout(() => {
-        finish(rejectReady, new Error(`Packaged Harness did not become ready.\n${output}`))
+        finish(rejectReady, new Error(`Packaged Harness did not become ready.\n${readOutput()}`))
       }, STARTUP_TIMEOUT_MS)
 
       child.stdout.on('data', accept)
       child.stderr.on('data', accept)
       child.once('error', error => finish(rejectReady, error))
       child.once('exit', (code, signal) => {
-        finish(rejectReady, new Error(`Packaged Harness exited early (code ${String(code)}, signal ${String(signal)}).\n${output}`))
+        finish(rejectReady, new Error(`Packaged Harness exited early (code ${String(code)}, signal ${String(signal)}).\n${readOutput()}`))
       })
     })
-    await waitForHttpReady(readyUrl, child, readOutput)
+    const connection = await connectLoopback(readyUrl)
+    await waitForHttpReady(connection, child, readOutput)
+    if (!(await callRemote(connection, 'settings/describe', {})).namespaces.length) {
+      throw new Error('Packaged settings gateway returned no namespaces')
+    }
     await verifyStableProcess(child, readOutput)
   } finally {
     await stopProcess(child)
@@ -184,7 +191,7 @@ if (unpackedDirectories.length === 0) {
 for (const unpackedDirectory of unpackedDirectories) {
   const modulesDirectory = join(unpackedDirectory, 'node_modules')
   const bootEntry = join(modulesDirectory, '@deepseek-ai', 'dsh-app-boot', 'lib', 'index.js')
-  const dshBin = join(modulesDirectory, '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  const dshBin = join(modulesDirectory, 'dsh-desktop-settings-plugin', 'lib', 'launch.js')
   const runtimeExecutable = resolveRuntimeExecutable(unpackedDirectory)
 
   await Promise.all([access(bootEntry), access(dshBin), access(runtimeExecutable)])

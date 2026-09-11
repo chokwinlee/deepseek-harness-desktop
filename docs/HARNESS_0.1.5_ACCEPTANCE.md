@@ -27,6 +27,10 @@ The initial live Remote retry created two inbox entries carrying the same reques
 
 The Desktop adapter now shares pending admissions and keeps up to 2,048 accepted receipts, keyed by session and request ID. Failed admissions remain retryable; older accepted requests continue to use upstream's durable check. The regression covers concurrent requests, the journal publication gap, failure retry and session scoping. The final packaged adapter's SHA-256 matched the source, and the live duplicate-request test passed after rebuilding.
 
+## Release preflight
+
+Desktop v0.5.0 was then built with synchronized package, Cargo and Tauri versions. Its macOS arm64 package passed `verify-tauri.sh` and the release size budget (98.0 MB DMG, 93.9 MB ZIP). A separate packaged Electron build passed the updated smoke check using the Desktop migration launcher, token-to-cookie login and live settings gateway. Cargo formatting and Clippy passed; JavaScript tests passed on macOS, Windows and Linux in PR CI. These preflight artifacts were locally ad-hoc signed; public signing and notarization are verified by the release process.
+
 ## Final checks and limits
 
 - Final JavaScript/TypeScript suite: 65 existing tests plus 4 migration/Remote tests passed. The earlier 27 Rust checks remain applicable; this acceptance fix changed no Rust source.
