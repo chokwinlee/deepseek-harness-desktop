@@ -53,7 +53,7 @@ fn run() -> Result<ExitCode, String> {
     let script = if is_pnpm {
         modules.join("pnpm/bin/pnpm.mjs")
     } else {
-        modules.join("@deepseek-ai/dsh/lib/bin.js")
+        modules.join("dsh-desktop-settings-plugin/lib/launch.js")
     };
     let mut paths = vec![executable_dir, modules.join(".bin")];
     if let Some(existing) = env::var_os("PATH") {

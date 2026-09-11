@@ -99,6 +99,7 @@ SPIKE_HOME="$REPO_ROOT/.verify-tauri-home"
 find "$SPIKE_HOME" -depth -delete 2>/dev/null || true
 mkdir -p "$SPIKE_HOME"
 export SPIKE_HOME
+export DSH_VERIFY_READY_FILE="$SPIKE_HOME/ready-url"
 
 LOG="$REPO_ROOT/.verify-tauri.log"
 : > "$LOG"
@@ -132,12 +133,24 @@ done
 [ -n "$CHILD_PID" ] || { echo "harness child pid was not logged" >&2; exit 1; }
 
 echo "harness ready at $URL"
-CODE="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "$URL/")"
+[ -s "$DSH_VERIFY_READY_FILE" ] || { echo "private readiness receipt missing" >&2; exit 1; }
+COOKIE_JAR="$SPIKE_HOME/cookies"
+curl --fail --silent --max-time 10 --cookie-jar "$COOKIE_JAR" --output /dev/null "$(cat "$DSH_VERIFY_READY_FILE")"
+chmod 600 "$COOKIE_JAR"
+rm "$DSH_VERIFY_READY_FILE"
+CODE="$(curl --silent --cookie "$COOKIE_JAR" --max-time 10 --output /dev/null --write-out '%{http_code}' "$URL/")"
 echo "GET $URL/ -> $CODE"
 [ "$CODE" = "200" ] || { echo "UI check failed" >&2; exit 1; }
-BOOT_HTML="$(curl --fail --silent --max-time 10 "$URL/")"
+BOOT_HTML="$(curl --fail --silent --cookie "$COOKIE_JAR" --max-time 10 "$URL/")"
 [[ "$BOOT_HTML" == *"dsh-desktop-settings-plugin"* ]] || { echo "Desktop Settings plugin missing from Web boot manifest" >&2; exit 1; }
-DESKTOP_CLIENT="$(curl --fail --silent --max-time 10 "$URL/plugins/dsh-desktop-settings-plugin/client.js")"
+DESKTOP_CLIENT_PATH="$(printf '%s' "$BOOT_HTML" | "$NODE" -e '
+  let html = ""; process.stdin.on("data", part => html += part); process.stdin.on("end", () => {
+    const match = html.match(/"id":"dsh-desktop-settings-plugin","url":"([^"]+)"/)
+    if (!match || !match[1].startsWith("/plugins/")) process.exit(1)
+    process.stdout.write(match[1])
+  })
+')"
+DESKTOP_CLIENT="$(curl --fail --silent --cookie "$COOKIE_JAR" --max-time 10 "$URL$DESKTOP_CLIENT_PATH")"
 [[ "$DESKTOP_CLIENT" == *"settings.plugins.tab"* ]] || { echo "Desktop Settings client bundle is invalid" >&2; exit 1; }
 echo "native Settings plugin smoke passed"
 

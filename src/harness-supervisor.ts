@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 
-const READY_LINE = /^dsh web:\s+(http:\/\/127\.0\.0\.1:(\d+))(?:\s|$)/
 const STARTUP_TAIL_LINES = 40
 const READINESS_GRACE_MS = 300
 const STOP_GRACE_MS = 5_000
@@ -23,11 +22,16 @@ export interface HarnessSupervisorOptions {
 
 /** Parse the official CLI readiness line and reject non-loopback or invalid ports. */
 export function parseHarnessUrl(line: string): string | undefined {
-  const match = READY_LINE.exec(line)
-  if (match === null) return undefined
-  const port = Number(match[2])
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined
-  return match[1]
+  if (!line.startsWith('dsh web: ')) return undefined
+  try {
+    const raw = line.slice('dsh web: '.length).trim().split(/\s/, 1)[0]!
+    const url = new URL(raw)
+    const keys = [...url.searchParams.keys()]
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port
+      || Number(url.port) < 1 || url.username || url.password || url.hash || url.pathname !== '/'
+      || (keys.length > 0 && (keys.length !== 1 || keys[0] !== 'token' || !url.searchParams.get('token')))) return undefined
+    return raw
+  } catch { return undefined }
 }
 
 function redactSecrets(line: string): string {
@@ -104,7 +108,7 @@ export class HarnessSupervisor {
       const handleLine = (source: HarnessLogSource, rawLine: string): void => {
         const line = redactSecrets(rawLine)
         this.record(source, line)
-        const url = source === 'stdout' ? parseHarnessUrl(line) : undefined
+        const url = source === 'stdout' ? parseHarnessUrl(rawLine) : undefined
         if (url !== undefined && readinessTimer === undefined) {
           readinessTimer = setTimeout(() => {
             finish(url)

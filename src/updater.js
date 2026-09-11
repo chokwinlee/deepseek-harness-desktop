@@ -93,8 +93,7 @@
 
   function harnessVersionLabel(raw) {
     const source = String(raw || '').trim()
-    const prerelease = /-(rc\.\d+(?:\.\d+)?)/i.exec(source)
-    return prerelease ? prerelease[1].toLowerCase() : source || 'unknown'
+    return source || 'unknown'
   }
 
   function runtimeSummary(desktop = CURRENT_VERSION, harness = HARNESS_VERSION) {

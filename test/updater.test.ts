@@ -110,9 +110,9 @@ test('hides the updater instead of mounting beside an unrelated dialog control',
 test('labels the bundled Harness release separately from the Desktop version', async () => {
   const { api } = await loadUpdater()
 
-  assert.equal(api.harnessVersionLabel('0.1.0-rc.8'), 'rc.8')
+  assert.equal(api.harnessVersionLabel('0.1.0-rc.8'), '0.1.0-rc.8')
   assert.equal(api.harnessVersionLabel('0.2.0'), '0.2.0')
-  assert.equal(api.runtimeSummary('0.2.1', '0.1.0-rc.8'), 'DSH Desktop v0.2.1 · Harness rc.8')
+  assert.equal(api.runtimeSummary('0.2.1', '0.1.0-rc.8'), 'DSH Desktop v0.2.1 · Harness 0.1.0-rc.8')
 })
 
 test('normalizes release notes without exposing markdown chrome', async () => {

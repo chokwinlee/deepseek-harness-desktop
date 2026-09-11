@@ -22,6 +22,9 @@ function supervisor(mode: string, startupTimeoutMs = 2_000): HarnessSupervisor {
 test('accepts only an official loopback readiness URL', () => {
   assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:3080'), 'http://127.0.0.1:3080')
   assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:3080 (LAN: http://10.0.0.2:3080)'), 'http://127.0.0.1:3080')
+  assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:3080/?token=private-launch'), 'http://127.0.0.1:3080/?token=private-launch')
+  assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:3080/?token=a&token=b'), undefined)
+  assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:3080/?other=a'), undefined)
   assert.equal(parseHarnessUrl('dsh web: http://localhost:3080'), undefined)
   assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:0'), undefined)
   assert.equal(parseHarnessUrl('dsh web: http://127.0.0.1:70000'), undefined)

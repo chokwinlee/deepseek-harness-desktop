@@ -97,6 +97,7 @@ function preferredAddress() {
 }
 
 function authorized(request, token) {
+  if (token === null) return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)
   const value = request.headers.authorization
   if (typeof value !== 'string' || !value.startsWith('Bearer ')) return false
   const received = Buffer.from(value.slice(7), 'utf8')
@@ -126,6 +127,7 @@ export function proxyHeaders(request, target, declaredBytes) {
     accept: request.headers.accept || 'application/json',
     host: `${target.hostname}:${target.port}`,
   }
+  if (target.dshCookie) headers.cookie = target.dshCookie
   if (request.headers['content-type']) headers['content-type'] = request.headers['content-type']
   if (request.headers['user-agent']) headers['user-agent'] = request.headers['user-agent']
   if (declaredBytes !== undefined) headers['content-length'] = String(declaredBytes)
@@ -205,6 +207,7 @@ function upgradeRequest(request, target) {
     'Connection: Upgrade',
     'Upgrade: websocket',
   ]
+  if (target.dshCookie) headers.push(`Cookie: ${target.dshCookie}`)
   for (const name of ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol']) {
     const value = request.headers[name]
     if (typeof value === 'string' && value.length <= 512) headers.push(`${name}: ${value}`)
@@ -352,25 +355,33 @@ function launchedDirectly() {
   }
 }
 
-function main() {
+async function main() {
   const targetValue = option('--target')
-  const token = option('--token')
+  const tailnet = process.argv.includes('--tailnet')
+  const token = tailnet ? null : option('--token')
   const port = Number(option('--port'))
-  if (!targetValue || !token || !Number.isInteger(port) || port < 1 || port > 65535) {
+  if (!targetValue || (!tailnet && !token) || !Number.isInteger(port) || port < (tailnet ? 0 : 1) || port > 65535) {
     fail('usage: --target http://127.0.0.1:<port> --token <secret> --port <port>')
   }
-  if (!/^[a-f0-9]{64}$/.test(token)) fail('token must be 64 lowercase hexadecimal characters')
+  if (!tailnet && !/^[a-f0-9]{64}$/.test(token)) fail('token must be 64 lowercase hexadecimal characters')
 
   const target = new URL(targetValue)
   if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || !target.port) {
     fail('target must be an explicit loopback HTTP endpoint')
   }
-  const advertisedAddress = preferredAddress()
+  if (target.searchParams.has('token')) {
+    const login = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(10_000) })
+    if (login.status !== 303) fail(`Harness authentication failed (${login.status})`)
+    target.dshCookie = login.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ')
+    if (!target.dshCookie) fail('Harness authentication did not issue a cookie')
+    target.search = ''
+  }
+  const advertisedAddress = tailnet ? '127.0.0.1' : preferredAddress()
   if (!advertisedAddress) fail('no private IPv4 address is available')
 
   const server = createLanRemoteServer(target, token)
   server.listen(port, advertisedAddress, () => {
-    process.stdout.write(`${READINESS_MARK} http://${advertisedAddress}:${port}/\n`)
+    process.stdout.write(`${tailnet ? "dsh tailnet remote:" : READINESS_MARK} http://${advertisedAddress}:${server.address().port}/\n`)
   })
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -378,4 +389,4 @@ function main() {
   }
 }
 
-if (launchedDirectly()) main()
+if (launchedDirectly()) main().catch(error => fail(error.message))
