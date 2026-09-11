@@ -23,7 +23,7 @@
 
 ![DSH Desktop](docs/images/readme-hero-zh-CN.png)
 
-*macOS 下载包低于 100 MB，完整内置 Harness 运行时。*
+*macOS DMG 安装包约 100 MB，完整内置 Harness 运行时。*
 
 DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI 和运行时放进桌面窗口。本仓库还包含 DSH Remote 原生 iPhone 与 Android 配套 App，用于继续查看电脑项目、会话和运行任务。当前构建使用 `@deepseek-ai/dsh@0.1.5-rc.2`，侧边栏会同时显示桌面版与内置 Harness 版本。桌面应用会自动管理本机 Harness 进程，用户无需另外安装 Node.js，也不用手动启动 `dsh web`。
 
@@ -37,7 +37,7 @@ DSH Desktop 把官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 
 - **多模态会话**　所选服务商与模型声明支持图片输入后，可以直接粘贴或附加图片，并沿用 Harness 的标准会话流程。图片消息会保留在会话历史中。
 - **macOS 用量统计**　无需离开当前会话，即可查看今日与近七天 Token、估算费用、运行任务数和合计吞吐率。
-- **轻巧的 macOS 安装包**　低于 100 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
+- **轻巧的 macOS 安装包**　约 100 MB，完整内置 Harness 运行时；采用 Tauri 并复用系统自带的 WKWebView，无需另外打包 Chromium。
 - **内置版本明确**　侧边栏同时标明桌面版与内置 Harness 版本，例如 `DSH Desktop v0.5.0 · Harness 0.1.5-rc.2`。
 - **开箱即用**　启动 Harness 所需的内容已经完整内置，无需另装 Node.js，也不用执行终端命令。应用会自动启动和关闭本地运行时。
 - **原生手机 Remote**　SwiftUI iPhone 客户端与 Kotlin/Compose Android 客户端可在受信任的同一 Wi-Fi 或用户自己的 Tailscale 网络中配对，随后浏览项目、新建会话、引导任务、处理审批、发送图片并跟进子代理；执行始终留在电脑上。

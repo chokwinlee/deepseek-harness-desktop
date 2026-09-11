@@ -40,4 +40,13 @@ Desktop v0.5.0 was then built with synchronized package, Cargo and Tauri version
 - Migration remains 28 successful historical sessions and 3 refused child logs. Their original bytes and backups are retained; these three are not declared migrated. See the migration report for recovery boundaries.
 - The artifacts used for these functional tests were locally ad-hoc signed. Desktop v0.5.0 release packaging, signing and notarization are checked separately by the release workflow.
 
+## Published release verification
+
+[Desktop v0.5.0](https://github.com/chokwinlee/deepseek-harness-desktop/releases/tag/v0.5.0) was published as the public Latest release on 2026-09-12 (Asia/Shanghai), with neither draft nor prerelease flags. The annotated tag resolves to merged commit `5d806645f98f4a29417e0783933cee3210ebd806` from PR #37. All jobs in [release run 34630083518](https://github.com/chokwinlee/deepseek-harness-desktop/actions/runs/34630083518), attempt 1, succeeded, as did the merged commit's CI.
+
+- Downloaded all eight published assets. All seven packages matched `SHA256SUMS.txt`; all eight files, including the manifest, matched GitHub's asset digests and byte sizes.
+- Both macOS DMGs passed independent Developer ID signature, stapling and Gatekeeper checks (`accepted`, `Notarized Developer ID`). The Apple Silicon public DMG was byte-identical to the CI artifact already independently verified and actually launched on this Mac.
+- That signed Apple Silicon app passed the packaged runtime, dsh/pnpm, plugin management, cookie-authenticated UI/settings and graceful shutdown checks. Its Harness version was `0.1.5-rc.2`; hashes of the five launcher, migration, RPC, Remote and client files matched the merged source.
+- Public DMG sizes were 98,384,338 bytes (Apple Silicon) and 101,341,069 bytes (Intel). The README describes these as around 100 MB. Windows installers and the signed Android APK passed their release workflow gates; physical mobile acceptance remains outside the coverage described above.
+
 Private raw evidence is retained under `/private/tmp/dsh-upgrade-015rc2/`: `functional-live-evidence.json`, `remote-live-evidence.json`, the before-fix Remote evidence, `npm-functional-final.log`, `verify-functional-final.log`, and `build-functional-final.log`. Those files contain local data and are not committed.
