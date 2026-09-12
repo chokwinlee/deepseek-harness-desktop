@@ -25,6 +25,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Verify packaged Windows runtime
+        if: runner.os == 'Windows'
+        run: |
+          npm run pack
+          npm run verify:packaged
+
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.22.0
+      - run: npm audit --package-lock-only --audit-level=high
 
   tauri-check:
     name: tauri-check (macOS)
@@ -68,7 +84,7 @@ jobs:
             android/*.gradle.kts
             android/gradle/wrapper/gradle-wrapper.properties
             android/app/build.gradle.kts
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
       - name: Install Android SDK 37
         run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0'
       - name: Verify Android Remote

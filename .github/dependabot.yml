@@ -1,26 +1,67 @@
 version: 2
+# Routine version proposals are reviewed monthly. Security fixes are also checked
+# by CI's dependency-audit job; no dependency update is automatically merged.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      harness:
+        patterns: ["@deepseek-ai/*"]
+      react:
+        patterns: ["react", "react-dom"]
+        update-types: [minor, patch]
+      desktop-compatible:
+        patterns: ["*"]
+        exclude-patterns: ["@deepseek-ai/*", "react", "react-dom"]
+        update-types: [minor, patch]
+    ignore:
+      # React follows the Harness UI/plugin peer range; types follow Node 22.
+      # Electron major migrations are reviewed separately from branch fixes.
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      - dependency-name: electron
+        update-types: [version-update:semver-major]
   - package-ecosystem: npm
     directory: /.tauri-cli
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      desktop-compatible:
+        patterns: ["*"]
+        # Pre-1.0 minor updates need independent runtime review.
+        exclude-patterns: [signal-hook, zstd]
+        update-types: [minor, patch]
   - package-ecosystem: gradle
     directory: /android
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      okhttp:
+        patterns: ["com.squareup.okhttp3:*"]
+      kotlin:
+        patterns: ["org.jetbrains.kotlin.*"]
+      screenshot:
+        patterns: ["com.android.compose.screenshot*", "com.android.tools.screenshot:*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      compatible-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
