@@ -75,13 +75,13 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.1.5-rc.2",
     "@deepseek-ai/dsh-workflow": "0.1.5-rc.2",
     "dsh-desktop-settings-plugin": "file:src/dsh-desktop-settings-plugin",
-    "pnpm": "11.21.0",
+    "pnpm": "11.22.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.3",
-    "electron": "43.4.0",
+    "electron": "43.7.0",
     "electron-builder": "26.15.3",
     "typescript": "7.0.2"
   },

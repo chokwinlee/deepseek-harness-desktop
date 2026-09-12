@@ -153,6 +153,7 @@ tasks.register("verifyReleaseVersionCodeOrdering") {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     val cameraXVersion = "1.6.1"
+    val okHttpVersion = "5.5.0"
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -168,7 +169,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("com.squareup.okhttp3:okhttp:5.3.0")
+    implementation("com.squareup.okhttp3:okhttp:$okHttpVersion")
     implementation("androidx.camera:camera-core:$cameraXVersion")
     implementation("androidx.camera:camera-camera2:$cameraXVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
@@ -178,7 +179,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-    testImplementation("com.squareup.okhttp3:mockwebserver3:5.3.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver3:$okHttpVersion")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
