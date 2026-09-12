@@ -75,7 +75,7 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.1.5-rc.2",
     "@deepseek-ai/dsh-workflow": "0.1.5-rc.2",
     "dsh-desktop-settings-plugin": "file:src/dsh-desktop-settings-plugin",
-    "pnpm": "11.22.0",
+    "pnpm": "12.4.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
